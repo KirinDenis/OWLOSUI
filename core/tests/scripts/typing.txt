@@ -1,0 +1,33 @@
+# Typing, and the two ways a line can be cut in half.
+
+text    hello world
+keys    <Right><Right>
+cursor  0 2
+keys    XY
+expect  heXYllo world
+cursor  0 4
+
+# Backspace at the start of a line joins it to the one above. This is the
+# case that a per-command undo implementation gets wrong, because it is a
+# deletion that changes the number of lines.
+text    one\ntwo
+keys    <Down><Home><BS>
+expect  onetwo
+cursor  0 3
+
+# Enter in the middle splits.
+text    onetwo
+keys    <Home><Right><Right><Right><Enter>
+expect  one\ntwo
+cursor  1 0
+
+# Delete at the end of a line pulls the next one up.
+text    one\ntwo
+keys    <End><Del>
+expect  onetwo
+cursor  0 3
+
+# The caret cannot be put where there is no text.
+text    ab
+keys    <End><Right><Right><Right>
+cursor  0 2

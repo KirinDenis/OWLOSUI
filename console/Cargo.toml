@@ -1,0 +1,13 @@
+[package]
+name = "owlosui-console"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal backend for OWLOSUI: VT output, raw input, CP437 translation."
+
+[dependencies]
+owlosui-core = { path = "../core" }
+# Only the platform layer is allowed dependencies, and only for the things
+# that are genuinely the platform's: raw mode, key decoding, mouse capture.
+# Drawing is ours — see term.rs.
+crossterm = "0.28"

@@ -1,0 +1,58 @@
+# Undo.
+#
+# Every change to the text is one operation — a span replaced by some lines —
+# so undo is written once and is right for commands that did not exist when it
+# was written. These cases are each a different command, and none of them has
+# any undo code of its own.
+
+# Typing.
+text    hello
+keys    <End>!!!
+expect  hello!!!
+cmd     Undo Undo Undo
+expect  hello
+
+# A line split.
+text    onetwo
+keys    <Home><Right><Right><Right><Enter>
+expect  one\ntwo
+cmd     Undo
+expect  onetwo
+
+# A line join.
+text    one\ntwo
+keys    <Down><Home><BS>
+expect  onetwo
+cmd     Undo
+expect  one\ntwo
+
+# A deleted selection.
+text    hello world
+keys    <S-Right><S-Right><S-Right><S-Right><S-Right><S-Right><Del>
+expect  world
+cmd     Undo
+expect  hello world
+
+# A paste of several lines.
+text    a\nb
+cmd     SelectAll Copy TextEnd Paste
+expect  a\nba\nb
+cmd     Undo
+expect  a\nb
+
+# Redo puts it back.
+text    hi
+keys    <End>!
+cmd     Undo
+expect  hi
+cmd     Redo
+expect  hi!
+
+# And a new change after an undo abandons the redo, as it must: the future it
+# was holding is no longer reachable from here.
+text    hi
+keys    <End>!
+cmd     Undo
+keys    ?
+cmd     Redo
+expect  hi?

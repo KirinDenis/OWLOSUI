@@ -1,0 +1,53 @@
+# The same editor under two arrangements of keys.
+#
+# Nothing below touches the editor's own code. What differs between these two
+# halves is one table, which is the whole argument for keeping keys out of the
+# editor: shipping an authentic keymap and a usable one costs a file, not a
+# fork.
+
+# --- Borland's -------------------------------------------------------------
+# Ctrl+E/S/D/X are a diamond under the left hand, and look arbitrary only if
+# you have not seen a WordStar keyboard.
+keymap  classic
+
+text    hello\nworld
+keys    <C-d><C-d>
+cursor  0 2
+keys    <C-x>
+cursor  1 2
+keys    <C-s>
+cursor  1 1
+
+# Ctrl+Y deletes a line outright. Nothing in the modern arrangement does this,
+# and people who grew up with it miss it more than anything else.
+text    one\ntwo\nthree
+keys    <C-x><C-y>
+expect  one\nthree
+
+# Ctrl+G and Ctrl+H are Delete and Backspace.
+text    abc
+keys    <C-g>
+expect  bc
+
+# --- the modern one --------------------------------------------------------
+keymap  modern
+
+text    hello\nworld
+keys    <Right><Right><Down>
+cursor  1 2
+
+# Ctrl+Z and Ctrl+Y here are undo and redo — note that Ctrl+Y means something
+# completely different under the other keymap. That is not a clash to be
+# resolved; it is the reason both exist.
+text    hi
+keys    <End>!
+keys    <C-z>
+expect  hi
+keys    <C-y>
+expect  hi!
+
+# The CUA clipboard belongs to both arrangements, so these work either way.
+keymap  classic
+text    hello
+keys    <S-Right><S-Right><C-Ins><End><S-Ins>
+expect  hellohe

@@ -1,0 +1,52 @@
+# Selecting, and the clipboard.
+
+# Shift and a movement start a selection; a movement without Shift drops it.
+text    hello world
+keys    <S-Right><S-Right><S-Right>
+sel     hel
+keys    <Right>
+sel
+
+# Selecting backwards works without a special case, because the selection is
+# whatever lies between the anchor and the caret rather than a start and an
+# end that have to be kept in order.
+text    hello
+keys    <End><S-Left><S-Left>
+sel     lo
+
+# A selection spanning a line break includes the break.
+text    one\ntwo
+keys    <End><S-Down><S-End>
+sel     \ntwo
+
+# Typing over a selection replaces it.
+text    hello world
+keys    <S-Right><S-Right><S-Right><S-Right><S-Right>
+keys    bye
+expect  bye world
+
+# Ctrl+C, Ctrl+V — and Ctrl+Ins, Shift+Ins, which do the same and outlived
+# them. Both arrangements have to answer to the CUA keys.
+text    hello
+keys    <S-Right><S-Right><S-Right><C-c>
+clip    hel
+keys    <End><C-v>
+expect  hellohel
+
+text    hello
+keys    <S-Right><S-Right><S-Right><C-Ins>
+clip    hel
+keys    <End><S-Ins>
+expect  hellohel
+
+# Shift+Del cuts. It must be read before plain Delete or it is taken for a
+# deletion that happens to have Shift held.
+text    hello
+keys    <S-Right><S-Right><S-Del>
+expect  llo
+clip    he
+
+# Ctrl+A selects everything, including across lines.
+text    one\ntwo
+cmd     SelectAll
+sel     one\ntwo

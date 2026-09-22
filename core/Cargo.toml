@@ -1,0 +1,9 @@
+[package]
+name = "owlosui-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Platform-independent core of OWLOSUI: cell grid, view tree, event dispatch."
+
+# No dependencies. Ever. This crate must be buildable for DOS.
+[dependencies]

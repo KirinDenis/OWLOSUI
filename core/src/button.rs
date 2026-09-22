@@ -1,0 +1,165 @@
+//! Buttons, and the row they live in.
+//!
+//! A row and not a button, because a dialog's buttons are laid out together —
+//! centred, evenly spaced, and moved as a group when the dialog resizes. One
+//! view that knows about all of them does that in a line; separate views need
+//! a container to arrange them, and we have no containers yet.
+//!
+//! When there are containers this becomes one, and the buttons inside it stay
+//! exactly as they are. That is the test of whether a shortcut was the right
+//! shape: the thing it stands in for can replace it without the parts
+//! changing.
+
+pub struct Button {
+    /// With the hotkey between tildes: `~O~pen`.
+    pub text: String,
+    pub cmd: u16,
+    /// The one Enter presses when nothing else has claimed the key. Turbo
+    /// Vision called this `bfDefault` and it is the whole of the bargain
+    /// between "Enter confirms" and "Enter does whatever I am standing on".
+    pub default: bool,
+    pub enabled: bool,
+}
+
+impl Button {
+    pub fn new(text: &str, cmd: u16) -> Self {
+        Button {
+            text: text.into(),
+            cmd,
+            default: false,
+            enabled: true,
+        }
+    }
+
+    pub fn default(mut self) -> Self {
+        self.default = true;
+        self
+    }
+
+    pub fn label(&self) -> String {
+        self.text.replace('~', "")
+    }
+
+    pub fn hotkey(&self) -> Option<char> {
+        let mut it = self.text.split('~');
+        it.next()?;
+        it.next()?.chars().next().map(|c| c.to_ascii_lowercase())
+    }
+
+    pub fn hotkey_at(&self) -> Option<usize> {
+        self.text.find('~').map(|i| self.text[..i].chars().count())
+    }
+
+    /// Two spaces either side of the label, the way Turbo Vision drew them.
+    pub fn width(&self) -> i16 {
+        self.label().chars().count() as i16 + 4
+    }
+}
+
+/// Where the row sits in the space it was given.
+///
+/// Bottom right by default, which is where thirty years of desktop dialogs
+/// have put them and therefore where the hand goes without being told. Turbo
+/// Vision centred its own; we are not copying that one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Align {
+    Right,
+    Centre,
+}
+
+pub struct ButtonRow {
+    pub align: Align,
+    pub buttons: Vec<Button>,
+    pub current: usize,
+    pub focused: bool,
+    /// Set when one was pressed.
+    pub pressed: Option<u16>,
+    /// The one being held down right now.
+    ///
+    /// A button that fires the instant it is touched cannot be changed your
+    /// mind about. Turbo Vision's went down on the press, stayed down while
+    /// the button was held, and did the thing on release — so sliding off it
+    /// first was a way out. That is worth keeping and costs one field.
+    pub down: Option<usize>,
+}
+
+impl ButtonRow {
+    pub fn new(buttons: Vec<Button>) -> Self {
+        ButtonRow {
+            align: Align::Right,
+            buttons,
+            current: 0,
+            focused: false,
+            pressed: None,
+            down: None,
+        }
+    }
+
+    /// Open and Cancel, which is most dialogs.
+    pub fn ok_cancel(ok: &str, ok_cmd: u16, cancel_cmd: u16) -> Self {
+        ButtonRow::new(vec![
+            Button::new(ok, ok_cmd).default(),
+            Button::new("~C~ancel", cancel_cmd),
+        ])
+    }
+
+    /// Total width including the gaps between.
+    pub fn width(&self) -> i16 {
+        let w: i16 = self.buttons.iter().map(|b| b.width()).sum();
+        w + 2 * (self.buttons.len().max(1) as i16 - 1)
+    }
+
+    /// Where each button starts, given the row's width.
+    ///
+    /// The right margin is three and not one: a button casts a shadow two
+    /// columns wide, and a shadow that falls outside the dialog is clipped
+    /// away, leaving the last button looking flatter than its neighbours.
+    pub fn x_of(&self, ix: usize, total: i16) -> i16 {
+        let mut x = match self.align {
+            Align::Right => (total - self.width() - 3).max(0),
+            Align::Centre => ((total - self.width()) / 2).max(0),
+        };
+        for b in &self.buttons[..ix] {
+            x += b.width() + 2;
+        }
+        x
+    }
+
+    pub fn at(&self, x: i16, total: i16) -> Option<usize> {
+        (0..self.buttons.len()).find(|&i| {
+            let s = self.x_of(i, total);
+            x >= s && x < s + self.buttons[i].width()
+        })
+    }
+
+    pub fn step(&mut self, d: i16) {
+        if self.buttons.is_empty() {
+            return;
+        }
+        let n = self.buttons.len() as i16;
+        self.current = ((self.current as i16 + d).rem_euclid(n)) as usize;
+    }
+
+    pub fn press(&mut self, ix: usize) {
+        if let Some(b) = self.buttons.get(ix) {
+            if b.enabled {
+                self.pressed = Some(b.cmd);
+            }
+        }
+    }
+
+    /// The command Enter should run when nothing else wanted the key.
+    pub fn default_cmd(&self) -> Option<u16> {
+        self.buttons
+            .iter()
+            .find(|b| b.default && b.enabled)
+            .map(|b| b.cmd)
+    }
+
+    pub fn by_hotkey(&self, c: char) -> Option<usize> {
+        let c = c.to_ascii_lowercase();
+        self.buttons
+            .iter()
+            .position(|b| b.enabled && b.hotkey() == Some(c))
+    }
+}
