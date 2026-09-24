@@ -7,51 +7,19 @@
 //! one editor, and it is why we can ship an authentic one and a modern one
 //! without touching a line of the toolkit.
 
-mod compare;
-mod dir;
 mod help;
-mod cp437;
-mod scenes;
-mod term;
 
+use owlosui_console::{cp437, dir, Term};
 use owlosui_core::{
-    ButtonRow, Dock, Event, FileList, Html, Key, KeyCode, Kind, MenuBar, MenuItem, Rect, TextView,
+    ButtonRow, Dock, Event, FileList, Html, Key, KeyCode, Kind, MenuBar, MenuItem, Mods, Rect, TextView,
     TreeNode, Ui, Window,
 };
-
-use term::Term;
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     if let Some(i) = args.iter().position(|a| a == "--dump") {
         return dump(args.get(i + 1).map(|s| s.as_str()));
-    }
-
-    // --match <scene> <reference.bin> [--rows a:b]
-    //
-    // Renders a scene we also built with the real Turbo Vision and says which
-    // cells disagree. `--rows` exists because every reference screen carries a
-    // menu bar on row 0 and a status line on row 24, and neither of those is a
-    // view here yet; without it the report is mostly noise about work that has
-    // not been done rather than work that is wrong.
-    if let Some(i) = args.iter().position(|a| a == "--match") {
-        let Some(scene) = args.get(i + 1) else {
-            eprintln!("usage: --match <scene> <reference.bin> [--rows a:b]");
-            return Ok(());
-        };
-        let Some(path) = args.get(i + 2) else {
-            eprintln!("usage: --match <scene> <reference.bin> [--rows a:b]");
-            return Ok(());
-        };
-        let rows = args
-            .iter()
-            .position(|a| a == "--rows")
-            .and_then(|j| args.get(j + 1))
-            .and_then(|s| s.split_once(':'))
-            .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
-        let code = compare::run(scene, path, compare::Options { rows })?;
-        std::process::exit(code);
     }
 
     if args.iter().any(|a| a == "--keys") {
@@ -68,13 +36,14 @@ fn main() -> std::io::Result<()> {
         status_line(&mut buf);
         term.render(&buf, ui.cursor())?;
 
-        // A menu item clicked with the mouse has just been drawn lit up. Hold
-        // it there long enough to be seen, then act. The core has no clock;
-        // waiting is the backend's business, and on DOS this would be the BIOS
-        // tick and in a browser a timer.
-        if ui.menu_pick_pending() {
+        // A menu item clicked with the mouse, or a button pressed by a key,
+        // has just been drawn as chosen. Hold it there long enough to be
+        // seen, then act. The core has no clock; waiting is the backend's
+        // business, and on DOS this would be the BIOS tick and in a browser
+        // a timer.
+        if ui.pick_pending() {
             std::thread::sleep(std::time::Duration::from_millis(90));
-            ui.complete_menu_pick();
+            ui.complete_pick();
             if let Some(cmd) = ui.take_command() {
                 if !run_command(&mut ui, cmd) {
                     break;
@@ -85,13 +54,23 @@ fn main() -> std::io::Result<()> {
 
         let Some(ev) = term.next_event()? else { continue };
 
-        // Application-level keys get first refusal, then the tree.
-        if let Event::Key(k) = ev {
+        // Application-level keys get first refusal, then the tree — unless a
+        // modal dialog is up, in which case there is no such thing as an
+        // application-level key. F1 opening a help window over a question the
+        // program is waiting on would be exactly the mess modality exists to
+        // prevent, and gating it here rather than inside each handler means a
+        // key added later is gated by default.
+        if let (Event::Key(k), None) = (ev, ui.modal()) {
             match k {
                 Key {
                     code: KeyCode::Char('x'),
                     mods,
-                } if mods.alt => break,
+                } if mods.alt => {
+                    if leaving(&mut ui) {
+                        continue;
+                    }
+                    break;
+                }
                 Key {
                     code: KeyCode::F(5),
                     ..
@@ -180,6 +159,8 @@ const CM_CANCEL: u16 = 21;
 const CM_DEMO: u16 = 22;
 const CM_DEMO_OK: u16 = 23;
 const CM_DEMO_CANCEL: u16 = 24;
+const CM_LEAVE: u16 = 25;
+const CM_STAY: u16 = 26;
 
 /// Print every key exactly as the terminal delivers it, until Esc.
 ///
@@ -188,25 +169,7 @@ const CM_DEMO_CANCEL: u16 = 24;
 /// window manager, or arrive as an escape prefix with no modifier flag at all,
 /// and all three look identical from inside the program.
 fn show_keys() -> std::io::Result<()> {
-    use crossterm::event::{self as ct, KeyEventKind};
-    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-
-    println!("Press keys. Esc quits.");
-    println!("Try Alt+F, Alt+W, F10 — and note what arrives.
-");
-    enable_raw_mode()?;
-    loop {
-        if let ct::Event::Key(k) = ct::read()? {
-            if k.kind != KeyEventKind::Press {
-                continue;
-            }
-            print!("  crossterm: {:?} + {:?}\r\n", k.code, k.modifiers);
-            if k.code == ct::KeyCode::Esc {
-                break;
-            }
-        }
-    }
-    disable_raw_mode()
+    owlosui_console::term::show_keys()
 }
 
 fn build(w: i16, h: i16) -> (Ui, owlosui_core::Buffer) {
@@ -214,8 +177,8 @@ fn build(w: i16, h: i16) -> (Ui, owlosui_core::Buffer) {
     let buf = owlosui_core::Buffer::new(w, h);
     let root = ui.root();
 
-    open_file(&mut ui, root, Rect::new(2, 2, 58, 16), "core/src/ui.rs");
-    open_file(&mut ui, root, Rect::new(14, 6, 56, 13), "core/src/views.rs");
+    open_file(&mut ui, root, Rect::new(2, 2, 58, 16), "lib/core/src/ui.rs");
+    open_file(&mut ui, root, Rect::new(14, 6, 56, 13), "lib/core/src/views.rs");
 
     let bar = MenuBar::new(vec![
         MenuItem::sub(
@@ -308,7 +271,18 @@ fn run_command(ui: &mut Ui, cmd: u16) -> bool {
         }
         CM_CLASSIC => ui.keymap = owlosui_core::Keymap::Classic,
         CM_MODERN => ui.keymap = owlosui_core::Keymap::Modern,
-        CM_QUIT => return false,
+        CM_QUIT => {
+            if leaving(ui) {
+                return true;
+            }
+            return false;
+        }
+        CM_LEAVE => return false,
+        CM_STAY => {
+            if let Some(m) = ui.modal() {
+                ui.close(m);
+            }
+        }
         _ => {}
     }
     true
@@ -329,6 +303,15 @@ fn dump(what: Option<&str>) -> std::io::Result<()> {
         Some("menu") => ui.open_menu(0),
         Some("files") => open_files(&mut ui),
         Some("controls") => open_controls(&mut ui),
+        // Type something first: the question only exists because there is
+        // something unsaved to ask about.
+        Some("modal") => {
+            ui.handle(Event::Key(Key {
+                code: KeyCode::Char('!'),
+                mods: Mods::default(),
+            }));
+            leaving(&mut ui);
+        }
         _ => {}
     }
     ui.draw(&mut buf);
@@ -355,7 +338,7 @@ fn open_file(ui: &mut Ui, parent: owlosui_core::ViewId, rect: Rect, path: &str) 
     // Resolved against the crate, not the working directory: a demo that only
     // runs from one folder is a demo that makes a bad first impression.
     let full = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
+        .join("../../..")
         .join(path);
     let text = std::fs::read_to_string(&full)
         .unwrap_or_else(|e| format!("{path}\n\ncould not be read:\n{e}"));
@@ -396,8 +379,22 @@ fn open_controls(ui: &mut Ui) {
     let mut win = Window::new("Controls");
     win.palette = owlosui_core::WinPalette::Gray;
     win.number = Some(6);
+    // A dialog, so it holds the attention until it is answered. It can still
+    // be dragged out of the way, which is the difference between modal and
+    // stuck.
+    win.modal = true;
+    // Fixed: its parts are placed by hand, so growing it would leave them
+    // sitting in the top-left of a larger empty box. No grip is drawn, which
+    // is how somebody finds that out without trying.
+    win.resizable = false;
+    // And not zoomable either. Zoom asks for the whole work area, which is a
+    // size this window has just said it will not take — a control that does
+    // nothing is worse than one that is not there.
+    win.zoomable = false;
     win.min_w = w;
     win.min_h = h;
+    win.max_w = w;
+    win.max_h = h;
     let wid = ui.insert(ui.root(), r, Kind::Window(win));
 
     // Placed by hand, which is what every Turbo Vision dialog did and what
@@ -505,7 +502,7 @@ fn open_controls(ui: &mut Ui) {
         )),
     );
     ui.set_dock(row, Dock::BottomRight(24, 2));
-    ui.advance_focus(false);
+    ui.focus_first();
 }
 
 /// Open a file: text in an editor, anything else in a hex view.
@@ -601,6 +598,7 @@ fn open_files(ui: &mut Ui) {
     // on it are what say "these are not part of the dialog" — and that is how
     // somebody knows at a glance that this is not another editor window.
     win.palette = owlosui_core::WinPalette::Gray;
+    win.modal = true;
     // Big and centred. A file dialog that opens small makes its first job -
     // showing you what is there - the first thing you have to fix.
     let screen = ui.rect(root);
@@ -627,6 +625,56 @@ fn open_files(ui: &mut Ui) {
     // Positioned rather than docked: the buttons sit beside the information
     // pane, not below it, and a strip would have taken the whole width.
     ui.set_dock(row, Dock::BottomRight(24, 2));
+}
+
+/// Put up the "you have not saved that" question, and say whether it went up.
+///
+/// This is what modality is *for*, and it is worth seeing it built out of
+/// parts that were already here: an ordinary grey window, some static text and
+/// a button row. Nothing about the dialog is special. What is special is one
+/// `bool` on the window, and everything behind it going quiet.
+///
+/// It asks about leaving rather than about saving, because this demo has no
+/// Save. A dialog that offers to do something the program cannot do is worse
+/// than no dialog.
+fn leaving(ui: &mut Ui) -> bool {
+    let root = ui.root();
+    let mut dirty = Vec::new();
+    for w in ui.children(root).to_vec() {
+        let title = match ui.kind(w) {
+            Kind::Window(win) => win.title.clone(),
+            _ => continue,
+        };
+        if let Some(first) = ui.children(w).first().copied() {
+            if let Kind::Text(t) = ui.kind(first) {
+                if t.modified && !t.readonly {
+                    dirty.push(title);
+                }
+            }
+        }
+    }
+    if dirty.is_empty() {
+        return false;
+    }
+
+    let what = if dirty.len() == 1 {
+        format!("{} has been changed.", dirty[0])
+    } else {
+        format!("{} windows have been changed.", dirty.len())
+    };
+    let row = ButtonRow::new(vec![
+        owlosui_core::button::Button::new("~L~eave", CM_LEAVE),
+        // The way out is the default, because the dialog appeared without
+        // being asked for and the safe answer is the one Enter and Escape
+        // both already give.
+        owlosui_core::button::Button::new("~S~tay", CM_STAY).default(),
+    ]);
+    ui.message_box(
+        "Confirm",
+        &format!("{} Leave without saving?", what),
+        row,
+    );
+    true
 }
 
 fn join(dir: &std::path::Path, mask: &str) -> String {

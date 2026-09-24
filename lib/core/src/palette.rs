@@ -17,7 +17,7 @@
 //! memory while the real Turbo Vision was drawing; the cyan set is written
 //! down in `HELPFILE.PAS` as `CHelpColor`.
 
-use crate::cell::{attr, Color};
+use crate::cell::{attr, attr_bg, Color};
 
 /// One family of window colours.
 #[derive(Clone, Copy, Debug)]
@@ -105,7 +105,6 @@ pub struct Palette {
     pub button_focus_key: u8,
     pub button_disabled: u8,
     /// Half blocks in dark grey over the dialog's own colour.
-    pub button_shadow: u8,
 
     /// The hex view: the offset column, the bytes, and the text beside them.
     /// Three roles because the eye uses them differently — the offsets to find
@@ -138,6 +137,25 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// The colour of a shadow cast on a surface.
+    ///
+    /// A shadow is not a colour of its own; it is the surface, darker. On the
+    /// grey of a dialog that is dark grey, on the blue of a document window
+    /// it is black, and on black - where a darker black does not exist - it
+    /// is dark grey so that it is there at all. The background is the
+    /// surface's, always: a shadow that brought its own background would be
+    /// a grey smear on a blue window, which is what this replaced.
+    pub fn shadow_on(surface: u8) -> u8 {
+        let bg = attr_bg(surface);
+        let fg = match bg {
+            Color::LightGray | Color::White => Color::DarkGray,
+            Color::Black => Color::DarkGray,
+            c if c.index() >= 8 => Color::from_index(c.index() - 8),
+            _ => Color::Black,
+        };
+        attr(fg, bg)
+    }
+
     pub fn window(&self, which: WinPalette) -> &WinColors {
         match which {
             WinPalette::Blue => &self.blue,
@@ -277,7 +295,6 @@ impl Palette {
             button_focus: attr(Color::White, Color::Green),
             button_focus_key: attr(Color::LightRed, Color::Green),
             button_disabled: attr(Color::DarkGray, Color::LightGray),
-            button_shadow: attr(Color::DarkGray, Color::LightGray),
 
             hex_offset: attr(Color::Cyan, Color::Blue),
             hex_byte: attr(Color::LightGray, Color::Blue),

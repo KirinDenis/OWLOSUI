@@ -81,6 +81,15 @@ pub struct ButtonRow {
     /// the button was held, and did the thing on release — so sliding off it
     /// first was a way out. That is worth keeping and costs one field.
     pub down: Option<usize>,
+    /// Pressed by a key, shown down, its command not yet delivered.
+    ///
+    /// A mouse press is seen: the button goes down under the pointer and
+    /// fires on release. A key press used to fire at once, and the button
+    /// never moved — Alt+S saved the file and nothing on the screen said
+    /// so. Now the key puts the button down, the backend shows that frame
+    /// for a moment, and only then `complete` delivers the command. The
+    /// pause belongs to the backend because the core has no clock.
+    pub pending: Option<usize>,
 }
 
 impl ButtonRow {
@@ -92,6 +101,7 @@ impl ButtonRow {
             focused: false,
             pressed: None,
             down: None,
+            pending: None,
         }
     }
 
@@ -140,12 +150,40 @@ impl ButtonRow {
         self.current = ((self.current as i16 + d).rem_euclid(n)) as usize;
     }
 
+    /// Fire now. What a mouse release does: the press was already seen.
     pub fn press(&mut self, ix: usize) {
         if let Some(b) = self.buttons.get(ix) {
             if b.enabled {
                 self.pressed = Some(b.cmd);
             }
         }
+    }
+
+    /// Put the button down and fire on `complete`. What every key does —
+    /// Enter, Escape, a hotkey, Space — so the press is seen first.
+    pub fn press_by_key(&mut self, ix: usize) {
+        if let Some(b) = self.buttons.get(ix) {
+            if b.enabled {
+                self.current = ix;
+                self.down = Some(ix);
+                self.pending = Some(ix);
+            }
+        }
+    }
+
+    /// The other half of `press_by_key`. Returns whether there was one.
+    pub fn complete(&mut self) -> bool {
+        let Some(ix) = self.pending.take() else {
+            return false;
+        };
+        self.down = None;
+        self.press(ix);
+        true
+    }
+
+    /// Where the default button is, if there is one.
+    pub fn default_ix(&self) -> Option<usize> {
+        self.buttons.iter().position(|b| b.default && b.enabled)
     }
 
     /// The command Enter should run when nothing else wanted the key.

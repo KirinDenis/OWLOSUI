@@ -1,0 +1,15 @@
+[package]
+name = "owlosui-serve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The core behind a pipe: speaks PROTOCOL.md on stdin/stdout so any language can be a client."
+
+[[bin]]
+name = "owlosui-serve"
+path = "src/main.rs"
+
+[dependencies]
+owlosui-core = { path = "../core" }
+# For the CP437 translation only. Nothing here touches a terminal.
+owlosui-console = { path = "../console" }

@@ -171,6 +171,7 @@ impl TextView {
     /// there. The single place the text changes.
     fn splice(&mut self, a: Point, b: Point, new: &[Vec<u8>]) -> Vec<Vec<u8>> {
         let old = self.extract(a, b);
+        self.modified = true;
 
         let prefix = self.lines[a.y as usize][..a.x as usize].to_vec();
         let suffix = self.lines[b.y as usize][b.x as usize..].to_vec();

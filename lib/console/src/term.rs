@@ -319,3 +319,31 @@ fn translate(e: ct::Event) -> Option<Event> {
         _ => None,
     }
 }
+
+/// Print what the terminal delivers for each key, raw, until Escape.
+///
+/// There is no other honest way to find out whether Alt with a letter even
+/// reaches us: it can be eaten by the terminal emulator, swallowed by the
+/// window manager, or arrive as an escape prefix with no modifier flag at all,
+/// and all three look identical from inside the program.
+pub fn show_keys() -> std::io::Result<()> {
+    use crossterm::event::{self as ct, KeyEventKind};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    println!("Press keys. Esc quits.");
+    println!("Try Alt+F, Alt+W, F10 — and note what arrives.
+");
+    enable_raw_mode()?;
+    loop {
+        if let ct::Event::Key(k) = ct::read()? {
+            if k.kind != KeyEventKind::Press {
+                continue;
+            }
+            print!("  crossterm: {:?} + {:?}\r\n", k.code, k.modifiers);
+            if k.code == ct::KeyCode::Esc {
+                break;
+            }
+        }
+    }
+    disable_raw_mode()
+}

@@ -3,7 +3,18 @@ name = "owlosui-console"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Terminal backend for OWLOSUI: VT output, raw input, CP437 translation."
+description = "Terminal backend for OWLOSUI: VT output, raw input, CP437 translation, and the tools that check it against real Turbo Vision."
+
+[lib]
+path = "src/lib.rs"
+
+# `owlosui-match` renders one of the reference scenes and compares it with a
+# dump of what Turbo Vision drew. It lives with the backend and not with the
+# examples because it is part of how the library is checked, not part of how
+# it is used.
+[[bin]]
+name = "owlosui-match"
+path = "src/bin/match.rs"
 
 [dependencies]
 owlosui-core = { path = "../core" }

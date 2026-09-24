@@ -4,7 +4,8 @@ A Turbo Vision-shaped text mode UI toolkit with one portable core.
 
 The same core is meant to drive a terminal, a browser canvas, a native window
 and — eventually — DOS text memory. Nothing above the platform layer knows
-which of those it is running on.
+which of those it is running on, and a program in any language can use it
+without linking to it.
 
 ## The contract
 
@@ -22,33 +23,113 @@ translates — and the backend is the only thing that needs to.
 ## Layout
 
 ```
-core/      no dependencies, ever. Cell grid, view tree, event dispatch.
-console/   terminal backend: VT output, raw input, CP437 translation.
+lib/core        no dependencies, ever. Cell grid, view tree, event dispatch.
+lib/console     terminal backend: VT output, raw input, CP437 translation;
+                and owlosui-match, which checks scenes against real Turbo Vision.
+lib/serve       the core behind a pipe — speaks lib/PROTOCOL.md on stdin/stdout.
+lib/csharp      Owlosui.cs: the C# client of that pipe. One file, no packages.
+lib/PROTOCOL.md the wire. Same numbers for a pipe, a WebSocket, an interrupt.
+
+Examples/Rust   01-Demo — every control the toolkit has, in one program.
+Examples/CSharp 01-HelloWorld, 02-Notes — programs that use the library.
+Examples/C      (empty) — DOS clients, through the resident, when it exists.
 ```
 
-`core` must stay buildable for a machine where the whole program lives in 64K.
-That is why it has no dependencies, why views are an `enum` rather than
-generics or trait objects, and why `no_std` is the direction of travel.
+`lib/core` must stay buildable for a machine where the whole program lives in
+64K. That is why it has no dependencies, why views are an `enum` rather than
+generics or trait objects, why handles are numbers, and why there are no
+callbacks: a callback cannot cross an interrupt, and neither can a closure
+cross a pipe.
 
 ## Running it
 
+The reference application, on the terminal:
+
 ```
-cargo run -p owlosui-console
+cargo run -p owlosui-demo
 ```
 
 Drag windows by the title bar, resize from the bottom-right corner, click the
-`[■]` to close and `[↑]` to zoom. `F5` zoom, `F6` next window, `Alt-F3` close,
-`Alt-X` quit.
+`[■]` to close and `[↑]` to zoom. `F1` help, `F3` open a file, `F4` the
+dialog with every control in it, `F5` zoom, `F6` next window, `Alt-F3` close,
+`Alt-X` quit — which asks first if something has been changed.
 
 One frame as plain text, with no terminal involved:
 
 ```
-cargo run -p owlosui-console -- --dump
+cargo run -p owlosui-demo -- --dump [help|menu|files|controls|modal]
 ```
 
 Because the output medium *is* a grid of characters, a rendered screen is its
-own screenshot. That makes the tests readable pictures (`core/tests/`), and it
-is what lets a model check its own layout work later without vision.
+own screenshot. That makes the tests readable pictures (`lib/core/tests/`),
+and it is what lets a model check its own layout work later without vision.
+
+## From C#
+
+Build the server once, then run an example:
+
+```
+cargo build -p owlosui-serve
+cd Examples/CSharp/01-HelloWorld
+dotnet run
+```
+
+The whole of HelloWorld:
+
+```csharp
+using var owl = new Owlosui();
+
+var w = owl.Window("Hello", 40, 9, style: Owlosui.Style.Dialog);
+owl.Static(w, 2, 1, "Hello, world!");
+owl.Buttons(w, ("~O~K", CmOk));
+
+owl.Run(cmd => cmd != CmOk);
+```
+
+`Owlosui` starts `owlosui-serve`, sends it what happened, asks for the frame
+and puts the cells on `System.Console`. The Rust core decides what every cell
+looks like; the C# program never sees a keystroke of the editor and never
+draws a line of a frame. `02-Notes` is an editor with undo, a clipboard and a
+"leave without saving?" box, and it is sixty lines.
+
+On Windows the mouse works too — the client reads it through
+`ReadConsoleInput`, since `System.Console` does not know a mouse exists —
+and the desktop follows the console window when it is resized.
+
+The same protocol, over a different transport, is how DOS programs will reach
+a resident copy of the toolkit and how a browser page will reach a
+WebAssembly one. The C# client exists first because it is the fastest way to
+find out whether the API is pleasant to use.
+
+### The examples, tested
+
+```
+cd Examples/CSharp/Tests
+dotnet run
+```
+
+Each case builds the scene an example builds — by calling the example's own
+code — then presses its buttons, drags its corners and types into it by the
+wire, headless, and looks at the frame. No test framework, no packages: a
+program that prints a line per case and exits 1 if one failed.
+
+The same cases exist on the Rust side, in `lib/serve/tests/protocol.rs`,
+against the server alone. When something the mouse should do does not
+happen, the two together say which side of the wire to look at.
+
+The cases follow the list a Turbo Vision manual gives for a window — move,
+resize, zoom, close, next — and for an editor — type, Enter, scroll, click —
+plus the things a console does to a program: change size under it, down to
+one cell and back. Each one is done, not read about. A person resizing the
+console window found the desktop losing every window; that is a case now.
+
+The last cases are not headless. `ConsoleAgent` (`lib/csharp`) starts
+Notes in a hidden console of its own, attaches to it, puts mouse and key
+records straight into its input buffer — the same `INPUT_RECORD`s a person's
+mouse produces — and reads the screen back. That is the layer between the
+wire and the console, the one that broke first, tested without anybody at the
+keyboard. The agent is not specific to OWLOSUI; it will drive any program that
+reads a Windows console.
 
 ## Checking against the real thing
 
@@ -57,7 +138,7 @@ wire-city repository, where they are built with the actual Borland Turbo
 Vision units and dumped straight out of video memory. Then:
 
 ```
-cargo run -p owlosui-console -- --match one-window path/to/REF01.BIN --rows 1:23
+cargo run -p owlosui-console --bin owlosui-match -- one-window path/to/REF01.BIN --rows 1:23
 ```
 
 renders the scene here and reports which cells disagree — grouped by the
@@ -92,6 +173,9 @@ window's fill.
 * **Keys are a table, not code.** The core exposes primitives (`toggle_zoom`,
   `cycle_windows`, `close`); which key invokes which belongs to the
   application. Borland shipped four keymaps for one editor this way.
+* **No callbacks out of the core.** Results are collected — `take_pressed`,
+  `take_command`, `pending` — never delivered. That is what lets the same
+  core sit behind a pipe, an interrupt or a WebAssembly boundary unchanged.
 
 ## Editing
 
@@ -113,8 +197,8 @@ expect  onetwo
 cursor  0 3
 ```
 
-Those live in `core/tests/scripts`, and a failure prints the script line, what
-it got and what it wanted.
+Those live in `lib/core/tests/scripts`, and a failure prints the script line,
+what it got and what it wanted.
 
 ## Help
 
@@ -128,20 +212,16 @@ in `pending`; resolving it belongs to the application.
 ## Status
 
 Working: desktop, overlapping framed windows (move, resize, zoom, close,
-z-order), scrolling text views with working scrollbars, editing with undo,
-selection and a clipboard, two keymaps, a help viewer, CP437 translation,
+z-order, modal), scrolling text views with working scrollbars, editing with
+undo, selection and a clipboard, two keymaps, a help viewer, menu bar and
+menu panels, a file-open dialog with a path/mask line, a hex viewer, buttons,
+input lines, check boxes and radio buttons, lists, trees, static text, a
+message box; the terminal backend; the pipe server and its C# client;
 comparison against real Turbo Vision.
 
-There is a measure pass now, with two rules: a window's content fills its
-client area, and a help page is then wrapped to the width it ended up with.
-Layout belongs to the toolkit — an application asked to remember it will
-forget, and the symptom is content left at its old size with the window's
-background showing round it.
-
-Not yet: sizes that come from the content rather than from the window (a
-dialog cannot yet work out how big it should be), menus, a status line as a
-real view, saving to disk, the rest of the control set, any backend other than
-the terminal.
+Not yet on the wire: menus, the file dialog, hex, lists, trees, clusters.
+Not yet at all: saving from the demo, a status line as a real view, the
+DOS, browser and native backends, the resident.
 
 ## Licence
 

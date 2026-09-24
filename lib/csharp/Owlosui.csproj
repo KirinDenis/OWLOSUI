@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The C# side of the wire. One file, no packages: a program that uses this
+    needs a ProjectReference and nothing else, and the whole client fits in a
+    single afternoon's reading.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace></RootNamespace>
+    <AssemblyName>Owlosui</AssemblyName>
+  </PropertyGroup>
+
+</Project>

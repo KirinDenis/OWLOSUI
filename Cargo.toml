@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["core", "console"]
+members = [
+    "lib/core",
+    "lib/console",
+    "lib/serve",
+    "Examples/Rust/01-Demo",
+]
 
 [workspace.package]
 version = "0.1.0"

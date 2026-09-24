@@ -1,1 +1,1 @@
-cd C:\repos\OWLOSUI && cargo run -p owlosui-console
+cargo run -p owlosui-demo

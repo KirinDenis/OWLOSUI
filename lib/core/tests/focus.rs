@@ -268,3 +268,82 @@ fn a_bare_letter_does_not_press_a_button() {
         _ => panic!("no panel"),
     }
 }
+
+/// A click both moves the focus and does whatever a click means there. Those
+/// are one action to the hand and two to the program — and doing only the
+/// second is how a dialog ends up answering the keyboard somewhere the eye is
+/// not looking.
+#[test]
+fn clicking_a_control_gives_it_the_focus() {
+    use owlosui_core::{Cluster, ListBox, Mouse, MouseKind, StaticText};
+    use owlosui_core::Button as MouseButton;
+
+    let mut ui = Ui::new(60, 20);
+    let root = ui.root();
+    let wid = ui.insert(root, Rect::new(0, 0, 60, 20), Kind::Window(Window::new("D")));
+
+    let lab = ui.insert(wid, Rect::new(1, 1, 30, 1), Kind::Static(StaticText::new("Pick:")));
+    ui.set_dock(lab, Dock::Manual);
+    let list = ui.insert(
+        wid,
+        Rect::new(1, 3, 20, 4),
+        Kind::List(ListBox::new(&["one", "two", "three", "four"])),
+    );
+    ui.set_dock(list, Dock::Manual);
+    let cluster = ui.insert(
+        wid,
+        Rect::new(25, 3, 20, 2),
+        Kind::Cluster(Cluster::checks(&["~A~lpha", "~B~eta"])),
+    );
+    ui.set_dock(cluster, Dock::Manual);
+
+    // Draw once first. The measure pass is what tells a list how many rows it
+    // has, and a program always draws a frame before it handles an event.
+    let mut buf = owlosui_core::Buffer::new(60, 20);
+    ui.draw(&mut buf);
+
+    ui.focus_first();
+    assert_eq!(ui.focused(), Some(list), "the first thing with anything to do");
+
+    let click = |ui: &mut Ui, x, y| {
+        ui.handle(Event::Mouse(Mouse {
+            x,
+            y,
+            kind: MouseKind::Down(MouseButton::Left),
+        }))
+    };
+
+    // The list's third row, which is both a focus change and a choice.
+    click(&mut ui, 4, 6);
+    assert_eq!(ui.focused(), Some(list));
+    match ui.kind(list) {
+        Kind::List(l) => assert_eq!(l.current, 2),
+        _ => panic!(),
+    }
+
+    // The cluster's second row, on the bracket.
+    click(&mut ui, 26, 5);
+    assert_eq!(ui.focused(), Some(cluster));
+    match ui.kind(cluster) {
+        Kind::Cluster(c) => {
+            assert_eq!(c.current, 1);
+            assert_eq!(c.chosen(), vec![1], "the bracket was hit, so it toggled");
+        }
+        _ => panic!(),
+    }
+
+    // On the label, not the bracket: reading the words of an option should not
+    // change the answer.
+    click(&mut ui, 31, 4);
+    match ui.kind(cluster) {
+        Kind::Cluster(c) => {
+            assert_eq!(c.current, 0);
+            assert_eq!(c.chosen(), vec![1], "still only the one");
+        }
+        _ => panic!(),
+    }
+
+    // Static text is not in the ring, so clicking it takes the focus nowhere.
+    click(&mut ui, 3, 2);
+    assert_eq!(ui.focused(), Some(cluster));
+}

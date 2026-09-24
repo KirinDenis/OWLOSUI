@@ -65,6 +65,20 @@ impl ViewId {
     fn ix(self) -> usize {
         self.0 as usize
     }
+
+    /// The number inside, for sending across a boundary the type cannot
+    /// cross: a pipe, an interrupt, a WebAssembly import. It is an index and
+    /// nothing more — that is the whole reason handles are numbers here.
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// The other side of `raw`. Nothing is checked, because nothing can be
+    /// without a `Ui`; ask `Ui::is_alive` before using one that came in from
+    /// outside.
+    pub fn from_raw(n: u32) -> ViewId {
+        ViewId(n)
+    }
 }
 
 struct Node {
@@ -222,6 +236,14 @@ impl Ui {
         id
     }
 
+    /// Whether a handle names a view that exists and has not been closed.
+    ///
+    /// Every other accessor trusts its handle, which is right for handles the
+    /// program made itself and wrong for ones that arrived over a wire.
+    pub fn is_alive(&self, id: ViewId) -> bool {
+        self.nodes.get(id.ix()).is_some_and(|n| n.alive)
+    }
+
     pub fn kind(&self, id: ViewId) -> &Kind {
         &self.nodes[id.ix()].kind
     }
@@ -248,15 +270,38 @@ impl Ui {
 
     /// The screen grew or shrank. The desktop always fills it; windows keep
     /// their place but are pushed back inside if they would fall off.
+    /// The desktop changed size.
+    ///
+    /// A window keeps its top-left corner and follows the desktop's far
+    /// edges: grow the console by ten columns and every resizable window is
+    /// ten columns wider. That is Turbo Vision's `gfGrowAll`, and it is what
+    /// makes an editor that filled the screen still fill it. A window with a
+    /// fixed size keeps it, and if it was centred it is centred again by the
+    /// measure pass.
+    ///
+    /// It used to shrink every window to fit and never grow one back, so a
+    /// console taken down to a sliver and restored came back empty.
     pub fn resize(&mut self, w: i16, h: i16) {
+        let old = self.nodes[self.root.ix()].rect;
+        let (dw, dh) = (w - old.w, h - old.h);
         self.nodes[self.root.ix()].rect = Rect::sized(w, h);
         let kids: Vec<ViewId> = self.nodes[self.root.ix()].children.clone();
         for id in kids {
+            let Kind::Window(win) = &self.nodes[id.ix()].kind else {
+                continue;
+            };
+            // A zoomed window is the work area; it follows by definition.
+            if win.is_zoomed() {
+                let full = self.work_area();
+                self.nodes[id.ix()].rect = full;
+                continue;
+            }
+            let (min_w, min_h) = (win.min_w.max(6), win.min_h.max(3));
+            let max_w = if win.max_w > 0 { win.max_w } else { i16::MAX };
+            let max_h = if win.max_h > 0 { win.max_h } else { i16::MAX };
             let mut r = self.nodes[id.ix()].rect;
-            r.w = r.w.min(w);
-            r.h = r.h.min(h);
-            r.x = r.x.min(w - r.w).max(0);
-            r.y = r.y.min(h - r.h).max(0);
+            r.w = (r.w + dw).clamp(min_w, max_w.max(min_w));
+            r.h = (r.h + dh).clamp(min_h, max_h.max(min_h));
             self.nodes[id.ix()].rect = r;
         }
     }
@@ -325,7 +370,25 @@ impl Ui {
         }
     }
 
+    /// The topmost modal window, if one is up.
+    pub fn modal(&self) -> Option<ViewId> {
+        self.nodes[self.root.ix()]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .find(|id| {
+                self.nodes[id.ix()].alive
+                    && matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if w.modal)
+            })
+    }
+
     pub fn active_window(&self) -> Option<ViewId> {
+        // A modal window is the active one for as long as it is up, whatever
+        // else has been clicked. That single line is most of what modal means.
+        if let Some(m) = self.modal() {
+            return Some(m);
+        }
         self.nodes[self.root.ix()]
             .children
             .iter()
@@ -340,18 +403,33 @@ impl Ui {
         self.command.take()
     }
 
-    /// True when an item has been clicked and is showing as chosen. Draw one
-    /// frame, wait a moment, then call `complete_menu_pick`.
-    pub fn menu_pick_pending(&self) -> bool {
-        self.pending_pick.is_some()
+    /// True when something has been chosen and is showing as chosen: a menu
+    /// item clicked, a button pressed by a key. Draw one frame, wait a
+    /// moment - long enough to be seen, about 90 ms - then call
+    /// `complete_pick`. The core has no clock; the waiting is the backend's.
+    pub fn pick_pending(&self) -> bool {
+        if self.pending_pick.is_some() {
+            return true;
+        }
+        self.active_window()
+            .and_then(|w| self.button_row(w))
+            .is_some_and(|row| match &self.nodes[row.ix()].kind {
+                Kind::Buttons(b) => b.pending.is_some(),
+                _ => false,
+            })
     }
 
-    pub fn complete_menu_pick(&mut self) {
-        let Some((_, cmd)) = self.pending_pick.take() else {
-            return;
-        };
-        self.close_menu();
-        self.command = Some(cmd);
+    /// Deliver what `pick_pending` was holding.
+    pub fn complete_pick(&mut self) {
+        if let Some((_, cmd)) = self.pending_pick.take() {
+            self.close_menu();
+            self.command = Some(cmd);
+        }
+        if let Some(row) = self.active_window().and_then(|w| self.button_row(w)) {
+            if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
+                b.complete();
+            }
+        }
     }
 
     fn find_kind(&self, f: impl Fn(&Kind) -> bool) -> Option<ViewId> {
@@ -364,6 +442,16 @@ impl Ui {
 
     fn menu_bar_id(&self) -> Option<ViewId> {
         self.find_kind(|k| matches!(k, Kind::MenuBar(_)))
+    }
+
+    /// The open menu panel, if one is showing.
+    ///
+    /// Public because an application asking "is a key mine?" needs the same
+    /// answer the toolkit's own handlers use, and working it out from the
+    /// desktop's children — which is what the tests used to do — is both
+    /// tedious and a guess.
+    pub fn menu_open(&self) -> Option<ViewId> {
+        self.menu_box_id()
     }
 
     fn menu_box_id(&self) -> Option<ViewId> {
@@ -461,6 +549,9 @@ impl Ui {
 
     /// Send the frontmost window to the back — Turbo Vision's Alt+F6 / F6.
     pub fn cycle_windows(&mut self) {
+        if self.modal().is_some() {
+            return;
+        }
         let kids = &mut self.nodes[self.root.ix()].children;
         if kids.len() > 1 {
             let v = kids.pop().unwrap();
@@ -576,6 +667,10 @@ impl Ui {
                 continue;
             }
             let mut r = self.nodes[id.ix()].rect;
+            if matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if w.centred) {
+                r.x = work.x + (work.w - r.w) / 2;
+                r.y = work.y + (work.h - r.h) / 2;
+            }
             r.y = r.y.clamp(work.y, (work.bottom() - 1).max(work.y));
             r.x = r.x.clamp(1 - r.w, (work.right() - 1).max(0));
             self.nodes[id.ix()].rect = r;
@@ -671,7 +766,7 @@ impl Ui {
             Kind::Html(h) => self.draw_html(h, abs, buf, clip, wc),
             Kind::Files(f) => self.draw_files(f, abs, buf, clip, wc, self.foot_taken(id)),
             Kind::Input(i) => draw_input(i, abs, buf, clip, &self.palette),
-            Kind::Buttons(b) => self.draw_buttons(b, abs, buf, clip, parent_clip),
+            Kind::Buttons(b) => self.draw_buttons(b, abs, buf, clip, wc),
             Kind::Hex(h) => self.draw_hex(h, abs, buf, clip),
             Kind::Cluster(c) => self.draw_cluster(c, abs, buf, clip),
             Kind::List(l) => self.draw_list(l, abs, buf, clip),
@@ -894,9 +989,9 @@ impl Ui {
         let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind else {
             return false;
         };
-        match b.default_cmd() {
-            Some(cmd) => {
-                b.pressed = Some(cmd);
+        match b.default_ix() {
+            Some(ix) => {
+                b.press_by_key(ix);
                 true
             }
             None => false,
@@ -942,8 +1037,9 @@ impl Ui {
                     // The last button is Cancel by convention; a dialog that
                     // has no such button simply cannot be escaped from, which
                     // is a thing it is allowed to want.
-                    if let Some(last) = b.buttons.last() {
-                        b.pressed = Some(last.cmd);
+                    if !b.buttons.is_empty() {
+                        let last = b.buttons.len() - 1;
+                        b.press_by_key(last);
                     }
                 }
             }
@@ -962,7 +1058,7 @@ impl Ui {
                     K::Right => b.step(1),
                     K::Enter | K::Char(' ') => {
                         let c = b.current;
-                        b.press(c);
+                        b.press_by_key(c);
                     }
                     K::Up => {
                         b.focused = false;
@@ -1389,16 +1485,11 @@ impl Ui {
     /// The default one wears arrows. "Which button does Enter press" is a
     /// question people ask of every dialog they meet, and a dialog that
     /// answers it without being asked is one they can use without stopping.
-    fn draw_buttons(
-        &self,
-        r: &ButtonRow,
-        abs: Rect,
-        buf: &mut Buffer,
-        clip: Rect,
-        parent_clip: Rect,
-    ) {
+    fn draw_buttons(&self, r: &ButtonRow, abs: Rect, buf: &mut Buffer, clip: Rect, wc: &WinColors) {
         let p = &self.palette;
-        let _ = parent_clip;
+        // The shadow falls on whatever the buttons stand on - the window's
+        // body - and takes its colour from that.
+        let shadow = Palette::shadow_on(wc.body);
         for (i, b) in r.buttons.iter().enumerate() {
             // A held button loses its shadow and stays exactly where it was.
             // Moving it as well is the obvious thing and the wrong one: what
@@ -1422,8 +1513,8 @@ impl Ui {
                 // one-cell-tall button is as thick as the button and reads as
                 // a second button; `▀` puts the dark at the top of the row
                 // below, hugging the edge, which is what a shadow looks like.
-                buf.hline(x + 1, y + 1, w, 0xDF, p.button_shadow, clip);
-                buf.vline(x + w, y, 1, 0xDD, p.button_shadow, clip);
+                buf.hline(x + 1, y + 1, w, 0xDF, shadow, clip);
+                buf.vline(x + w, y, 1, 0xDD, shadow, clip);
             }
 
             buf.fill(Rect::new(x, y, w, 1), b' ', a, clip);
@@ -1617,6 +1708,11 @@ impl Ui {
 
     /// Topmost window under a point, if any.
     fn window_at(&self, p: Point) -> Option<ViewId> {
+        // While a modal is up it is the only window there is, as far as the
+        // pointer is concerned.
+        if let Some(m) = self.modal() {
+            return self.abs_rect(m).contains(p).then_some(m);
+        }
         self.nodes[self.root.ix()]
             .children
             .iter()
@@ -1630,6 +1726,16 @@ impl Ui {
 
         match m.kind {
             MouseKind::Down(Button::Left) => {
+                // A click outside a modal window does nothing at all. Not
+                // "activates what is under it quietly" — nothing, because the
+                // person is being asked a question and the answer is not over
+                // there.
+                if let Some(m) = self.modal() {
+                    if !self.abs_rect(m).contains(p) && self.menu_box_id().is_none() {
+                        return;
+                    }
+                }
+
                 // An open panel gets the click, wherever it landed: inside it
                 // picks an item, outside it puts the menu away. A click that
                 // both closed a menu and did something behind it would be one
@@ -1679,7 +1785,15 @@ impl Ui {
                 // Frame hits first, body second.
                 if p.y == abs.y {
                     if closable && p.x >= abs.x + 2 && p.x <= abs.x + 4 {
-                        self.close(id);
+                        let cmd = match &self.nodes[id.ix()].kind {
+                            Kind::Window(w) => w.close_cmd,
+                            _ => 0,
+                        };
+                        if cmd != 0 {
+                            self.command = Some(cmd);
+                        } else {
+                            self.close(id);
+                        }
                         return;
                     }
                     if zoomable && p.x >= abs.right() - 5 && p.x <= abs.right() - 3 {
@@ -1745,6 +1859,20 @@ impl Ui {
                         }
                         return;
                     }
+                }
+
+                // Anything in the focus ring that the pointer landed on. The
+                // click both moves the focus there and does whatever a click
+                // means to that control, because those are one action as far
+                // as the hand is concerned: nobody clicks a list meaning only
+                // to look at it.
+                let chain = self.focus_chain(id);
+                if let Some(hit) = chain.iter().copied().find(|c| self.abs_rect(*c).contains(p)) {
+                    for c in &chain {
+                        self.set_view_focus(*c, *c == hit);
+                    }
+                    self.control_click(hit, p);
+                    return;
                 }
 
                 // A name under the pointer.
@@ -1956,9 +2084,14 @@ impl Ui {
         // The floor is structural: two cells of frame either way, and room
         // for something between them. What a window asks for on top of that is
         // its own business.
-        let (min_w, min_h) = match &self.nodes[id.ix()].kind {
-            Kind::Window(w) => (w.min_w.max(6), w.min_h.max(3)),
-            _ => (4, 3),
+        let (min_w, min_h, max_w, max_h) = match &self.nodes[id.ix()].kind {
+            Kind::Window(w) => (
+                w.min_w.max(6),
+                w.min_h.max(3),
+                if w.max_w > 0 { w.max_w } else { i16::MAX },
+                if w.max_h > 0 { w.max_h } else { i16::MAX },
+            ),
+            _ => (4, 3, i16::MAX, i16::MAX),
         };
 
         let r = match mode {
@@ -1971,12 +2104,15 @@ impl Ui {
             DragMode::Resize => Rect::new(
                 orig.x,
                 orig.y,
-                (orig.w + dx).max(min_w),
-                (orig.h + dy).max(min_h),
+                (orig.w + dx).clamp(min_w, max_w),
+                (orig.h + dy).clamp(min_h, max_h),
             ),
             DragMode::Thumb(_) => return, // dealt with above
         };
         self.nodes[id.ix()].rect = r;
+        if let Kind::Window(w) = &mut self.nodes[id.ix()].kind {
+            w.centred = false;
+        }
     }
 
     fn scroll_at(&mut self, p: Point, delta: i16) {
@@ -2006,7 +2142,7 @@ impl Ui {
 
         // F10 opens the bar, and Alt with a letter opens the one it belongs
         // to. These are the only keys the bar owns while it is closed.
-        if self.menu_bar_id().is_some() {
+        if self.menu_bar_id().is_some() && self.modal().is_none() {
             if k.code == K::F(10) {
                 self.open_menu(0);
                 return;
@@ -2042,7 +2178,7 @@ impl Ui {
                     };
                     if let Some(ix) = hit {
                         if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
-                            b.press(ix);
+                            b.press_by_key(ix);
                         }
                         return;
                     }
@@ -2071,14 +2207,15 @@ impl Ui {
             if k.code == K::Esc {
                 if let Some(row) = self.button_row(win) {
                     if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
-                        if let Some(last) = b.buttons.last() {
-                            b.pressed = Some(last.cmd);
+                        if !b.buttons.is_empty() {
+                            let last = b.buttons.len() - 1;
+                            b.press_by_key(last);
                         }
                     }
                 }
                 return;
             }
-            if let Some(f) = self.focused() {
+            if let Some(f) = self.focused_or_first() {
                 if !matches!(self.nodes[f.ix()].kind, Kind::Text(_)) {
                     return self.control_key(win, f, k);
                 }
@@ -2203,11 +2340,16 @@ impl Ui {
         }
     }
 
-    /// Which view in this window currently has the focus.
+    /// Which view in this window actually holds the focus, and `None` when
+    /// none of them does yet.
+    ///
+    /// It used to answer "the first one" in that case, which reads as
+    /// helpfulness and is a trap: `advance_focus` then believed it was already
+    /// on the first and moved to the second, so opening a dialog and pressing
+    /// Tab skipped the control the eye had started on.
     pub fn focused(&self) -> Option<ViewId> {
         let win = self.active_window()?;
-        let chain = self.focus_chain(win);
-        chain
+        self.focus_chain(win)
             .iter()
             .copied()
             .find(|id| match &self.nodes[id.ix()].kind {
@@ -2219,7 +2361,75 @@ impl Ui {
                 Kind::Buttons(b) => b.focused,
                 _ => false,
             })
-            .or_else(|| chain.first().copied())
+    }
+
+    /// The one holding the focus, or the one that would hold it first. For
+    /// routing a key, where there has to be an answer.
+    fn focused_or_first(&self) -> Option<ViewId> {
+        let win = self.active_window()?;
+        self.focused().or_else(|| self.focus_chain(win).first().copied())
+    }
+
+    /// The commonest dialog there is: some words and a row of buttons.
+    ///
+    /// In the library rather than in every application, because every
+    /// application needs it and none of them should spell it differently.
+    /// Turbo Vision had `messageBox` for the same reason.
+    ///
+    /// Returns the window, so a caller can move it or add to it. The answer
+    /// comes back through `take_pressed`, like any other button.
+    pub fn message_box(&mut self, title: &str, text: &str, buttons: crate::button::ButtonRow) -> ViewId {
+        use crate::controls::StaticText;
+
+        let work = self.work_area();
+        let body = StaticText::new(text);
+        let w = 52.min(work.w - 4).max(24);
+        let lines = body.lines(w - 6).len() as i16;
+        let h = lines + 6;
+
+        let mut win = Window::new(title);
+        win.palette = crate::palette::WinPalette::Gray;
+        win.modal = true;
+        // Nothing to resize: it is as big as the words in it.
+        win.resizable = false;
+        win.zoomable = false;
+        // And no close box. Turbo Vision's meant cmCancel, but nothing here
+        // knows which of these buttons is the cancel one — so a close box
+        // would be a way of dismissing the question without answering it,
+        // which is the one thing a modal dialog must not have.
+        win.closable = false;
+        win.min_w = w;
+        win.max_w = w;
+        win.min_h = h;
+        win.max_h = h;
+
+        let r = Rect::new(
+            work.x + (work.w - w) / 2,
+            work.y + (work.h - h) / 2,
+            w,
+            h,
+        );
+        let root = self.root;
+        let wid = self.insert(root, r, Kind::Window(win));
+
+        let txt = self.insert(wid, Rect::new(2, 1, w - 6, lines), Kind::Static(body));
+        self.set_dock(txt, Dock::Manual);
+
+        let row = self.insert(wid, Rect::default(), Kind::Buttons(buttons));
+        self.set_dock(row, Dock::BottomRight(w - 2, 2));
+        self.focus_first();
+        wid
+    }
+
+    /// Put the focus on the first stop. What a dialog does when it opens.
+    pub fn focus_first(&mut self) {
+        let Some(win) = self.active_window() else {
+            return;
+        };
+        let chain = self.focus_chain(win);
+        for (i, id) in chain.iter().enumerate() {
+            self.set_view_focus(*id, i == 0);
+        }
     }
 
     /// Move the focus on by one stop, wrapping.
@@ -2298,6 +2508,61 @@ impl Ui {
         }
     }
 
+    /// What a click means to the control it landed on.
+    ///
+    /// Separate from the focus it also gives, because the two are one action
+    /// to the hand and two to the program: the focus moves for every control,
+    /// and what happens next is different for each.
+    fn control_click(&mut self, id: ViewId, at: Point) {
+        let r = self.abs_rect(id);
+        let (row, col) = (at.y - r.y, at.x - r.x);
+
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Cluster(c) => {
+                let i = row.max(0) as usize;
+                if i < c.items.len() {
+                    c.current = i;
+                    // On the bracket, not on the label: clicking the words of
+                    // an option to read them should not change the answer.
+                    if col < 3 {
+                        c.toggle();
+                    }
+                }
+            }
+            Kind::List(l) => {
+                if let Some(i) = l.at_row(row) {
+                    l.current = i;
+                }
+            }
+            Kind::Tree(t) => {
+                if let Some(i) = t.at_row(row) {
+                    t.current = i;
+                    // The sign is the hinge. Clicking the name selects;
+                    // clicking the `+` or `-` opens or closes, which is what
+                    // it looks like it would do.
+                    let rows = t.flatten();
+                    if let Some(rw) = rows.get(i) {
+                        let pre = crate::tree::TreeView::prefix(rw).len() as i16;
+                        if col == pre - 2 {
+                            t.toggle();
+                        }
+                    }
+                }
+            }
+            Kind::Input(i) => {
+                let x = (col - i.field_x()).max(0) as usize;
+                i.set_cursor(x);
+            }
+            Kind::Text(t) => {
+                t.cur.y = (t.top + row).clamp(0, (t.line_count() - 1).max(0));
+                let len = t.lines.get(t.cur.y as usize).map_or(0, |l| l.len()) as i16;
+                t.cur.x = (t.left + col).clamp(0, len);
+                t.anchor = None;
+            }
+            _ => {}
+        }
+    }
+
     /// Keys for whatever holds the focus in an ordinary dialog.
     fn control_key(&mut self, win: ViewId, id: ViewId, k: Key) {
         use crate::event::KeyCode as K;
@@ -2348,7 +2613,7 @@ impl Ui {
                 K::Right => b.step(1),
                 K::Enter | K::Char(' ') => {
                     let c = b.current;
-                    b.press(c);
+                    b.press_by_key(c);
                 }
                 _ => {}
             },

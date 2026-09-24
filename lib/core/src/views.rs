@@ -38,6 +38,13 @@ pub struct Window {
     /// deep, because a character cell is taller than it is wide and an equal
     /// offset would look lopsided.
     pub shadow: bool,
+    /// Nothing behind it answers until it is gone.
+    ///
+    /// It can still be moved, because a dialog covering the thing it is asking
+    /// about is a dialog you cannot answer. What it holds is the *attention*:
+    /// keys and clicks outside it do nothing at all, rather than quietly doing
+    /// something in a window nobody is looking at.
+    pub modal: bool,
     /// Shown near the right end of the top edge. Borland numbered windows so
     /// Alt+1..Alt+9 could reach them; the number in the frame is what makes
     /// that shortcut discoverable instead of secret.
@@ -58,6 +65,28 @@ pub struct Window {
     /// frame is not a small window, it is a drawing bug.
     pub min_w: i16,
     pub min_h: i16,
+    /// Largest it may be dragged up to. Zero means no limit, which is the
+    /// default.
+    ///
+    /// Not the same thing as `resizable`, and deliberately not derived from
+    /// it: a window that may grow but only so far is an ordinary thing, and a
+    /// reader who finds no grip on a window should be able to see *why* in one
+    /// field rather than by comparing two others.
+    pub max_w: i16,
+    pub max_h: i16,
+    /// Keep it in the middle of the work area, whatever size that becomes.
+    ///
+    /// A dialog that was centred when it opened and is left in the top-left
+    /// corner after the console grows was centred by accident. Dragging it
+    /// anywhere turns this off: from then on it is where the hand put it.
+    pub centred: bool,
+    /// What the close box sends instead of closing, if not zero.
+    ///
+    /// Turbo Vision's `[■]` sent `cmClose`, and a program could refuse it -
+    /// which is how "save changes?" got asked. With zero here the box just
+    /// closes the window; with a command the program hears about it and
+    /// decides. An editor with unsaved text wants the second.
+    pub close_cmd: u16,
     /// Set while zoomed; holds the rectangle to restore.
     pub(crate) unzoomed: Option<Rect>,
 }
@@ -71,11 +100,16 @@ impl Window {
             movable: true,
             resizable: true,
             shadow: true,
+            modal: false,
             number: None,
             palette: crate::palette::WinPalette::Blue,
             footer: String::new(),
             min_w: 0,
             min_h: 0,
+            max_w: 0,
+            max_h: 0,
+            centred: false,
+            close_cmd: 0,
             unzoomed: None,
         }
     }
@@ -118,6 +152,12 @@ pub struct TextView {
     /// because there it *is* the window.
     pub boxed: bool,
     pub focused: bool,
+    /// Something has been typed since this was loaded or saved.
+    ///
+    /// Set in one place — `splice`, the single point every change goes
+    /// through — so it cannot drift out of step with the text. Cleared by
+    /// whoever saves, because only they know it happened.
+    pub modified: bool,
     /// Draw a bar across the caret line. Off by default: Borland's editors
     /// never did this, and a full-width highlight is the single thing that
     /// makes a screen stop looking like Turbo Vision.
@@ -138,6 +178,7 @@ impl TextView {
             readonly: false,
             boxed: false,
             focused: false,
+            modified: false,
             highlight_line: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -239,7 +280,11 @@ impl Kind {
     /// the menu bar, which is both wrong and very confusing to look at.
     pub fn layer(&self) -> u8 {
         match self {
-            Kind::MenuBox(_) => 2,
+            Kind::MenuBox(_) => 3,
+            // A modal dialog goes above the menu bar as well. While one is up
+            // the menu is not a thing you may reach, and a bar drawn over the
+            // dialog would say the opposite.
+            Kind::Window(w) if w.modal => 2,
             Kind::MenuBar(_) => 1,
             _ => 0,
         }
