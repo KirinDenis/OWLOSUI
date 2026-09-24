@@ -6,6 +6,7 @@
 //! A shadow has no colour of its own.
 
 use owlosui_core::{attr, Buffer, ButtonRow, Color, Dock, Kind, Palette, PushButton, Rect, Ui, WinPalette, Window};
+use owlosui_core::cell::{glyphs, Glyph};
 
 fn with_buttons(palette: WinPalette) -> Buffer {
     let mut ui = Ui::new(40, 10);
@@ -25,7 +26,7 @@ fn with_buttons(palette: WinPalette) -> Buffer {
 }
 
 /// The cell under the button's first label column: the `▀` of its shadow.
-fn shadow_cell(buf: &Buffer) -> (u8, u8) {
+fn shadow_cell(buf: &Buffer) -> (Glyph, u8) {
     for y in 0..10 {
         for x in 0..40 {
             let c = buf.get(x, y).unwrap();

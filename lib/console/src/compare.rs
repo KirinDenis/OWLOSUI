@@ -113,7 +113,7 @@ fn colour_name(a: u8) -> String {
 }
 
 fn glyph_name(b: u8) -> String {
-    let c = crate::cp437::to_char(b);
+    let c = crate::codepage::current().to_char(b);
     if b == 0x20 {
         "space".into()
     } else {

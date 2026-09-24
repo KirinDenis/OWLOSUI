@@ -27,10 +27,11 @@
 //! sequence is not evidence, it is a puzzle.
 
 use owlosui_core::{keymap, Cmd, Keymap, TextView};
+use owlosui_core::cell::{glyphs, Glyph};
 
 struct World {
     t: TextView,
-    clip: Vec<Vec<u8>>,
+    clip: Vec<Vec<Glyph>>,
     keymap: Keymap,
     page: i16,
 }
@@ -64,9 +65,9 @@ fn unescape(s: &str) -> String {
     s.replace("\\n", "\n")
 }
 
-fn lines_to_string(v: &[Vec<u8>]) -> String {
+fn lines_to_string(v: &[Vec<Glyph>]) -> String {
     v.iter()
-        .map(|l| String::from_utf8_lossy(l).into_owned())
+        .map(|l| l.iter().map(|&g| char::from_u32(g as u32).unwrap_or('?')).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n")
 }

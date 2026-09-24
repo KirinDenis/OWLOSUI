@@ -236,6 +236,11 @@ fn alt_and_a_letter_press_a_button_from_anywhere() {
         f.path.focused = true;
     }
     ui.handle(Event::Key(Key::new(KeyCode::Char('o'), Mods::alt())));
+    // A key puts the button down first and fires only when the backend has
+    // shown that frame: the press must be seen before the thing happens.
+    assert_eq!(ui.take_pressed(), None, "fired before it was seen");
+    assert!(ui.pick_pending());
+    ui.complete_pick();
     assert_eq!(ui.take_pressed(), Some(1));
 
     // And from the list.
@@ -243,6 +248,7 @@ fn alt_and_a_letter_press_a_button_from_anywhere() {
         f.focus = Focus::List;
     }
     ui.handle(Event::Key(Key::new(KeyCode::Char('c'), Mods::alt())));
+    ui.complete_pick();
     assert_eq!(ui.take_pressed(), Some(2));
 }
 

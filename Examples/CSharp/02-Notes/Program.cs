@@ -49,11 +49,21 @@ public sealed class App
     public ushort Window { get; }
     public ushort Editor { get; }
 
+    /// <summary>
+    /// True when the file holds characters the session's code page has no
+    /// glyph for. Such a file is shown with `?` where they were - the screen
+    /// can do no better - and is *not* saved from here: writing the `?`s
+    /// back would destroy the text. Start with a code page that has the
+    /// letters (866 for Cyrillic) and it opens for editing.
+    /// </summary>
+    public bool ReadOnly { get; }
+
     public App(Owlosui owl, string fileName)
     {
         this.owl = owl;
         this.fileName = fileName;
         saved = File.Exists(fileName) ? File.ReadAllText(fileName) : "";
+        ReadOnly = !owl.Fits(saved);
 
         // A document window - blue, movable, resizable, zoomable - almost as
         // big as the desktop, centred, with a two-cell margin all round so
@@ -70,7 +80,14 @@ public sealed class App
         // The editor fills the window - it is docked, so when the window is
         // resized or zoomed the editor follows and the scroll bars move with
         // the frame. It takes the focus first, so typing starts at once.
-        Editor = owl.Text(Window, saved);
+        // A file the screen cannot show whole opens as a viewer instead.
+        Editor = owl.Text(Window, saved, readOnly: ReadOnly);
+        if (ReadOnly)
+            box = owl.MessageBox("Notes",
+                $"{fileName} has characters this code page cannot show; they are drawn as ? " +
+                "and the file is opened read-only, so nothing is lost. Start with a code page " +
+                "that has them - 866 for Cyrillic - to edit it.",
+                ("~O~K", CmStay));
 
         // Bottom right, over the editor's corner. Save is first and so the
         // default - but Enter inside an editor is a new line, and the editor
@@ -95,6 +112,13 @@ public sealed class App
         switch (cmd)
         {
             case CmSave:
+                // A file opened read-only is not written, whatever was
+                // pressed: the text on the screen is not the text in the file.
+                if (ReadOnly)
+                {
+                    box = owl.MessageBox("Notes", "Opened read-only: this code page cannot hold the file.", ("~O~K", CmStay));
+                    return true;
+                }
                 // The only time the program looks at the text. Everything
                 // the person did to it since the last save - typing, undo,
                 // paste - is already in it.

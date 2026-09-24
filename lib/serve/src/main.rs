@@ -16,29 +16,46 @@
 
 use std::io::{Read, Write};
 
-use owlosui_console::cp437;
+use owlosui_console::codepage::CodePage;
 use owlosui_core::{
-    Button, ButtonRow, Dock, Event, InputLine, Key, KeyCode, Kind, Mods, Mouse, MouseKind,
-    PushButton, Rect, StaticText, TextView, Ui, ViewId, WinPalette, Window,
+    Button, ButtonRow, Dock, Event, FileEntry, FileList, InputLine, Key, KeyCode, Kind, Label,
+    ListBox, Mods, Mouse, MouseKind, Progress, PushButton, Rect, StaticText, StatusItem, StatusLine,
+    TextView, Ui, ViewId, WinPalette, Window,
 };
 
 mod op {
     pub const QUIT: u8 = 0x00;
     pub const INIT: u8 = 0x01;
     pub const RESIZE: u8 = 0x02;
+    pub const CODEPAGE: u8 = 0x03;
     pub const WINDOW: u8 = 0x10;
     pub const TEXT: u8 = 0x11;
     pub const STATIC: u8 = 0x12;
     pub const INPUT: u8 = 0x13;
     pub const BUTTONS: u8 = 0x14;
     pub const MESSAGE_BOX: u8 = 0x15;
+    pub const STATUS: u8 = 0x16;
+    pub const LABEL: u8 = 0x17;
+    pub const PROGRESS: u8 = 0x18;
+    pub const LIST: u8 = 0x19;
+    pub const FILES: u8 = 0x1A;
     pub const CLOSE: u8 = 0x20;
     pub const GET_TEXT: u8 = 0x21;
+    pub const SET_PROGRESS: u8 = 0x22;
+    pub const GET_MARKED: u8 = 0x23;
+    pub const GET_CURRENT: u8 = 0x24;
+    pub const SET_FILES: u8 = 0x25;
+    pub const TAKE_FILES: u8 = 0x26;
+    pub const ACTIVATE: u8 = 0x27;
+    pub const MARKED_NAMES: u8 = 0x28;
+    pub const SET_FILES_ERROR: u8 = 0x29;
+    pub const ACTIVE: u8 = 0x2A;
     pub const KEY: u8 = 0x30;
     pub const MOUSE: u8 = 0x31;
     pub const TICK: u8 = 0x32;
     pub const FRAME: u8 = 0x40;
     pub const TAKE: u8 = 0x41;
+    pub const GET_GLYPHS: u8 = 0x42;
 }
 
 type Res<T> = Result<T, String>;
@@ -74,6 +91,20 @@ impl<'a> In<'a> {
     fn i16(&mut self, what: &str) -> Res<i16> {
         Ok(self.u16(what)? as i16)
     }
+    fn u32(&mut self, what: &str) -> Res<u32> {
+        let s = self.take(4, what)?;
+        Ok(u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+    }
+    /// `kind:u8 value:u16 mods:u8`, as KEY carries it; `0xFF` means no key.
+    fn key(&mut self) -> Res<Option<Key>> {
+        let kind = self.u8("key.kind")?;
+        let value = self.u16("key.value")?;
+        let m = self.u8("key.mods")?;
+        if kind == 0xFF {
+            return Ok(None);
+        }
+        decode_key(kind, value, m).map(Some)
+    }
     fn id(&mut self, what: &str) -> Res<ViewId> {
         Ok(ViewId::from_raw(self.u16(what)? as u32))
     }
@@ -90,9 +121,34 @@ impl<'a> In<'a> {
         let s = self.take(n, what)?;
         String::from_utf8(s.to_vec()).map_err(|_| format!("{what} is not UTF-8"))
     }
+    /// `n:u16` then `n ×` (`name:str size:u32 year:u16 month:u8 day:u8
+    /// hour:u8 minute:u8 attrs:u8`): a directory listing, read by the
+    /// client, because the server reads no files and no directories.
+    fn entries(&mut self, cp: &CodePage) -> Res<Vec<FileEntry>> {
+        let n = self.u16("entry count")?;
+        let mut v = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            let name = cp.to_core(&self.str("entry.name")?);
+            let size = self.u32("entry.size")?;
+            let year = self.u16("entry.year")?;
+            let month = self.u8("entry.month")?;
+            let day = self.u8("entry.day")?;
+            let hour = self.u8("entry.hour")?;
+            let minute = self.u8("entry.minute")?;
+            let attrs = self.u8("entry.attrs")?;
+            v.push(FileEntry {
+                name,
+                size,
+                date: (year, month, day, hour, minute),
+                attrs,
+            });
+        }
+        Ok(v)
+    }
+
     /// `n ×` (`cmd:u16 flags:u8 label:str`) — the shape both BUTTONS and
     /// MESSAGE_BOX carry.
-    fn buttons(&mut self) -> Res<ButtonRow> {
+    fn buttons(&mut self, cp: &CodePage) -> Res<ButtonRow> {
         let n = self.u8("button count")?;
         let mut v = Vec::with_capacity(n as usize);
         for i in 0..n {
@@ -101,7 +157,7 @@ impl<'a> In<'a> {
                 return Err(format!("button {i} has command 0, which means none"));
             }
             let flags = self.u8("button.flags")?;
-            let label = self.str("button.label")?;
+            let label = cp.to_core(&self.str("button.label")?);
             let mut b = PushButton::new(&label, cmd);
             if flags & 1 != 0 {
                 b = b.default();
@@ -143,6 +199,11 @@ impl Out {
 
 struct Server {
     ui: Option<Ui>,
+    /// The status line, if one has been made. A second one replaces it.
+    status: Option<ViewId>,
+    /// The code page every string is turned into on the way in and back
+    /// on the way out. One per session, like the font in a video card.
+    cp: CodePage,
 }
 
 impl Server {
@@ -156,6 +217,17 @@ impl Server {
         } else {
             Err(format!("no view {}", id.raw()))
         }
+    }
+
+    /// A dialog with something focusable in it and nothing focused is a
+    /// dialog whose first key goes nowhere. The first control to arrive
+    /// takes the focus, as it would in a dialog built by hand.
+    fn settle_focus(&mut self) -> Res<()> {
+        let ui = self.ui()?;
+        if ui.focused().is_none() {
+            ui.focus_first();
+        }
+        Ok(())
     }
 
     /// `-1` in either coordinate means "in the middle of the work area" -
@@ -181,7 +253,30 @@ impl Server {
                 if w < 1 || h < 1 {
                     return Err(format!("cannot make a {w}x{h} screen"));
                 }
+                // An optional code page; absent or 0 is 437.
+                if r.remaining() >= 2 {
+                    let n = r.u16("codepage")?;
+                    if n != 0 {
+                        self.cp = CodePage::by_number(n).ok_or_else(|| format!("no code page {n}"))?;
+                    }
+                }
                 self.ui = Some(Ui::new(w, h));
+                self.status = None;
+            }
+
+            op::CODEPAGE => {
+                let n = r.u16("codepage")?;
+                self.cp = CodePage::by_number(n).ok_or_else(|| format!("no code page {n}"))?;
+            }
+
+            op::GET_GLYPHS => {
+                // What each of the 256 glyph indices looks like, as Unicode,
+                // so a client draws with the server's table and never keeps
+                // one of its own.
+                for &c in self.cp.table.iter() {
+                    let u = c as u32;
+                    out.u16(if u <= 0xFFFF { u as u16 } else { b'?' as u16 });
+                }
             }
             op::RESIZE => {
                 let (w, h) = (r.i16("w")?, r.i16("h")?);
@@ -192,7 +287,7 @@ impl Server {
                 let parent = r.id("parent")?;
                 let rect = r.rect()?;
                 let flags = r.u8("flags")?;
-                let title = r.str("title")?;
+                let title = self.cp.to_core(&r.str("title")?);
                 // Added after the first clients were written, so it is
                 // allowed to be absent: no field, no command.
                 let close_cmd = if r.remaining() >= 2 { r.u16("close_cmd")? } else { 0 };
@@ -227,19 +322,20 @@ impl Server {
                 let flags = r.u8("flags")?;
                 let text = r.str("text")?;
                 let parent = self.alive(parent)?;
-                let mut t = TextView::new(lines_of(&text));
+                let mut t = TextView::new(lines_of(&self.cp, &text));
                 t.readonly = flags & 1 != 0;
                 t.boxed = flags & 2 != 0;
                 let ui = self.ui()?;
                 let id = ui.insert(parent, rect, Kind::Text(t));
                 ui.set_dock(id, if dock == 1 { Dock::Manual } else { Dock::Fill });
+                self.settle_focus()?;
                 out.id(id);
             }
 
             op::STATIC => {
                 let parent = r.id("parent")?;
                 let rect = r.rect()?;
-                let text = r.str("text")?;
+                let text = self.cp.to_core(&r.str("text")?);
                 let parent = self.alive(parent)?;
                 let ui = self.ui()?;
                 let id = ui.insert(parent, rect, Kind::Static(StaticText::new(&text)));
@@ -251,8 +347,8 @@ impl Server {
                 let parent = r.id("parent")?;
                 let rect = r.rect()?;
                 let max = r.u16("max")?;
-                let label = r.str("label")?;
-                let text = r.str("text")?;
+                let label = self.cp.to_core(&r.str("label")?);
+                let text = self.cp.to_core(&r.str("text")?);
                 let parent = self.alive(parent)?;
                 let mut i = InputLine::new(&label, &text);
                 if max > 0 {
@@ -261,12 +357,13 @@ impl Server {
                 let ui = self.ui()?;
                 let id = ui.insert(parent, rect, Kind::Input(i));
                 ui.set_dock(id, Dock::Manual);
+                self.settle_focus()?;
                 out.id(id);
             }
 
             op::BUTTONS => {
                 let parent = r.id("parent")?;
-                let row = r.buttons()?;
+                let row = r.buttons(&self.cp)?;
                 let parent = self.alive(parent)?;
                 // Bottom right, with room for the last button's shadow. The
                 // row is two rows tall for the same reason.
@@ -279,9 +376,9 @@ impl Server {
             }
 
             op::MESSAGE_BOX => {
-                let title = r.str("title")?;
-                let text = r.str("text")?;
-                let row = r.buttons()?;
+                let title = self.cp.to_core(&r.str("title")?);
+                let text = self.cp.to_core(&r.str("text")?);
+                let row = r.buttons(&self.cp)?;
                 let id = self.ui()?.message_box(&title, &text, row);
                 out.id(id);
             }
@@ -295,14 +392,15 @@ impl Server {
             op::GET_TEXT => {
                 let id = r.id("id")?;
                 let id = self.alive(id)?;
-                let s = match self.ui()?.kind(id) {
+                let cp = &self.cp;
+                let s = match self.ui.as_ref().ok_or("INIT first")?.kind(id) {
                     Kind::Text(t) => t
                         .lines
                         .iter()
-                        .map(|l| l.iter().map(|&b| cp437::to_char(b)).collect::<String>())
+                        .map(|l| cp.decode(l))
                         .collect::<Vec<_>>()
                         .join("\n"),
-                    Kind::Input(i) => i.text.clone(),
+                    Kind::Input(i) => cp.from_core(&i.text),
                     _ => return Err(format!("view {} has no text", id.raw())),
                 };
                 out.str(&s);
@@ -312,20 +410,241 @@ impl Server {
                 let kind = r.u8("kind")?;
                 let value = r.u16("value")?;
                 let m = r.u8("mods")?;
-                let code = match kind {
-                    0 => KeyCode::Char(
-                        char::from_u32(value as u32).ok_or("not a character")?,
-                    ),
-                    1 => KeyCode::F(value as u8),
-                    2 => named_key(value).ok_or_else(|| format!("no named key {value}"))?,
-                    _ => return Err(format!("no key kind {kind}")),
+                let mut key = decode_key(kind, value, m)?;
+                // A typed character goes in as its glyph index, like every
+                // other string; a character the page has no glyph for is
+                // typed as `?`, which is what the screen would show anyway.
+                if let KeyCode::Char(c) = key.code {
+                    if (c as u32) >= 128 {
+                        key.code = KeyCode::Char(self.cp.from_char(c) as char);
+                    }
+                }
+                self.ui()?.handle(Event::Key(key));
+            }
+
+            op::STATUS => {
+                let n = r.u8("item count")?;
+                let mut items = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    let cmd = r.u16("status.cmd")?;
+                    let key = r.key()?;
+                    let text = self.cp.to_core(&r.str("status.text")?);
+                    items.push(StatusItem::new(&text, key, cmd));
+                }
+                let old = self.status.take();
+                let ui = self.ui()?;
+                if let Some(old) = old {
+                    if ui.is_alive(old) {
+                        ui.close(old);
+                    }
+                }
+                let root = ui.root();
+                let screen = ui.rect(root);
+                let id = ui.insert(
+                    root,
+                    Rect::new(0, screen.h - 1, screen.w, 1),
+                    Kind::Status(StatusLine::new(items)),
+                );
+                self.status = Some(id);
+                out.id(id);
+            }
+
+            op::LABEL => {
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let target = r.u16("target")?;
+                let text = self.cp.to_core(&r.str("text")?);
+                let parent = self.alive(parent)?;
+                let target = if target == 0 {
+                    None
+                } else {
+                    Some(self.alive(ViewId::from_raw(target as u32))?)
                 };
-                let mods = Mods {
-                    shift: m & 1 != 0,
-                    ctrl: m & 2 != 0,
-                    alt: m & 4 != 0,
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::Label(Label::new(&text, target)));
+                ui.set_dock(id, Dock::Manual);
+                out.id(id);
+            }
+
+            op::PROGRESS => {
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let max = r.u32("max")?;
+                let flags = r.u8("flags")?;
+                let parent = self.alive(parent)?;
+                let mut p = Progress::new(max);
+                p.percent = flags & 1 != 0;
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::Progress(p));
+                ui.set_dock(id, Dock::Manual);
+                out.id(id);
+            }
+
+            op::SET_PROGRESS => {
+                let id = r.id("id")?;
+                let value = r.u32("value")?;
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Progress(p) => p.set(value),
+                    _ => return Err(format!("view {} is not a progress bar", id.raw())),
+                }
+            }
+
+            op::LIST => {
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let flags = r.u8("flags")?;
+                let n = r.u16("item count")?;
+                let mut items = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    items.push(self.cp.to_core(&r.str("item")?));
+                }
+                let parent = self.alive(parent)?;
+                let refs: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
+                let mut l = ListBox::new(&refs);
+                l.multi = flags & 1 != 0;
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::List(l));
+                ui.set_dock(id, Dock::Manual);
+                self.settle_focus()?;
+                out.id(id);
+            }
+
+            op::FILES => {
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let flags = r.u8("flags")?;
+                let mask = self.cp.to_core(&r.str("mask")?);
+                let path = self.cp.to_core(&r.str("path")?);
+                let entries = r.entries(&self.cp)?;
+                let parent = self.alive(parent)?;
+                let mut f = FileList::new(entries, &mask);
+                f.set_path(&path);
+                f.multi = flags & 1 != 0;
+                // A bare path line, without `Path:` in front of it. An Open
+                // dialog wants the word; a file manager's panel is nothing
+                // but paths and does not.
+                if flags & 2 != 0 {
+                    f.path.label = String::new();
+                }
+                // No path line at all: a commander's panel, where the names
+                // start at the top and the foot says where you are.
+                if flags & 4 != 0 {
+                    f.path_line = false;
+                }
+                f.focus = owlosui_core::files::Focus::List;
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::Files(f));
+                ui.set_dock(id, Dock::Fill);
+                out.id(id);
+            }
+
+            op::SET_FILES => {
+                let id = r.id("id")?;
+                let path = self.cp.to_core(&r.str("path")?);
+                let mask = self.cp.to_core(&r.str("mask")?);
+                let entries = r.entries(&self.cp)?;
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Files(f) => {
+                        f.set_mask(&mask);
+                        f.set_entries(entries);
+                        f.set_path(&path);
+                        f.error = None;
+                    }
+                    _ => return Err(format!("view {} is not a file panel", id.raw())),
+                }
+            }
+
+            op::SET_FILES_ERROR => {
+                let id = r.id("id")?;
+                let text = self.cp.to_core(&r.str("text")?);
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Files(f) => f.error = Some(text),
+                    _ => return Err(format!("view {} is not a file panel", id.raw())),
+                }
+            }
+
+            op::TAKE_FILES => {
+                // What the person did in the panel since last asked: typed a
+                // path and pressed Enter (2), or pressed Enter on a name (1).
+                // Read once, like TAKE.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let (kind, text) = match self.ui()?.kind_mut(id) {
+                    Kind::Files(f) => {
+                        if let Some(p) = f.pending_path.take() {
+                            (2u8, p)
+                        } else if let Some(n) = f.chosen.take() {
+                            (1u8, n)
+                        } else {
+                            (0u8, String::new())
+                        }
+                    }
+                    _ => return Err(format!("view {} is not a file panel", id.raw())),
                 };
-                self.ui()?.handle(Event::Key(Key { code, mods }));
+                out.u8(kind);
+                out.str(&self.cp.from_core(&text));
+            }
+
+            op::MARKED_NAMES => {
+                // The marked files - or, with none marked, the one under the
+                // cursor, which is what F5 in Norton Commander copied.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let names = match self.ui()?.kind(id) {
+                    Kind::Files(f) => {
+                        let m = f.marked_names();
+                        if m.is_empty() {
+                            f.selected().map(|e| vec![e.name.clone()]).unwrap_or_default()
+                        } else {
+                            m
+                        }
+                    }
+                    _ => return Err(format!("view {} is not a file panel", id.raw())),
+                };
+                out.u16(names.len() as u16);
+                for n in &names {
+                    out.str(&self.cp.from_core(n));
+                }
+            }
+
+            op::ACTIVATE => {
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                if !matches!(ui.kind(id), Kind::Window(_)) {
+                    return Err(format!("view {} is not a window", id.raw()));
+                }
+                ui.activate(id);
+            }
+
+            op::ACTIVE => {
+                out.u16(self.ui()?.active_window().map_or(0, |w| w.raw() as u16));
+            }
+
+            op::GET_MARKED => {
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let marked = match self.ui()?.kind(id) {
+                    Kind::List(l) => l.marked(),
+                    _ => return Err(format!("view {} is not a list", id.raw())),
+                };
+                out.u16(marked.len() as u16);
+                for m in marked {
+                    out.u16(m as u16);
+                }
+            }
+
+            op::GET_CURRENT => {
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let cur = match self.ui()?.kind(id) {
+                    Kind::List(l) => l.current,
+                    _ => return Err(format!("view {} is not a list", id.raw())),
+                };
+                out.u16(cur as u16);
             }
 
             op::MOUSE => {
@@ -389,12 +708,27 @@ impl Server {
     }
 }
 
-fn lines_of(text: &str) -> Vec<Vec<u8>> {
-    let mut v: Vec<Vec<u8>> = text.split('\n').map(cp437::encode).collect();
+fn lines_of(cp: &CodePage, text: &str) -> Vec<Vec<u8>> {
+    let mut v: Vec<Vec<u8>> = text.split('\n').map(|l| cp.encode(l)).collect();
     if v.is_empty() {
         v.push(Vec::new());
     }
     v
+}
+
+fn decode_key(kind: u8, value: u16, m: u8) -> Res<Key> {
+    let code = match kind {
+        0 => KeyCode::Char(char::from_u32(value as u32).ok_or("not a character")?),
+        1 => KeyCode::F(value as u8),
+        2 => named_key(value).ok_or_else(|| format!("no named key {value}"))?,
+        _ => return Err(format!("no key kind {kind}")),
+    };
+    let mods = Mods {
+        shift: m & 1 != 0,
+        ctrl: m & 2 != 0,
+        alt: m & 4 != 0,
+    };
+    Ok(Key { code, mods })
 }
 
 fn named_key(v: u16) -> Option<KeyCode> {
@@ -423,7 +757,11 @@ fn main() -> std::io::Result<()> {
     let stdout = std::io::stdout();
     let mut input = stdin.lock();
     let mut output = std::io::BufWriter::new(stdout.lock());
-    let mut server = Server { ui: None };
+    let mut server = Server {
+        ui: None,
+        status: None,
+        cp: CodePage::by_number(437).expect("437 is built in"),
+    };
 
     loop {
         // op:u8 len:u16, then the payload. End of input is a normal way for a

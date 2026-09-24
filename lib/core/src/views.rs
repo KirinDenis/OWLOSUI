@@ -11,7 +11,7 @@ use crate::geom::Rect;
 pub struct Desktop {
     /// The fill character. `░` is what Turbo Vision used; `▒` and `▓` are the
     /// other two shades, and any glyph is legal.
-    pub glyph: u8,
+    pub glyph: crate::cell::Glyph,
 }
 
 impl Default for Desktop {
@@ -133,7 +133,7 @@ pub struct TextView {
     /// uses — UTF-8 here, whatever DOS hands us there — is the backend's job,
     /// done once on the way in. Doing it per frame, or storing both, is how a
     /// core stops being portable.
-    pub lines: Vec<Vec<u8>>,
+    pub lines: Vec<Vec<crate::cell::Glyph>>,
     /// First visible line.
     pub top: i16,
     /// First visible column.
@@ -168,7 +168,7 @@ pub struct TextView {
 }
 
 impl TextView {
-    pub fn new(lines: Vec<Vec<u8>>) -> Self {
+    pub fn new(lines: Vec<Vec<crate::cell::Glyph>>) -> Self {
         TextView {
             lines,
             top: 0,
@@ -195,7 +195,7 @@ impl TextView {
     pub fn from_ascii(text: &str) -> Self {
         TextView::new(
             text.lines()
-                .map(|l| l.bytes().map(|b| if b < 128 { b } else { b'?' }).collect())
+                .map(|l| crate::cell::glyphs(l))
                 .collect(),
         )
     }
@@ -232,6 +232,10 @@ pub enum Kind {
     List(crate::controls::ListBox),
     Static(crate::controls::StaticText),
     Tree(crate::tree::TreeView),
+    /// The bottom row: keys and what they do. One per desktop, like the bar.
+    Status(crate::status::StatusLine),
+    Label(crate::controls::Label),
+    Progress(crate::controls::Progress),
 }
 
 /// Where a child sits inside its parent.
@@ -285,7 +289,7 @@ impl Kind {
             // the menu is not a thing you may reach, and a bar drawn over the
             // dialog would say the opposite.
             Kind::Window(w) if w.modal => 2,
-            Kind::MenuBar(_) => 1,
+            Kind::MenuBar(_) | Kind::Status(_) => 1,
             _ => 0,
         }
     }

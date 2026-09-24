@@ -168,10 +168,10 @@ fn the_prefix_shows_the_shape() {
 
     // `├─-` for an open branch, `└─ ` for the last leaf of one.
     let core = TreeView::prefix(&rows[0]);
-    assert_eq!(core[core.len() - 2], b'-', "an open branch says so");
+    assert_eq!(core[core.len() - 2], b'-' as owlosui_core::Glyph, "an open branch says so");
 
     let files = TreeView::prefix(&rows[2]);
-    assert_eq!(files[0], b' ', "indented one level");
+    assert_eq!(files[0], b' ' as owlosui_core::Glyph, "indented one level");
     assert_eq!(files[2], 0xC0, "the last child gets the elbow");
 
     let ui = TreeView::prefix(&rows[1]);

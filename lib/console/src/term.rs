@@ -26,7 +26,6 @@ use crossterm::{event as ct, execute};
 
 use owlosui_core::{Buffer, Button, Cell, Event, Key, KeyCode, Mods, Mouse, MouseKind, Point};
 
-use crate::cp437;
 
 /// IBM attribute nibble to ANSI colour number. The two orders are not the
 /// same: IBM counts blue as 1, ANSI counts red as 1.
@@ -149,7 +148,7 @@ impl Term {
                     push_sgr(&mut self.frame, c.attr, self.truecolor);
                     cur_attr = Some(c.attr);
                 }
-                self.frame.push(cp437::to_char(c.ch));
+                self.frame.push(crate::codepage::current().to_char(c.ch));
                 self.shadow[row + x] = c;
             }
         }

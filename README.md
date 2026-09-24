@@ -31,7 +31,7 @@ lib/csharp      Owlosui.cs: the C# client of that pipe. One file, no packages.
 lib/PROTOCOL.md the wire. Same numbers for a pipe, a WebSocket, an interrupt.
 
 Examples/Rust   01-Demo — every control the toolkit has, in one program.
-Examples/CSharp 01-HelloWorld, 02-Notes — programs that use the library.
+Examples/CSharp 01-HelloWorld, 02-Notes, 03-Commander — programs that use the library.
 Examples/C      (empty) — DOS clients, through the resident, when it exists.
 ```
 
@@ -131,6 +131,24 @@ wire and the console, the one that broke first, tested without anybody at the
 keyboard. The agent is not specific to OWLOSUI; it will drive any program that
 reads a Windows console.
 
+## Code pages
+
+The core never sees Unicode. A cell is a glyph index; a title is a string
+of glyph indices; an editor line is bytes — the screen of a DOS machine,
+where a byte in video memory *is* the picture. Which picture is the
+**code page**, and it lives in one place: `lib/console/src/codepage.rs`,
+437 (the IBM PC's) and 866 (Cyrillic, with the same frames at the same
+places). Text crosses the wire as UTF-8 and becomes bytes there on the way
+in and text again on the way out; a client asks `GET_GLYPHS` once and draws
+with the server's table, keeping none of its own.
+
+A character the page has no glyph for becomes `?`. That is a fact about
+256 glyphs, not a bug, and the answer to it is to know first:
+`Owlosui.Fits(text)` says whether a text can be shown, and Notes opens a
+file it cannot show read-only rather than save `?`s back into it. Pick the
+page with `new Owlosui(codePage: 866)` or `OWLOSUI_CODEPAGE=866` in the
+environment; the terminal demo reads the same variable.
+
 ## Checking against the real thing
 
 Several scenes exist twice: here, and in `TOOLS/REFGEN/REFGEN.PAS` in the
@@ -212,16 +230,18 @@ in `pending`; resolving it belongs to the application.
 ## Status
 
 Working: desktop, overlapping framed windows (move, resize, zoom, close,
-z-order, modal), scrolling text views with working scrollbars, editing with
-undo, selection and a clipboard, two keymaps, a help viewer, menu bar and
-menu panels, a file-open dialog with a path/mask line, a hex viewer, buttons,
-input lines, check boxes and radio buttons, lists, trees, static text, a
-message box; the terminal backend; the pipe server and its C# client;
-comparison against real Turbo Vision.
+z-order, modal, following the desktop when it resizes), scrolling text
+views with working scrollbars, editing with undo, selection and a
+clipboard, two keymaps, a help viewer, menu bar with panels, submenus and
+ticked items, a status line that shows its keys and binds them, a file-open
+dialog with a path/mask line, a hex viewer, buttons, labels with hotkeys,
+input lines, check boxes and radio buttons, lists with Insert-marks, trees,
+static text, a progress bar, a message box; the terminal backend; the pipe
+server and its C# client; comparison against real Turbo Vision.
 
-Not yet on the wire: menus, the file dialog, hex, lists, trees, clusters.
-Not yet at all: saving from the demo, a status line as a real view, the
-DOS, browser and native backends, the resident.
+Not yet on the wire: menus, the file dialog, hex, trees, clusters.
+Not yet at all: a grid, tabs, a drop-down list and input history, a masked
+field, an ANSI viewer; the DOS, browser and native backends; the resident.
 
 ## Licence
 

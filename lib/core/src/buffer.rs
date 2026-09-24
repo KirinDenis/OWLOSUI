@@ -6,7 +6,7 @@
 //! outside it simply has nothing happen. That is the whole occlusion story:
 //! draw back to front, clip on the way down.
 
-use crate::cell::{attr, Cell, Color};
+use crate::cell::{attr, glyph, Cell, Color, Glyph};
 use crate::geom::Rect;
 
 pub struct Buffer {
@@ -22,7 +22,7 @@ impl Buffer {
         Buffer {
             w,
             h,
-            cells: vec![Cell::new(b' ', attr(Color::LightGray, Color::Black)); (w as usize) * (h as usize)],
+            cells: vec![Cell::new(glyph::SPACE, attr(Color::LightGray, Color::Black)); (w as usize) * (h as usize)],
         }
     }
 
@@ -53,7 +53,7 @@ impl Buffer {
         self.cells.clear();
         self.cells.resize(
             (w as usize) * (h as usize),
-            Cell::new(b' ', attr(Color::LightGray, Color::Black)),
+            Cell::new(glyph::SPACE, attr(Color::LightGray, Color::Black)),
         );
     }
 
@@ -65,7 +65,8 @@ impl Buffer {
     }
 
     /// Write one cell. Silently does nothing outside the buffer or the clip.
-    pub fn put(&mut self, x: i16, y: i16, ch: u8, a: u8, clip: Rect) {
+    pub fn put(&mut self, x: i16, y: i16, ch: impl Into<Glyph>, a: u8, clip: Rect) {
+        let ch: Glyph = ch.into();
         if x < 0 || y < 0 || x >= self.w || y >= self.h {
             return;
         }
@@ -87,7 +88,7 @@ impl Buffer {
     }
 
     /// Write raw code page bytes.
-    pub fn raw(&mut self, x: i16, y: i16, bytes: &[u8], a: u8, clip: Rect) {
+    pub fn raw(&mut self, x: i16, y: i16, bytes: &[Glyph], a: u8, clip: Rect) {
         for (i, b) in bytes.iter().enumerate() {
             self.put(x + i as i16, y, *b, a, clip);
         }
@@ -95,17 +96,24 @@ impl Buffer {
 
     /// Write text. Characters outside ASCII are drawn as `?` — mapping Unicode
     /// onto the active code page is the caller's business, not the grid's.
+    /// Write a string of glyph indices.
+    ///
+    /// A `String` in the core is a byte string: each `char` is the glyph
+    /// index itself, `U+0000..U+00FF`, put there by the backend's code page
+    /// on the way in. So a char up to 255 is written as that byte, and
+    /// anything above it - which no backend should have let in - becomes
+    /// `?` rather than a hole. Nothing here knows what code page it is.
     pub fn text(&mut self, x: i16, y: i16, s: &str, a: u8, clip: Rect) -> i16 {
         let mut n = 0i16;
         for c in s.chars() {
-            let b = if (c as u32) < 128 { c as u8 } else { b'?' };
-            self.put(x + n, y, b, a, clip);
+            self.put(x + n, y, crate::cell::glyph_of(c), a, clip);
             n += 1;
         }
         n
     }
 
-    pub fn fill(&mut self, r: Rect, ch: u8, a: u8, clip: Rect) {
+    pub fn fill(&mut self, r: Rect, ch: impl Into<Glyph>, a: u8, clip: Rect) {
+        let ch: Glyph = ch.into();
         let r = r.intersect(&clip);
         for y in r.y..r.bottom() {
             for x in r.x..r.right() {
@@ -114,13 +122,15 @@ impl Buffer {
         }
     }
 
-    pub fn hline(&mut self, x: i16, y: i16, len: i16, ch: u8, a: u8, clip: Rect) {
+    pub fn hline(&mut self, x: i16, y: i16, len: i16, ch: impl Into<Glyph>, a: u8, clip: Rect) {
+        let ch: Glyph = ch.into();
         for i in 0..len {
             self.put(x + i, y, ch, a, clip);
         }
     }
 
-    pub fn vline(&mut self, x: i16, y: i16, len: i16, ch: u8, a: u8, clip: Rect) {
+    pub fn vline(&mut self, x: i16, y: i16, len: i16, ch: impl Into<Glyph>, a: u8, clip: Rect) {
+        let ch: Glyph = ch.into();
         for i in 0..len {
             self.put(x, y + i, ch, a, clip);
         }

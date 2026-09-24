@@ -9,9 +9,9 @@
 
 mod help;
 
-use owlosui_console::{cp437, dir, Term};
+use owlosui_console::{codepage, dir, Term};
 use owlosui_core::{
-    ButtonRow, Dock, Event, FileList, Html, Key, KeyCode, Kind, MenuBar, MenuItem, Mods, Rect, TextView,
+    ButtonRow, Dock, Event, FileList, Html, Key, KeyCode, Kind, MenuBar, MenuItem, Mods, Rect, StatusItem, StatusLine, TextView,
     TreeNode, Ui, Window,
 };
 
@@ -33,7 +33,6 @@ fn main() -> std::io::Result<()> {
 
     loop {
         ui.draw(&mut buf);
-        status_line(&mut buf);
         term.render(&buf, ui.cursor())?;
 
         // A menu item clicked with the mouse, or a button pressed by a key,
@@ -54,69 +53,9 @@ fn main() -> std::io::Result<()> {
 
         let Some(ev) = term.next_event()? else { continue };
 
-        // Application-level keys get first refusal, then the tree — unless a
-        // modal dialog is up, in which case there is no such thing as an
-        // application-level key. F1 opening a help window over a question the
-        // program is waiting on would be exactly the mess modality exists to
-        // prevent, and gating it here rather than inside each handler means a
-        // key added later is gated by default.
-        if let (Event::Key(k), None) = (ev, ui.modal()) {
-            match k {
-                Key {
-                    code: KeyCode::Char('x'),
-                    mods,
-                } if mods.alt => {
-                    if leaving(&mut ui) {
-                        continue;
-                    }
-                    break;
-                }
-                Key {
-                    code: KeyCode::F(5),
-                    ..
-                } => {
-                    if let Some(a) = ui.active_window() {
-                        ui.toggle_zoom(a);
-                    }
-                    continue;
-                }
-                Key {
-                    code: KeyCode::F(1),
-                    ..
-                } => {
-                    open_help(&mut ui);
-                    continue;
-                }
-                Key {
-                    code: KeyCode::F(4),
-                    ..
-                } => {
-                    open_controls(&mut ui);
-                    continue;
-                }
-                Key {
-                    code: KeyCode::F(6),
-                    ..
-                } => {
-                    ui.cycle_windows();
-                    continue;
-                }
-                Key {
-                    code: KeyCode::F(3),
-                    mods,
-                } if mods.alt => {
-                    if let Some(a) = ui.active_window() {
-                        ui.close(a);
-                    }
-                    continue;
-                }
-                _ => {}
-            }
-        }
-
         if let Event::Resize(nw, nh) = ev {
             buf.resize(nw, nh);
-            ui.handle(Event::Resize(nw, nh - 1));
+            ui.handle(Event::Resize(nw, nh));
             continue;
         }
 
@@ -173,7 +112,7 @@ fn show_keys() -> std::io::Result<()> {
 }
 
 fn build(w: i16, h: i16) -> (Ui, owlosui_core::Buffer) {
-    let mut ui = Ui::new(w, h - 1); // last row is the status line placeholder
+    let mut ui = Ui::new(w, h);
     let buf = owlosui_core::Buffer::new(w, h);
     let root = ui.root();
 
@@ -208,6 +147,21 @@ fn build(w: i16, h: i16) -> (Ui, owlosui_core::Buffer) {
         ),
     ]);
     ui.insert(root, Rect::new(0, 0, w, 1), Kind::MenuBar(bar));
+
+    // The status line shows the keys and binds them. Every key here used to
+    // be a match arm in the event loop and a hand-drawn row of text, and the
+    // two had to be kept in step by hand; now they are one list.
+    let f = |n| Some(Key::new(KeyCode::F(n), Mods::default()));
+    let alt = |c| Some(Key::new(KeyCode::Char(c), Mods::alt()));
+    let status = StatusLine::new(vec![
+        StatusItem::new("~Alt-X~ Exit", alt('x'), CM_QUIT),
+        StatusItem::new("~F1~ Help", f(1), CM_HELP),
+        StatusItem::new("~F4~ Controls", f(4), CM_DEMO),
+        StatusItem::new("~F5~ Zoom", f(5), CM_ZOOM),
+        StatusItem::new("~F6~ Next", f(6), CM_NEXT),
+        StatusItem::new("~Alt-F3~ Close", Some(Key::new(KeyCode::F(3), Mods::alt())), CM_CLOSE),
+    ]);
+    ui.insert(root, Rect::new(0, h - 1, w, 1), Kind::Status(status));
 
     (ui, buf)
 }
@@ -315,12 +269,11 @@ fn dump(what: Option<&str>) -> std::io::Result<()> {
         _ => {}
     }
     ui.draw(&mut buf);
-    status_line(&mut buf);
 
     let mut out = String::new();
     for y in 0..buf.height() {
         for x in 0..buf.width() {
-            out.push(cp437::to_char(buf.get(x, y).map(|c| c.ch).unwrap_or(b' ')));
+            out.push(codepage::current().to_char(buf.get(x, y).map(|c| c.ch).unwrap_or(b' ')));
         }
         out.push('\n');
     }
@@ -353,7 +306,7 @@ fn open_file(ui: &mut Ui, parent: owlosui_core::ViewId, rect: Rect, path: &str) 
     // taken yet, and guessing it in the loader would prejudge it.
     let lines: Vec<Vec<u8>> = text
         .lines()
-        .map(|l| cp437::encode(&l.replace('\t', "    ")))
+        .map(|l| codepage::current().encode(&l.replace('\t', "    ")))
         .collect();
 
     // The size given here does not matter: the measure pass makes a window's
@@ -547,7 +500,7 @@ fn open_document(ui: &mut Ui, path: &std::path::Path) {
         let text = String::from_utf8_lossy(&bytes);
         let lines: Vec<Vec<u8>> = text
             .lines()
-            .map(|l| cp437::encode(&l.replace('\t', "    ")))
+            .map(|l| codepage::current().encode(&l.replace('\t', "    ")))
             .collect();
         ui.insert(wid, Rect::default(), Kind::Text(TextView::new(lines)));
     }
@@ -833,32 +786,5 @@ fn update_footers(ui: &mut Ui) {
         if let Kind::Window(w) = ui.kind_mut(wid) {
             w.footer = pos;
         }
-    }
-}
-
-/// Placeholder until `StatusLine` exists as a real view. It is drawn straight
-/// into the buffer so the screen looks finished; it is not part of the tree
-/// and does not receive events.
-fn status_line(buf: &mut owlosui_core::Buffer) {
-    use owlosui_core::{attr, Color};
-    let y = buf.height() - 1;
-    let clip = buf.rect();
-    let normal = attr(Color::Black, Color::LightGray);
-    let key = attr(Color::Red, Color::LightGray);
-
-    buf.fill(Rect::new(0, y, buf.width(), 1), b' ', normal, clip);
-
-    let mut x = 1i16;
-    for (k, label) in [
-        ("Alt-X", "Exit"),
-        ("F1", "Help"),
-        ("F5", "Zoom"),
-        ("F6", "Next"),
-        ("Alt-F3", "Close"),
-    ] {
-        x += buf.text(x, y, k, key, clip);
-        x += buf.text(x, y, " ", normal, clip);
-        x += buf.text(x, y, label, normal, clip);
-        x += 2;
     }
 }

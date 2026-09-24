@@ -7,6 +7,7 @@
 //! is then wrong.
 
 use owlosui_core::hex::looks_binary;
+use owlosui_core::cell::{glyphs, Glyph};
 use owlosui_core::{Buffer, HexView, Kind, Rect, Ui, Window};
 
 #[test]
@@ -91,8 +92,8 @@ fn a_row_as_drawn() {
     let mut row = String::new();
     for x in 1..=62 {
         let c = buf.get(x, 1).unwrap().ch;
-        row.push(if c.is_ascii_graphic() || c == b' ' {
-            c as char
+        row.push(if c < 128 && ((c as u8).is_ascii_graphic() || c == 32) {
+            (c as u8) as char
         } else {
             '?'
         });

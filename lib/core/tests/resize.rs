@@ -7,6 +7,7 @@
 //! corner and its far edges follow the desktop's - and that is what this is.
 
 use owlosui_core::{Buffer, Event, Kind, Rect, TextView, Ui, Window};
+use owlosui_core::cell::{glyphs, Glyph};
 
 fn settle(ui: &mut Ui) {
     let r = ui.rect(ui.root());
@@ -17,7 +18,7 @@ fn settle(ui: &mut Ui) {
 fn editor(ui: &mut Ui, r: Rect) -> owlosui_core::ViewId {
     let root = ui.root();
     let w = ui.insert(root, r, Kind::Window(Window::new("NOTES.TXT")));
-    ui.insert(w, Rect::default(), Kind::Text(TextView::new(vec![b"x".to_vec()])));
+    ui.insert(w, Rect::default(), Kind::Text(TextView::new(vec![glyphs("x")])));
     w
 }
 
@@ -59,7 +60,7 @@ fn a_sliver_and_back_loses_nothing_that_can_be_kept() {
     let mut buf = Buffer::new(80, 25);
     ui.draw(&mut buf);
     let rows: Vec<String> = (0..25)
-        .map(|y| (0..80).map(|x| buf.get(x, y).unwrap().ch as char).collect())
+        .map(|y| (0..80).map(|x| buf.get(x, y).unwrap().to_char()).collect())
         .collect();
     assert!(
         rows.iter().any(|r| r.contains("NOTES")),

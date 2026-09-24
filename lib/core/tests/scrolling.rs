@@ -6,6 +6,7 @@
 //! cells the drawing puts the arrows and the marker in.
 
 use owlosui_core::{Button, Event, Kind, Mouse, MouseKind, Rect, TextView, Ui, Window};
+use owlosui_core::cell::{glyphs, Glyph};
 
 /// A window at (5,4) 55x15 holding 100 lines of 100 columns.
 ///
@@ -19,7 +20,7 @@ fn window() -> Ui {
     let mut w = Window::new("Scrolling");
     w.footer = String::new();
     let wid = ui.insert(root, Rect::new(5, 4, 55, 15), Kind::Window(w));
-    let lines: Vec<Vec<u8>> = (0..100).map(|_| vec![b'x'; 100]).collect();
+    let lines: Vec<Vec<Glyph>> = (0..100).map(|_| vec![b'x' as Glyph; 100]).collect();
     ui.insert(wid, Rect::new(0, 0, 53, 13), Kind::Text(TextView::new(lines)));
     ui
 }

@@ -129,6 +129,11 @@ pub struct ListBox {
     pub top: i16,
     pub focused: bool,
     rows: i16,
+    /// Insert marks an item and moves down, the way Norton Commander marked
+    /// files. Off by default: a list that answers a question has one
+    /// answer, and a mark on it would be a second one.
+    pub multi: bool,
+    marked: Vec<bool>,
 }
 
 impl ListBox {
@@ -139,7 +144,31 @@ impl ListBox {
             top: 0,
             focused: false,
             rows: 1,
+            multi: false,
+            marked: Vec::new(),
         }
+    }
+
+    /// Mark or unmark the current item and step to the next, so that
+    /// holding Insert marks a run. Nothing happens on a single-choice list.
+    pub fn toggle_mark(&mut self) {
+        if !self.multi || self.items.is_empty() {
+            return;
+        }
+        if self.marked.len() != self.items.len() {
+            self.marked.resize(self.items.len(), false);
+        }
+        self.marked[self.current] = !self.marked[self.current];
+        self.step(1);
+    }
+
+    pub fn is_marked(&self, ix: usize) -> bool {
+        self.marked.get(ix).copied().unwrap_or(false)
+    }
+
+    /// The marked items, in order. Empty on a single-choice list.
+    pub fn marked(&self) -> Vec<usize> {
+        (0..self.items.len()).filter(|&i| self.is_marked(i)).collect()
     }
 
     pub fn set_rows(&mut self, rows: i16) {
@@ -210,5 +239,77 @@ impl StaticText {
             out.push(cur);
         }
         out
+    }
+}
+
+/// Words with a hotkey, standing beside the control they name.
+///
+/// `~N~ame:` next to an input line means Alt+N puts the caret there, and a
+/// click on the words does the same. Turbo Vision's `TLabel` was the
+/// difference between a dialog you could drive blind and one you had to
+/// Tab through counting; it costs one field, the handle of the control.
+pub struct Label {
+    pub text: String,
+    pub target: Option<crate::ui::ViewId>,
+}
+
+impl Label {
+    pub fn new(text: &str, target: Option<crate::ui::ViewId>) -> Self {
+        Label {
+            text: text.into(),
+            target,
+        }
+    }
+
+    pub fn label(&self) -> String {
+        self.text.replace('~', "")
+    }
+
+    pub fn hotkey(&self) -> Option<char> {
+        let mut it = self.text.split('~');
+        it.next()?;
+        it.next()?.chars().next().map(|c| c.to_ascii_lowercase())
+    }
+
+    pub fn hotkey_at(&self) -> Option<usize> {
+        self.text.find('~').map(|i| self.text[..i].chars().count())
+    }
+}
+
+/// A bar that fills up: copying, searching, waiting.
+///
+/// `value` of `max`, drawn as `█` for what is done and `░` for what is not,
+/// with the percentage at the right if there is room for it. The program
+/// sets the value; nothing here counts. Turbo Vision never had one, and
+/// every program that needed one drew a row of blocks by hand - which is
+/// exactly the case for it being here.
+pub struct Progress {
+    pub value: u32,
+    pub max: u32,
+    /// Show `42%` at the right end.
+    pub percent: bool,
+}
+
+impl Progress {
+    pub fn new(max: u32) -> Self {
+        Progress {
+            value: 0,
+            max: max.max(1),
+            percent: true,
+        }
+    }
+
+    pub fn set(&mut self, value: u32) {
+        self.value = value.min(self.max);
+    }
+
+    /// How many of `width` cells are filled.
+    pub fn filled(&self, width: i16) -> i16 {
+        let w = width.max(0) as u64;
+        ((self.value as u64 * w) / self.max as u64) as i16
+    }
+
+    pub fn percent_text(&self) -> String {
+        format!("{}%", (self.value as u64 * 100 / self.max as u64).min(100))
     }
 }

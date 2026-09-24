@@ -19,7 +19,7 @@ pub struct InputLine {
     pub label: String,
     pub text: String,
     /// Caret position, counted in characters.
-    cursor: usize,
+    pub cursor: usize,
     pub focused: bool,
     pub max: usize,
     /// Set when Enter was pressed. What that means is the owner's business.
@@ -68,7 +68,7 @@ impl InputLine {
     /// depending on how often you looked. The rule is simple enough not to
     /// need memory: the caret is always in sight, and a path too long for its
     /// field shows its tail — which is the end you were typing.
-    fn left(&self, width: i16) -> usize {
+    pub fn left(&self, width: i16) -> usize {
         let w = self.width(width);
         self.cursor.saturating_sub(w.saturating_sub(1))
     }

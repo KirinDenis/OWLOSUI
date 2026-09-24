@@ -136,6 +136,10 @@ internal static class Win32
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern IntPtr GetStdHandle(int nStdHandle);
 
+    /// <summary>The OEM code page of the system locale - what a DOS window on this machine runs in.</summary>
+    [DllImport("kernel32.dll")]
+    public static extern uint GetOEMCP();
+
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
 

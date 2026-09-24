@@ -8,7 +8,7 @@
 //! itself before the boundary exists.
 
 use crate::buffer::Buffer;
-use crate::cell::glyph;
+use crate::cell::{attr, attr_bg, attr_fg, glyph, Glyph};
 use crate::event::{Button, Event, Key, Mouse, MouseKind};
 use crate::geom::{Point, Rect};
 use crate::files::{FileKind, FileList};
@@ -178,7 +178,7 @@ pub struct Ui {
     /// One clipboard for the whole tree, so text moves between views. Turbo
     /// Vision used a hidden editor for this; a list of lines does the same job
     /// without the machinery.
-    pub clipboard: Vec<Vec<u8>>,
+    pub clipboard: Vec<Vec<Glyph>>,
     /// A command chosen from a menu, waiting to be collected.
     ///
     /// The core has no callbacks and will not grow any: a call back into the
@@ -287,6 +287,17 @@ impl Ui {
         self.nodes[self.root.ix()].rect = Rect::sized(w, h);
         let kids: Vec<ViewId> = self.nodes[self.root.ix()].children.clone();
         for id in kids {
+            match &self.nodes[id.ix()].kind {
+                Kind::MenuBar(_) => {
+                    self.nodes[id.ix()].rect = Rect::new(0, 0, w, 1);
+                    continue;
+                }
+                Kind::Status(_) => {
+                    self.nodes[id.ix()].rect = Rect::new(0, h - 1, w, 1);
+                    continue;
+                }
+                _ => {}
+            }
             let Kind::Window(win) = &self.nodes[id.ix()].kind else {
                 continue;
             };
@@ -294,6 +305,11 @@ impl Ui {
             if win.is_zoomed() {
                 let full = self.work_area();
                 self.nodes[id.ix()].rect = full;
+                continue;
+            }
+            // A window that will not be resized by hand is not resized by
+            // the desktop either; if it was centred, measure re-centres it.
+            if !win.resizable {
                 continue;
             }
             let (min_w, min_h) = (win.min_w.max(6), win.min_h.max(3));
@@ -339,6 +355,9 @@ impl Ui {
             match self.nodes[c.ix()].kind {
                 Kind::MenuBar(_) => {
                     r.y += 1;
+                    r.h -= 1;
+                }
+                Kind::Status(_) => {
                     r.h -= 1;
                 }
                 _ => {}
@@ -440,6 +459,37 @@ impl Ui {
             .find(|id| f(&self.nodes[id.ix()].kind))
     }
 
+    fn status_id(&self) -> Option<ViewId> {
+        self.find_kind(|k| matches!(k, Kind::Status(_)))
+    }
+
+    fn status_command(&self, k: Key) -> Option<u16> {
+        let sid = self.status_id()?;
+        match &self.nodes[sid.ix()].kind {
+            Kind::Status(s) => s.command_for(k),
+            _ => None,
+        }
+    }
+
+    /// The control named by a label in this window whose hotkey is `c`.
+    fn label_target(&self, win: ViewId, c: char) -> Option<ViewId> {
+        let c = c.to_ascii_lowercase();
+        self.nodes[win.ix()].children.iter().find_map(|k| match &self.nodes[k.ix()].kind {
+            Kind::Label(l) if l.hotkey() == Some(c) => l.target,
+            _ => None,
+        })
+    }
+
+    /// Put the focus on one control of a window and take it off the rest.
+    pub fn focus_on(&mut self, win: ViewId, target: ViewId) {
+        if !self.is_alive(target) {
+            return;
+        }
+        for c in self.focus_chain(win) {
+            self.set_view_focus(c, c == target);
+        }
+    }
+
     fn menu_bar_id(&self) -> Option<ViewId> {
         self.find_kind(|k| matches!(k, Kind::MenuBar(_)))
     }
@@ -454,8 +504,60 @@ impl Ui {
         self.menu_box_id()
     }
 
+    /// The panel on top: the one keys go to. With a submenu open that is
+    /// the submenu; its parent panel is still on the screen underneath.
     fn menu_box_id(&self) -> Option<ViewId> {
-        self.find_kind(|k| matches!(k, Kind::MenuBox(_)))
+        self.menu_boxes().last().copied()
+    }
+
+    /// Every open panel, bottom to top.
+    fn menu_boxes(&self) -> Vec<ViewId> {
+        self.nodes[self.root.ix()]
+            .children
+            .iter()
+            .copied()
+            .filter(|id| matches!(self.nodes[id.ix()].kind, Kind::MenuBox(_)))
+            .collect()
+    }
+
+    /// Close the topmost panel only. Left in a submenu, or Escape: the
+    /// panel it came from is still there to go on choosing from.
+    fn close_top_menu(&mut self) {
+        if let Some(mb) = self.menu_box_id() {
+            self.close(mb);
+        }
+        if self.menu_box_id().is_none() {
+            if let Some(bar) = self.menu_bar_id() {
+                if let Kind::MenuBar(m) = &mut self.nodes[bar.ix()].kind {
+                    m.open = None;
+                }
+            }
+        }
+    }
+
+    /// Open the submenu of an item, beside its panel, its first item on the
+    /// row of the item it came from - which is where Turbo Vision put it.
+    fn open_submenu(&mut self, mb: ViewId, ix: usize) {
+        let items = match &self.nodes[mb.ix()].kind {
+            Kind::MenuBox(m) => match m.items.get(ix) {
+                Some(it) if !it.items.is_empty() => clone_items(&it.items),
+                _ => return,
+            },
+            _ => return,
+        };
+        // Whatever was open above this panel goes first.
+        while self.menu_box_id().is_some_and(|top| top != mb) {
+            self.close_top_menu();
+        }
+        let mut b = MenuBox::new(items);
+        b.parent = None;
+        let (w, h) = (b.width(), b.height());
+        let pr = self.abs_rect(mb);
+        let screen = self.nodes[self.root.ix()].rect;
+        let x = (pr.right() - 1).min((screen.w - w).max(0));
+        let y = (pr.y + ix as i16).min((screen.h - h).max(0));
+        let root = self.root;
+        self.insert(root, Rect::new(x, y, w, h), Kind::MenuBox(b));
     }
 
     /// Drop a panel out of the bar. Closing whatever was open first means the
@@ -487,7 +589,7 @@ impl Ui {
     }
 
     pub fn close_menu(&mut self) {
-        if let Some(mb) = self.menu_box_id() {
+        for mb in self.menu_boxes() {
             self.close(mb);
         }
         if let Some(bar) = self.menu_bar_id() {
@@ -518,7 +620,17 @@ impl Ui {
         let Some(it) = m.items.get(m.current) else {
             return;
         };
-        if !it.selectable() || it.cmd == 0 {
+        if !it.selectable() {
+            return;
+        }
+        // A submenu opens at once: there is nothing to show chosen, only
+        // more to choose from.
+        if !it.items.is_empty() {
+            let ix = m.current;
+            self.open_submenu(mb, ix);
+            return;
+        }
+        if it.cmd == 0 {
             return;
         }
         self.pending_pick = Some((mb, it.cmd));
@@ -532,7 +644,15 @@ impl Ui {
         let Some(it) = m.items.get(m.current) else {
             return;
         };
-        if !it.selectable() || it.cmd == 0 {
+        if !it.selectable() {
+            return;
+        }
+        if !it.items.is_empty() {
+            let ix = m.current;
+            self.open_submenu(mb, ix);
+            return;
+        }
+        if it.cmd == 0 {
             return;
         }
         let cmd = it.cmd;
@@ -540,7 +660,13 @@ impl Ui {
         self.command = Some(cmd);
     }
 
+    /// Close a view and everything inside it. A handle to a child of a
+    /// closed window must say it is dead, or `is_alive` is not worth asking.
     pub fn close(&mut self, id: ViewId) {
+        let kids = std::mem::take(&mut self.nodes[id.ix()].children);
+        for k in kids {
+            self.close(k);
+        }
         self.nodes[id.ix()].alive = false;
         if let Some(parent) = self.nodes[id.ix()].parent {
             self.nodes[parent.ix()].children.retain(|k| *k != id);
@@ -764,7 +890,10 @@ impl Ui {
             Kind::Window(w) => self.draw_window(id, w, abs, buf, clip),
             Kind::Text(t) => self.draw_text(t, abs, buf, clip, wc),
             Kind::Html(h) => self.draw_html(h, abs, buf, clip, wc),
-            Kind::Files(f) => self.draw_files(f, abs, buf, clip, wc, self.foot_taken(id)),
+            Kind::Files(f) => {
+                let active = self.parent_active(id);
+                self.draw_files(f, abs, buf, clip, wc, self.foot_taken(id), active)
+            }
             Kind::Input(i) => draw_input(i, abs, buf, clip, &self.palette),
             Kind::Buttons(b) => self.draw_buttons(b, abs, buf, clip, wc),
             Kind::Hex(h) => self.draw_hex(h, abs, buf, clip),
@@ -772,6 +901,9 @@ impl Ui {
             Kind::List(l) => self.draw_list(l, abs, buf, clip),
             Kind::Static(t) => self.draw_static(t, abs, buf, clip),
             Kind::Tree(t) => self.draw_tree(t, abs, buf, clip),
+            Kind::Status(s) => self.draw_status(s, abs, buf, clip),
+            Kind::Label(l) => self.draw_label(l, abs, buf, clip),
+            Kind::Progress(pr) => self.draw_progress(pr, abs, buf, clip, wc),
             Kind::MenuBar(m) => self.draw_menu_bar(m, abs, buf, clip),
             Kind::MenuBox(m) => self.draw_menu_box(m, abs, buf, clip, parent_clip),
         }
@@ -882,7 +1014,7 @@ impl Ui {
                 let zx = abs.right() - 5;
                 let icon = if w.is_zoomed() { 0x19 } else { 0x18 }; // ↓ / ↑
                 buf.put(zx, abs.y, b'[', fa, clip);
-                buf.put(zx + 1, abs.y, icon, p.handle, clip);
+                buf.put(zx + 1, abs.y, icon as Glyph, p.handle, clip);
                 buf.put(zx + 2, abs.y, b']', fa, clip);
             }
         }
@@ -931,11 +1063,6 @@ impl Ui {
             buf.hline(h.start + 1, y, h.track, glyph::MEDIUM_SHADE, p.scroll, clip);
             buf.put(h.thumb_at(), y, glyph::SQUARE, p.scroll, clip);
         }
-    }
-
-    fn scrolling_child_or_files(&self, id: ViewId) -> Option<ViewId> {
-        let first = *self.nodes[id.ix()].children.first()?;
-        matches!(self.nodes[first.ix()].kind, Kind::Files(_)).then_some(first)
     }
 
     /// The first child, if it is an editable text view.
@@ -1101,6 +1228,7 @@ impl Ui {
         match k.code {
             K::Down => f.step(1),
             K::Up => f.step(-1),
+            K::Insert => f.toggle_mark(),
             // Left and Right move by a whole column, because the names flow
             // downward. Moving by one entry would look like the cursor
             // jumping about at random.
@@ -1212,6 +1340,16 @@ impl Ui {
     /// "these are two regions" and a margin says "this is a thing on top of
     /// that thing", which is the truer description and the one the eye reads
     /// without being taught.
+    /// Whether the window a view sits in is the active one. A cursor bar
+    /// in a window nobody is working in is a second cursor, and two panels
+    /// each with one is how a person deletes from the wrong side.
+    fn parent_active(&self, id: ViewId) -> bool {
+        match self.nodes[id.ix()].parent {
+            Some(p) => self.active_window() == Some(p),
+            None => true,
+        }
+    }
+
     fn draw_files(
         &self,
         f: &FileList,
@@ -1220,15 +1358,18 @@ impl Ui {
         clip: Rect,
         wc: &crate::palette::WinColors,
         foot_taken: i16,
+        active: bool,
     ) {
         let p = &self.palette;
         buf.fill(abs, b' ', wc.body, clip);
 
-        draw_input(&f.path, field_rect(abs), buf, clip, p);
+        if f.path_line {
+            draw_input(&f.path, field_rect(abs), buf, clip, p);
+        }
 
         let colw = f.column_width();
         let rows = f.rows();
-        let list = Rect::new(abs.x + 1, abs.y + 2, abs.w - 2, rows);
+        let list = Rect::new(abs.x + 1, abs.y + f.top(), abs.w - 2, rows);
         buf.fill(list, b' ', p.file_plain, clip);
 
         // Every divider, every time — not only the ones with names beside
@@ -1246,12 +1387,19 @@ impl Ui {
                 let ix = ((f.left + col) * rows + row) as usize;
                 let Some(e) = f.at(ix) else { continue };
                 let y = list.y + row;
-                let a = if ix == f.current {
-                    if f.focus == crate::files::Focus::List {
+                let marked = f.is_marked(ix);
+                // The cursor bar is drawn in the active window only: solid
+                // while the list has the focus, dimmed while the path line
+                // has it, gone when the window itself is behind another.
+                let a = if ix == f.current && active {
+                    let sel = if f.focus == crate::files::Focus::List {
                         p.file_selected
                     } else {
                         p.file_selected_passive
-                    }
+                    };
+                    if marked { attr(attr_fg(p.list_marked), attr_bg(sel)) } else { sel }
+                } else if marked {
+                    p.list_marked
                 } else {
                     match FileKind::of(e) {
                         FileKind::Dim => p.file_dim,
@@ -1275,29 +1423,30 @@ impl Ui {
         let w = (abs.w - 2 - foot_taken).max(1);
         let h = f.foot_rows();
         let foot = Rect::new(abs.x + 1, abs.bottom() - h, w, h);
+        // The foot sits on the window, so it takes the window's ground: the
+        // measured black-on-grey of a dialog, and on a blue document window
+        // white on blue, with the error in light red. A grey strip on a blue
+        // panel was a piece of dialog that had wandered in.
+        let ground = attr_bg(wc.body);
+        let (info, error) = if ground == crate::cell::Color::LightGray {
+            (p.file_info, p.file_error)
+        } else {
+            (
+                attr(crate::cell::Color::White, ground),
+                attr(crate::cell::Color::LightRed, ground),
+            )
+        };
         match &f.error {
             Some(_) => {
-                buf.fill(foot, b' ', p.file_error, clip);
+                buf.fill(foot, b' ', error, clip);
                 for (i, line) in f.error_lines(w).iter().take(h as usize).enumerate() {
-                    buf.text(foot.x, foot.y + i as i16, line, p.file_error, clip);
+                    buf.text(foot.x, foot.y + i as i16, line, error, clip);
                 }
             }
             None => {
-                buf.fill(foot, b' ', p.file_info, clip);
-                buf.text(
-                    foot.x,
-                    foot.y,
-                    &trim(f.path_text(), w as usize),
-                    p.file_info,
-                    clip,
-                );
-                buf.text(
-                    foot.x,
-                    foot.y + 1,
-                    &trim(&f.info(), w as usize),
-                    p.file_info,
-                    clip,
-                );
+                buf.fill(foot, b' ', info, clip);
+                buf.text(foot.x, foot.y, &trim(f.path_text(), w as usize), info, clip);
+                buf.text(foot.x, foot.y + 1, &trim(&f.info(), w as usize), info, clip);
             }
         }
     }
@@ -1367,7 +1516,7 @@ impl Ui {
                 (_, false) => (p.ctl_disabled, p.ctl_disabled),
                 _ => (p.ctl, p.ctl_key),
             };
-            let m = c.marker(i);
+            let m: Vec<Glyph> = c.marker(i).iter().map(|&b| b as Glyph).collect();
             buf.raw(abs.x, y, &m, a, clip);
             let label = c.label(i);
             buf.fill(Rect::new(abs.x + 4, y, abs.w - 4, 1), b' ', a, clip);
@@ -1419,12 +1568,14 @@ impl Ui {
         let w = self.draw_inner_scroll(abs, l.top, l.items.len() as i16, abs.h, buf, clip);
         for row in 0..abs.h {
             let Some(ix) = l.at_row(row) else { break };
+            let marked = l.is_marked(ix);
             let a = if ix == l.current {
-                if l.focused {
-                    p.list_selected
-                } else {
-                    p.list_selected_passive
-                }
+                let sel = if l.focused { p.list_selected } else { p.list_selected_passive };
+                // A marked item under the cursor keeps its yellow: the mark
+                // is the more important thing to see.
+                if marked { attr(attr_fg(p.list_marked), attr_bg(sel)) } else { sel }
+            } else if marked {
+                p.list_marked
             } else {
                 p.list
             };
@@ -1513,8 +1664,8 @@ impl Ui {
                 // one-cell-tall button is as thick as the button and reads as
                 // a second button; `▀` puts the dark at the top of the row
                 // below, hugging the edge, which is what a shadow looks like.
-                buf.hline(x + 1, y + 1, w, 0xDF, shadow, clip);
-                buf.vline(x + w, y, 1, 0xDD, shadow, clip);
+                buf.hline(x + 1, y + 1, w, 0xDF as Glyph, shadow, clip);
+                buf.vline(x + w, y, 1, 0xDD as Glyph, shadow, clip);
             }
 
             buf.fill(Rect::new(x, y, w, 1), b' ', a, clip);
@@ -1529,9 +1680,56 @@ impl Ui {
                 }
             }
             if b.default {
-                buf.put(x, y, 0x10, a, clip); // >
-                buf.put(x + w - 1, y, 0x11, a, clip); // <
+                buf.put(x, y, 0x10 as Glyph, a, clip); // >
+                buf.put(x + w - 1, y, 0x11 as Glyph, a, clip); // <
             }
+        }
+    }
+
+    fn draw_status(&self, s: &crate::status::StatusLine, abs: Rect, buf: &mut Buffer, clip: Rect) {
+        let p = &self.palette;
+        buf.fill(abs, b' ', p.status, clip);
+        for (i, it) in s.items.iter().enumerate() {
+            let x = abs.x + s.item_x(i);
+            let a = if it.enabled { p.status } else { p.status_disabled };
+            let label = it.label();
+            buf.text(x, abs.y, &label, a, clip);
+            if it.enabled {
+                if let Some((start, len)) = it.key_span() {
+                    let part: String = label.chars().skip(start).take(len).collect();
+                    buf.text(x + start as i16, abs.y, &part, p.status_key, clip);
+                }
+            }
+        }
+    }
+
+    fn draw_label(&self, l: &crate::controls::Label, abs: Rect, buf: &mut Buffer, clip: Rect) {
+        let p = &self.palette;
+        // Lit when the control it names has the focus - the eye then finds
+        // the caret by finding the bright words.
+        let lit = l.target.is_some() && self.focused() == l.target;
+        let a = if lit { p.label_active } else { p.label };
+        let label = l.label();
+        buf.fill(abs, b' ', a, clip);
+        buf.text(abs.x, abs.y, &label, a, clip);
+        if let Some(h) = l.hotkey_at() {
+            if let Some(c) = label.chars().nth(h) {
+                buf.put(abs.x + h as i16, abs.y, c as u8, p.label_key, clip);
+            }
+        }
+    }
+
+    fn draw_progress(&self, pr: &crate::controls::Progress, abs: Rect, buf: &mut Buffer, clip: Rect, wc: &WinColors) {
+        let a = Palette::progress_on(wc.body);
+        // Room for ` 100%` at the right, if asked for and if it fits.
+        let text = if pr.percent { pr.percent_text() } else { String::new() };
+        let tw = if text.is_empty() { 0 } else { text.chars().count() as i16 + 1 };
+        let bar_w = if abs.w - tw >= 4 { abs.w - tw } else { abs.w };
+        let done = pr.filled(bar_w);
+        buf.hline(abs.x, abs.y, done, glyph::FULL_BLOCK, a, clip);
+        buf.hline(abs.x + done, abs.y, bar_w - done, glyph::LIGHT_SHADE, a, clip);
+        if bar_w < abs.w {
+            buf.text(abs.x + bar_w + 1, abs.y, &text, wc.body, clip);
         }
     }
 
@@ -1593,8 +1791,8 @@ impl Ui {
             let y = abs.y + 1 + i as i16;
             if it.separator {
                 buf.hline(ix0, y, iw, glyph::SL_H, p.menu, clip);
-                buf.put(fx, y, 0xC3, p.menu, clip); // ├
-                buf.put(fx + fw - 1, y, 0xB4, p.menu, clip); // ┤
+                buf.put(fx, y, 0xC3 as Glyph, p.menu, clip); // ├
+                buf.put(fx + fw - 1, y, 0xB4 as Glyph, p.menu, clip); // ┤
                 continue;
             }
             let sel = i == m.current && it.enabled;
@@ -1604,6 +1802,9 @@ impl Ui {
                 _ => (p.menu, p.menu_key),
             };
             buf.fill(Rect::new(ix0, y, iw, 1), b' ', a, clip);
+            if !it.items.is_empty() {
+                buf.put(ix0 + iw - 1, y, 0x10 as Glyph, a, clip); // ► there is more
+            }
             let label = it.label();
             buf.text(ix0 + 1, y, &label, a, clip);
             if it.enabled {
@@ -1612,6 +1813,9 @@ impl Ui {
                         buf.put(ix0 + 1 + h as i16, y, c as u8, ka, clip);
                     }
                 }
+            }
+            if it.checked {
+                buf.put(ix0, y, 0xFB as Glyph, a, clip); // √ in the column before the label
             }
             if !it.shortcut.is_empty() {
                 let n = it.shortcut.chars().count() as i16;
@@ -1740,21 +1944,30 @@ impl Ui {
                 // picks an item, outside it puts the menu away. A click that
                 // both closed a menu and did something behind it would be one
                 // click doing two things the user only asked for once.
-                if let Some(mb) = self.menu_box_id() {
-                    let abs = self.abs_rect(mb);
-                    if abs.contains(p) {
-                        let hit = match &self.nodes[mb.ix()].kind {
-                            Kind::MenuBox(m) => m.item_at(p.y - abs.y),
-                            _ => None,
-                        };
-                        if let Some(ix) = hit {
-                            if let Kind::MenuBox(m) = &mut self.nodes[mb.ix()].kind {
-                                m.current = ix;
+                let boxes = self.menu_boxes();
+                if !boxes.is_empty() {
+                    // The topmost panel under the pointer gets the click. A
+                    // click on a parent panel with a submenu open closes the
+                    // submenu and chooses there, as it would in the original.
+                    let hit_box = boxes.iter().rev().copied().find(|b| self.abs_rect(*b).contains(p));
+                    match hit_box {
+                        Some(mb) => {
+                            while self.menu_box_id().is_some_and(|top| top != mb) {
+                                self.close_top_menu();
                             }
-                            self.pick_menu_slowly(mb);
+                            let abs = self.abs_rect(mb);
+                            let hit = match &self.nodes[mb.ix()].kind {
+                                Kind::MenuBox(m) => m.item_at(p.y - abs.y),
+                                _ => None,
+                            };
+                            if let Some(ix) = hit {
+                                if let Kind::MenuBox(m) = &mut self.nodes[mb.ix()].kind {
+                                    m.current = ix;
+                                }
+                                self.pick_menu_slowly(mb);
+                            }
                         }
-                    } else {
-                        self.close_menu();
+                        None => self.close_menu(),
                     }
                     return;
                 }
@@ -1773,14 +1986,40 @@ impl Ui {
                     }
                 }
 
+                // The status line: a click on an item is its command.
+                if let Some(sid) = self.status_id() {
+                    let abs = self.abs_rect(sid);
+                    if abs.contains(p) {
+                        if let Kind::Status(s) = &self.nodes[sid.ix()].kind {
+                            if let Some(ix) = s.item_at(p.x - abs.x) {
+                                let it = &s.items[ix];
+                                if it.enabled && it.cmd != 0 {
+                                    self.command = Some(it.cmd);
+                                }
+                            }
+                        }
+                        return;
+                    }
+                }
+
                 let Some(id) = self.window_at(p) else { return };
+                // The close and zoom boxes, and the resize grip, are drawn
+                // on the active window only, so on an inactive one there is
+                // nothing there to click: the click activates it, and the
+                // next click is the one that reaches a box. Deciding by the
+                // coordinates alone closed windows nobody had looked at yet.
+                let was_active = self.active_window() == Some(id);
                 self.activate(id);
                 let abs = self.abs_rect(id);
                 let Kind::Window(w) = &self.nodes[id.ix()].kind else {
                     return;
                 };
-                let (closable, zoomable, movable, resizable) =
-                    (w.closable, w.zoomable, w.movable, w.resizable);
+                let (closable, zoomable, movable, resizable) = (
+                    w.closable && was_active,
+                    w.zoomable && was_active,
+                    w.movable,
+                    w.resizable && was_active,
+                );
 
                 // Frame hits first, body second.
                 if p.y == abs.y {
@@ -1861,6 +2100,19 @@ impl Ui {
                     }
                 }
 
+                // A label: the click goes to the control it names.
+                let labelled = self.nodes[id.ix()].children.iter().copied().find(|c| {
+                    matches!(self.nodes[c.ix()].kind, Kind::Label(_)) && self.abs_rect(*c).contains(p)
+                });
+                if let Some(l) = labelled {
+                    if let Kind::Label(lb) = &self.nodes[l.ix()].kind {
+                        if let Some(target) = lb.target {
+                            self.focus_on(id, target);
+                        }
+                    }
+                    return;
+                }
+
                 // Anything in the focus ring that the pointer landed on. The
                 // click both moves the focus there and does whatever a click
                 // means to that control, because those are one action as far
@@ -1873,19 +2125,6 @@ impl Ui {
                     }
                     self.control_click(hit, p);
                     return;
-                }
-
-                // A name under the pointer.
-                if let Some(fid) = self.scrolling_child_or_files(id) {
-                    let inner = self.abs_rect(fid);
-                    if inner.contains(p) {
-                        if let Kind::Files(f) = &mut self.nodes[fid.ix()].kind {
-                            if let Some(ix) = f.at_point(p.x - inner.x, p.y - inner.y) {
-                                f.current = ix;
-                            }
-                            return;
-                        }
-                    }
                 }
 
                 // A link under the pointer. One press both focuses and
@@ -2018,6 +2257,7 @@ impl Ui {
             (Kind::Text(t), Axis::Vertical) => t.top,
             (Kind::Text(t), Axis::Horizontal) => t.left,
             (Kind::Html(h), Axis::Vertical) => h.top,
+            (Kind::Hex(h), Axis::Vertical) => h.top,
             (Kind::Files(f), Axis::Horizontal) => f.overflow().0,
             _ => 0,
         }
@@ -2036,7 +2276,16 @@ impl Ui {
         }
         if let Kind::Html(h) = &mut self.nodes[tid.ix()].kind {
             if axis == Axis::Vertical {
-                h.top = pos.max(0);
+                // Through `scroll`, which knows where the page ends.
+                let d = pos.max(0) - h.top;
+                h.scroll(d, page);
+            }
+            return;
+        }
+        if let Kind::Hex(h) = &mut self.nodes[tid.ix()].kind {
+            if axis == Axis::Vertical {
+                let d = pos.max(0) - h.top;
+                h.scroll(d);
             }
             return;
         }
@@ -2127,6 +2376,7 @@ impl Ui {
                 t.top = (t.top + delta).clamp(0, max);
             }
             Kind::Html(h) => h.scroll(delta, page),
+            Kind::Hex(h) => h.scroll(delta),
             _ => {}
         }
     }
@@ -2157,9 +2407,32 @@ impl Ui {
             }
         }
 
+        // The status line binds keys of its own - F1, Alt-X - and turns
+        // them into commands. Not while a modal dialog is up: it is asking
+        // something, and Help over an unanswered question is the mess
+        // modality exists to prevent.
+        if self.modal().is_none() {
+            if let Some(cmd) = self.status_command(k) {
+                self.command = Some(cmd);
+                return;
+            }
+        }
+
         let Some(win) = self.active_window() else {
             return;
         };
+
+        // A label's hotkey puts the focus on the control it names. Before
+        // the buttons, so that ~N~ame beside a field wins over a ~N~ext
+        // button: the field is what the person is looking at.
+        if k.mods.alt {
+            if let crate::event::KeyCode::Char(c) = k.code {
+                if let Some(target) = self.label_target(win, c) {
+                    self.focus_on(win, target);
+                    return;
+                }
+            }
+        }
 
         // A button's hotkey is Alt and its letter, and it works wherever the
         // focus happens to be. That is what makes it a shortcut rather than
@@ -2198,7 +2471,10 @@ impl Ui {
 
         // An ordinary dialog: Tab walks the ring, Escape presses the last
         // button, and everything else goes to whatever is holding the focus.
-        if self.focus_chain(win).len() > 1 || self.button_row(win).is_some() {
+        // Any window with something focusable in it, not only one with
+        // several: a window holding a single list and no buttons still has
+        // to give that list its keys, and it used to give them to nobody.
+        if !self.focus_chain(win).is_empty() || self.button_row(win).is_some() {
             use crate::event::KeyCode as K;
             if k.code == K::Tab || k.code == K::BackTab {
                 self.advance_focus(k.code == K::BackTab);
@@ -2269,21 +2545,29 @@ impl Ui {
             Some(row) => matches!(&self.nodes[row.ix()].kind, Kind::Buttons(b) if b.focused),
             None => false,
         };
-        let here = if on_buttons {
-            2
+        let (here, has_path) = if on_buttons {
+            (2, true)
         } else {
             match &self.nodes[files.ix()].kind {
-                Kind::Files(f) if f.focus == Focus::Path => 0,
-                _ => 1,
+                Kind::Files(f) if f.focus == Focus::Path => (0, true),
+                Kind::Files(f) => (1, f.path_line),
+                _ => (1, true),
             }
         };
 
-        let n = if has_buttons { 3 } else { 2 };
-        let next = if back {
-            (here + n - 1) % n
-        } else {
-            (here + 1) % n
-        };
+        // The stops: path line (if there is one), names, buttons (if any).
+        // Tab walks them in that order and wraps.
+        let mut stops: Vec<usize> = Vec::new();
+        if has_path {
+            stops.push(0);
+        }
+        stops.push(1);
+        if has_buttons {
+            stops.push(2);
+        }
+        let at = stops.iter().position(|&s| s == here).unwrap_or(0);
+        let n = stops.len();
+        let next = stops[if back { (at + n - 1) % n } else { (at + 1) % n }];
 
         if let Some(row) = self.button_row(win) {
             if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
@@ -2476,7 +2760,7 @@ impl Ui {
         };
 
         match k.code {
-            K::Esc => self.close_menu(),
+            K::Esc => self.close_top_menu(),
             K::Enter => self.pick_menu(mb),
             K::Up | K::Down => {
                 let d = if k.code == K::Up { -1 } else { 1 };
@@ -2485,10 +2769,33 @@ impl Ui {
                 }
             }
             K::Left | K::Right => {
-                if let (Some(p), n) = (parent, self.bar_len()) {
-                    if n > 0 {
-                        let d = if k.code == K::Left { n - 1 } else { 1 };
-                        self.open_menu((p + d) % n);
+                // Right on a submenu item opens it; Left in a submenu
+                // closes it. Otherwise both walk the bar - from whichever
+                // panel in the chain came from the bar, so Right at the end
+                // of a submenu still reaches the next menu along.
+                let is_sub = parent.is_none() && self.menu_boxes().len() > 1;
+                let (cur, has_sub) = match &self.nodes[mb.ix()].kind {
+                    Kind::MenuBox(m) => (
+                        m.current,
+                        m.items.get(m.current).is_some_and(|i| !i.items.is_empty()),
+                    ),
+                    _ => (0, false),
+                };
+                if k.code == K::Right && has_sub {
+                    self.open_submenu(mb, cur);
+                } else if k.code == K::Left && is_sub {
+                    self.close_top_menu();
+                } else {
+                    let bottom = self.menu_boxes().first().copied();
+                    let from_bar = bottom.and_then(|b| match &self.nodes[b.ix()].kind {
+                        Kind::MenuBox(m) => m.parent,
+                        _ => None,
+                    });
+                    if let (Some(p), n) = (from_bar, self.bar_len()) {
+                        if n > 0 {
+                            let d = if k.code == K::Left { n - 1 } else { 1 };
+                            self.open_menu((p + d) % n);
+                        }
                     }
                 }
             }
@@ -2550,8 +2857,27 @@ impl Ui {
                 }
             }
             Kind::Input(i) => {
-                let x = (col - i.field_x()).max(0) as usize;
+                // Into the text, not into the field: the field may be
+                // scrolled, and the column under the pointer is that many
+                // characters past the first one showing.
+                let x = i.left(r.w) + (col - i.field_x()).max(0) as usize;
                 i.set_cursor(x);
+            }
+            Kind::Files(f) => {
+                // Row 0 is the path line, one column in from the panel's
+                // edge (`field_rect`); the names start on row 2 - or on row
+                // 0 in a panel without a path line.
+                if f.path_line && row == 0 {
+                    f.focus = crate::files::Focus::Path;
+                    f.path.focused = true;
+                    let field_w = (r.w - 2).max(1);
+                    let x = f.path.left(field_w) + (col - 1 - f.path.field_x()).max(0) as usize;
+                    f.path.set_cursor(x);
+                } else if let Some(ix) = f.at_point(col, row) {
+                    f.current = ix;
+                    f.focus = crate::files::Focus::List;
+                    f.path.focused = false;
+                }
             }
             Kind::Text(t) => {
                 t.cur.y = (t.top + row).clamp(0, (t.line_count() - 1).max(0));
@@ -2591,6 +2917,7 @@ impl Ui {
             Kind::List(l) => match k.code {
                 K::Up => l.step(-1),
                 K::Down => l.step(1),
+                K::Insert => l.toggle_mark(),
                 K::PageUp => l.step(-page),
                 K::PageDown => l.step(page),
                 K::Home => l.step(-(l.items.len() as i16)),

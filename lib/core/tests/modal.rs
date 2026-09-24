@@ -7,6 +7,7 @@
 //! each of them is a line somebody could delete next month without any of the
 //! others complaining — which is what these tests are for.
 
+use owlosui_core::cell::{glyphs, Glyph};
 use owlosui_core::{
     Button, Event, Key, KeyCode, Kind, MenuBar, MenuItem, Mods, Mouse, MouseKind, PushButton,
     ButtonRow, Rect, TextView, Ui, ViewId, Window,
@@ -33,7 +34,7 @@ fn app() -> (Ui, ViewId, ViewId) {
     let text = ui.insert(
         win,
         Rect::default(),
-        Kind::Text(TextView::new(vec![b"hello".to_vec(), b"there".to_vec()])),
+        Kind::Text(TextView::new(vec![glyphs("hello"), glyphs("there")])),
     );
     settle(&mut ui);
     (ui, win, text)
@@ -249,5 +250,48 @@ fn the_default_button_answers_it() {
     let (mut ui, _, _) = app();
     box_of(&mut ui);
     key(&mut ui, KeyCode::Enter, Mods::default());
+    // Down first, drawn without its shadow; the command comes on the tick.
+    assert!(ui.pick_pending());
+    assert_eq!(ui.take_pressed(), None);
+    ui.complete_pick();
+    assert_eq!(ui.take_pressed(), Some(CM_OK));
+}
+
+#[test]
+fn enter_presses_the_default_even_when_it_is_not_first() {
+    // "Yes / No" with No the default: the cursor must start on No, or the
+    // first Enter answers Yes to a question built to be safe.
+    let (mut ui, _, _) = app();
+    let row = ButtonRow::new(vec![
+        PushButton::new("~Y~es", 5),
+        PushButton::new("~N~o", 6).default(),
+    ]);
+    ui.message_box("Confirm", "Delete everything?", row);
+    settle(&mut ui);
+    key(&mut ui, KeyCode::Enter, Mods::default());
+    ui.complete_pick();
+    assert_eq!(ui.take_pressed(), Some(6), "Enter pressed Yes");
+}
+
+#[test]
+fn a_key_press_is_seen_before_it_happens() {
+    let (mut ui, _, _) = app();
+    let m = box_of(&mut ui);
+    let mut buf = owlosui_core::Buffer::new(60, 20);
+    ui.draw(&mut buf);
+    // Standing up: a `▀` shadow somewhere in the box.
+    let r = ui.rect(m);
+    let shadow = |buf: &owlosui_core::Buffer| {
+        (r.y..r.bottom()).any(|y| (r.x..r.right()).any(|x| buf.get(x, y).unwrap().ch == 0xDF))
+    };
+    assert!(shadow(&buf), "no shadow under the button to begin with");
+
+    key(&mut ui, KeyCode::Enter, Mods::default());
+    ui.draw(&mut buf);
+    assert!(!shadow(&buf), "the pressed button still casts a shadow");
+
+    ui.complete_pick();
+    ui.draw(&mut buf);
+    assert!(shadow(&buf), "the button did not come back up");
     assert_eq!(ui.take_pressed(), Some(CM_OK));
 }

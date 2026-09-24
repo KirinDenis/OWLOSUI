@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\..\lib\csharp\Owlosui.csproj" />
     <ProjectReference Include="..\01-HelloWorld\HelloWorld.csproj" />
     <ProjectReference Include="..\02-Notes\Notes.csproj" />
+    <ProjectReference Include="..\03-Commander\Commander.csproj" />
   </ItemGroup>
 
 </Project>

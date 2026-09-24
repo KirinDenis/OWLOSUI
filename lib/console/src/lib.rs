@@ -10,6 +10,7 @@
 //! `REFGEN.PAS` with the real Turbo Vision units, and the comparison between
 //! the two. See `src/bin/match.rs`.
 
+pub mod codepage;
 pub mod compare;
 pub mod cp437;
 pub mod dir;

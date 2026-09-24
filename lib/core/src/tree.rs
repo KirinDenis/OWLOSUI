@@ -209,22 +209,23 @@ impl TreeView {
     /// the sign saying whether there is more underneath.
     /// Code page bytes, not characters: the core deals in glyph indices
     /// everywhere else and a tree's elbows are no exception.
-    pub fn prefix(row: &Row) -> Vec<u8> {
-        let mut s = vec![b' '; (row.depth.max(0) * 2) as usize];
+    pub fn prefix(row: &Row) -> Vec<crate::cell::Glyph> {
+        use crate::cell::{glyph, Glyph};
+        let mut s = vec![glyph::SPACE; (row.depth.max(0) * 2) as usize];
         s.push(if row.last {
-            crate::cell::glyph::SL_BL
+            glyph::SL_BL
         } else {
-            0xC3 // ├
+            0xC3 as Glyph // ├
         });
-        s.push(crate::cell::glyph::SL_H);
+        s.push(glyph::SL_H);
         s.push(if !row.has_children {
-            b' '
+            glyph::SPACE
         } else if row.open {
-            b'-'
+            b'-' as Glyph
         } else {
-            b'+'
+            b'+' as Glyph
         });
-        s.push(b' ');
+        s.push(glyph::SPACE);
         s
     }
 }

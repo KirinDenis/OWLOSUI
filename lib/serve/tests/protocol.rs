@@ -87,6 +87,8 @@ struct Frame {
     w: i16,
     h: i16,
     cursor: (i16, i16),
+    /// "Show this, wait, then TICK": something chosen is being shown.
+    hold: bool,
     cells: Vec<u8>,
 }
 
@@ -100,7 +102,8 @@ fn frame(c: &mut Client) -> Frame {
         w,
         h,
         cursor: (cx, cy),
-        cells: b[8..].to_vec(),
+        hold: b[8] != 0,
+        cells: b[9..].to_vec(),
     }
 }
 
@@ -158,8 +161,17 @@ fn a_window_with_words_and_a_button() {
     assert!(f.row(title_row + 2).contains("Hello, world!"));
     assert!(f.row(title_row + 4).contains(" OK "));
 
-    // Enter presses the default button and TAKE reports it - once.
+    // Enter presses the default button. The frame after it says "hold":
+    // the button is drawn down and nothing has happened yet; TICK ends the
+    // moment, and TAKE reports the press - once.
     c.ok(0x30, &[2, 0, 0, 0]);
+    let f = frame(&mut c);
+    assert!(f.hold, "the frame after a key press should ask to be held");
+    let t = c.ok(0x41, &[]);
+    assert_eq!(u16::from_le_bytes([t[0], t[1]]), 0, "fired before it was seen");
+    c.ok(0x32, &[]);
+    let f = frame(&mut c);
+    assert!(!f.hold);
     let t = c.ok(0x41, &[]);
     assert_eq!(u16::from_le_bytes([t[0], t[1]]), 7);
     let t = c.ok(0x41, &[]);
@@ -216,6 +228,7 @@ fn a_message_box_is_modal_and_answers_on_escape() {
     assert!((0..20).any(|y| f.row(y).contains("Leave without saving?")));
 
     c.ok(0x30, &[2, 1, 0, 0]); // Esc
+    c.ok(0x32, &[]); // the moment it is shown pressed
     let t = c.ok(0x41, &[]);
     assert_eq!(u16::from_le_bytes([t[0], t[1]]), 2, "Escape presses the last button");
 }
@@ -459,6 +472,7 @@ fn a_resize_with_a_modal_box_up_is_survivable() {
     let f = frame(&mut c);
     assert!(find(&f, "Stay").is_some(), "the box was lost in the resizes\n{}", picture(&f));
     c.ok(0x30, &[2, 0, 0, 0]);
+    c.ok(0x32, &[]);
     let t = c.ok(0x41, &[]);
     assert_eq!(u16::from_le_bytes([t[0], t[1]]), 4);
 }
@@ -506,6 +520,179 @@ fn a_window_dragged_off_the_edge_stays_reachable() {
             picture(&h)
         );
     }
+}
+
+// ---- the first five of the missing pieces, over the wire -------------
+
+#[test]
+fn the_status_line_shows_and_binds_its_keys() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(12)].concat());
+    // F1 -> 5, Alt-X -> 6 (a character with the alt bit), and a click-only Exit.
+    c.ok(
+        0x16,
+        &[
+            vec![3],
+            u16(5).to_vec(), vec![1], u16(1).to_vec(), vec![0], s("~F1~ Help"),
+            u16(6).to_vec(), vec![0], u16(b'x' as u16).to_vec(), vec![4], s("~Alt-X~ Exit"),
+            u16(7).to_vec(), vec![0xFF], u16(0).to_vec(), vec![0], s("About"),
+        ]
+        .concat(),
+    );
+    let f = frame(&mut c);
+    assert!(f.row(11).starts_with(" F1 Help  Alt-X Exit  About"), "{:?}", f.row(11));
+
+    c.ok(0x30, &[1, 1, 0, 0]); // F1
+    let t = c.ok(0x41, &[]);
+    assert_eq!(u16::from_le_bytes([t[2], t[3]]), 5, "F1 did not become the command");
+    c.ok(0x30, &[0, b'x', 0, 4]); // Alt+X
+    let t = c.ok(0x41, &[]);
+    assert_eq!(u16::from_le_bytes([t[2], t[3]]), 6);
+
+    let (x, y) = find(&f, "About").unwrap();
+    mouse(&mut c, 0, x + 1, y);
+    mouse(&mut c, 1, x + 1, y);
+    let t = c.ok(0x41, &[]);
+    assert_eq!(u16::from_le_bytes([t[2], t[3]]), 7, "a click on the words did nothing");
+}
+
+#[test]
+fn a_label_focuses_its_field_and_a_list_takes_marks() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(20)].concat());
+    let win = id_of(&c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(0, 0, 60, 20), vec![0x20], s("Pick")].concat(),
+    ));
+    let name = id_of(&c.ok(
+        0x13,
+        &[u16(win).to_vec(), rect(8, 1, 30, 1), u16(0).to_vec(), s(""), s("")].concat(),
+    ));
+    let list = id_of(&c.ok(
+        0x19,
+        &[u16(win).to_vec(), rect(2, 4, 20, 5), vec![1], u16(3).to_vec(), s("one"), s("two"), s("three")].concat(),
+    ));
+    c.ok(
+        0x17,
+        &[u16(win).to_vec(), rect(2, 1, 6, 1), u16(name).to_vec(), s("~N~ame:")].concat(),
+    );
+    let f = frame(&mut c);
+    assert!(find(&f, "Name:").is_some());
+
+    // Tab to the list, mark two, read them back.
+    c.ok(0x30, &[2, 2, 0, 0]); // Tab
+    frame(&mut c);
+    c.ok(0x30, &[2, 6, 0, 0]); // Insert
+    c.ok(0x30, &[2, 6, 0, 0]);
+    let m = c.ok(0x23, &u16(list));
+    assert_eq!(&m[..], &[2, 0, 0, 0, 1, 0], "marked {:?}", m);
+    let cur = c.ok(0x24, &u16(list));
+    assert_eq!(u16::from_le_bytes([cur[0], cur[1]]), 2);
+
+    // Alt+N goes back to the field: the caret is in it.
+    c.ok(0x30, &[0, b'n', 0, 4]);
+    let g = frame(&mut c);
+    assert_eq!(g.cursor, (1 + 8, 1 + 1), "Alt+N did not put the caret in the field\n{}", picture(&g));
+}
+
+#[test]
+fn a_progress_bar_moves() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(40), i16(6)].concat());
+    let win = id_of(&c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(0, 0, 40, 6), vec![0x20], s("Copy")].concat(),
+    ));
+    let bar = id_of(&c.ok(
+        0x18,
+        &[u16(win).to_vec(), rect(1, 1, 25, 1), 100u32.to_le_bytes().to_vec(), vec![1]].concat(),
+    ));
+    c.ok(0x22, &[u16(bar).to_vec(), 50u32.to_le_bytes().to_vec()].concat());
+    let f = frame(&mut c);
+    let line: String = f.row(2).chars().skip(2).take(25).collect();
+    assert!(line.starts_with(&"\u{DB}".repeat(10)), "{line:?}");
+    assert!(line.ends_with(" 50%"), "{line:?}");
+    assert!(c.err(0x22, &[u16(win).to_vec(), 1u32.to_le_bytes().to_vec()].concat()).contains("not a progress bar"));
+}
+
+// ---- code pages ---------------------------------------------------------
+
+#[test]
+fn code_page_866_carries_cyrillic_both_ways() {
+    let mut c = Client::start();
+    // INIT with a trailing code page.
+    c.ok(0x01, &[i16(60), i16(12), u16(866)].concat());
+    let win = id_of(&c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(0, 0, 60, 12), vec![0], s("\u{41e}\u{442}\u{447}\u{451}\u{442}")].concat(),
+    ));
+    let text = id_of(&c.ok(
+        0x11,
+        &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s("\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}")].concat(),
+    ));
+    let f = frame(&mut c);
+    // The bytes on the screen are 866's: П р и в е т.
+    let row: Vec<u8> = (1..7).map(|x| f.cells[((1 * f.w + x) * 2) as usize]).collect();
+    assert_eq!(row, vec![0x8F, 0xE0, 0xA8, 0xA2, 0xA5, 0xE2], "{}", picture(&f));
+
+    // Typed in, read back out: the same letters.
+    c.ok(0x30, &[2, 8, 0, 0]); // End
+    c.ok(0x30, &[0, 0x36, 0x04, 0]); // 'ж' U+0436, as a character
+    let b = c.ok(0x21, &u16(text));
+    assert_eq!(String::from_utf8_lossy(&b[2..]), "\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}\u{436}");
+
+    // And the table a client draws with says so.
+    let g = c.ok(0x42, &[]);
+    assert_eq!(g.len(), 512);
+    assert_eq!(u16::from_le_bytes([g[0x80 * 2], g[0x80 * 2 + 1]]), 0x0410, "0x80 is А");
+    assert_eq!(u16::from_le_bytes([g[0xC4 * 2], g[0xC4 * 2 + 1]]), 0x2500, "0xC4 is still ─");
+}
+
+#[test]
+fn code_page_437_turns_cyrillic_into_question_marks_and_nothing_worse() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(12)].concat());
+    let win = id_of(&c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(0, 0, 60, 12), vec![0], s("Notes")].concat(),
+    ));
+    let text = id_of(&c.ok(
+        0x11,
+        &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s("\u{41f}\u{440}\u{438} ok")].concat(),
+    ));
+    let f = frame(&mut c);
+    assert!(f.row(1).contains("??? ok"), "{}", picture(&f));
+    let b = c.ok(0x21, &u16(text));
+    assert_eq!(String::from_utf8_lossy(&b[2..]), "??? ok");
+    // Switching the page is a request like any other.
+    c.ok(0x03, &u16(866));
+    assert!(c.err(0x03, &u16(1251)).contains("no code page"));
+}
+
+#[test]
+fn a_cyrillic_file_name_survives_the_panel() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(20), u16(866)].concat());
+    let win = id_of(&c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(0, 0, 60, 20), vec![0], s("Open")].concat(),
+    ));
+    let name = "\u{41e}\u{442}\u{447}\u{451}\u{442}.txt";
+    let entry = [
+        s(name),
+        7u32.to_le_bytes().to_vec(),
+        u16(2026).to_vec(),
+        vec![9, 24, 12, 0, 0x20],
+    ]
+    .concat();
+    let files = id_of(&c.ok(
+        0x1A,
+        &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![1], s("*.*"), s("C:\\*.*"), u16(1).to_vec(), entry].concat(),
+    ));
+    frame(&mut c);
+    let m = c.ok(0x28, &u16(files));
+    assert_eq!(u16::from_le_bytes([m[0], m[1]]), 1);
+    assert_eq!(String::from_utf8_lossy(&m[4..]), name, "the name came back changed");
 }
 
 #[test]

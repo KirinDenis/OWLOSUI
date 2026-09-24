@@ -7,3 +7,11 @@ description = "Platform-independent core of OWLOSUI: cell grid, view tree, event
 
 # No dependencies. Ever. This crate must be buildable for DOS.
 [dependencies]
+
+[features]
+# A glyph index is a byte: the cell goes to video memory as it is, and the
+# font is the 256 glyphs the card was loaded with. Without this feature a
+# glyph index is a u16 into a font that grows as characters arrive, which
+# is how a Windows or browser client shows Russian and Slovak on one screen.
+# One type alias changes; nothing else in the core does.
+dos = []

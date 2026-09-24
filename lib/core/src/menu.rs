@@ -33,6 +33,10 @@ pub struct MenuItem {
     /// Non-empty makes this a submenu rather than a command.
     pub items: Vec<MenuItem>,
     pub separator: bool,
+    /// Shown with a tick in front: an option that is on. The item still
+    /// sends its command; turning the tick off is the program's answer to
+    /// it, not the menu's.
+    pub checked: bool,
 }
 
 impl MenuItem {
@@ -44,7 +48,13 @@ impl MenuItem {
             enabled: true,
             items: Vec::new(),
             separator: false,
+            checked: false,
         }
+    }
+
+    pub fn checked(mut self, on: bool) -> Self {
+        self.checked = on;
+        self
     }
 
     pub fn sub(text: &str, items: Vec<MenuItem>) -> Self {
@@ -55,6 +65,7 @@ impl MenuItem {
             enabled: true,
             items,
             separator: false,
+            checked: false,
         }
     }
 
@@ -66,6 +77,7 @@ impl MenuItem {
             enabled: false,
             items: Vec::new(),
             separator: true,
+            checked: false,
         }
     }
 
@@ -221,6 +233,7 @@ pub fn clone_items(items: &[MenuItem]) -> Vec<MenuItem> {
             enabled: i.enabled,
             items: clone_items(&i.items),
             separator: i.separator,
+            checked: i.checked,
         })
         .collect()
 }

@@ -19,6 +19,7 @@
 //! not markup — so drawing a frame is a copy, and the parser's cost is paid
 //! when the page arrives rather than sixty times a second.
 
+use crate::cell::{glyph, Glyph};
 use crate::geom::Point;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -36,7 +37,7 @@ pub const NO_LINK: u16 = u16::MAX;
 
 #[derive(Clone, Copy)]
 pub struct HCell {
-    pub ch: u8,
+    pub ch: Glyph,
     pub style: Style,
     pub link: u16,
 }
@@ -51,8 +52,8 @@ pub struct Html {
     /// The markup, kept so the page can be laid out again at a new width.
     source: String,
     /// The page as it will be drawn.
-    lines: Vec<Vec<HCell>>,
-    links: Vec<Link>,
+    pub lines: Vec<Vec<HCell>>,
+    pub links: Vec<Link>,
     /// Anchor name to line, for `#fragment` links.
     anchors: Vec<(String, i16)>,
     /// The width the current layout was made for.
@@ -183,7 +184,7 @@ impl Html {
         self.lines
             .iter()
             .map(|l| {
-                let s: String = l.iter().map(|c| c.ch as char).collect();
+                let s: String = l.iter().map(|c| char::from_u32(c.ch as u32).unwrap_or('?')).collect();
                 s.trim_end().to_string()
             })
             .collect::<Vec<_>>()
@@ -200,8 +201,8 @@ impl Html {
 // ============================================================================
 
 struct Out {
-    lines: Vec<Vec<HCell>>,
-    links: Vec<Link>,
+    pub lines: Vec<Vec<HCell>>,
+    pub links: Vec<Link>,
     anchors: Vec<(String, i16)>,
     width: i16,
     cur: Vec<HCell>,
@@ -216,11 +217,11 @@ impl Out {
     /// and the paragraph after it comes out shifted.
     fn set_indent(&mut self, n: i16) {
         self.indent = n;
-        if !self.cur.iter().any(|c| c.ch != b' ') {
+        if !self.cur.iter().any(|c| c.ch != glyph::SPACE) {
             self.cur.clear();
             for _ in 0..n {
                 self.cur.push(HCell {
-                    ch: b' ',
+                    ch: glyph::SPACE,
                     style: Style::Text,
                     link: NO_LINK,
                 });
@@ -233,7 +234,7 @@ impl Out {
         self.lines.push(line);
         for _ in 0..self.indent {
             self.cur.push(HCell {
-                ch: b' ',
+                ch: glyph::SPACE,
                 style: Style::Text,
                 link: NO_LINK,
             });
@@ -242,7 +243,7 @@ impl Out {
 
     /// End the line only if there is something on it.
     fn break_line(&mut self) {
-        if self.cur.iter().any(|c| c.ch != b' ') {
+        if self.cur.iter().any(|c| c.ch != glyph::SPACE) {
             self.flush();
         }
     }
@@ -254,7 +255,7 @@ impl Out {
         }
     }
 
-    fn push_word(&mut self, word: &[u8]) {
+    fn push_word(&mut self, word: &[Glyph]) {
         if word.is_empty() {
             return;
         }
@@ -262,7 +263,7 @@ impl Out {
         // the line gets its own line and is allowed to overhang; breaking an
         // identifier in a help page is worse than a ragged edge.
         if self.cur.len() as i16 + word.len() as i16 > self.width
-            && self.cur.iter().any(|c| c.ch != b' ')
+            && self.cur.iter().any(|c| c.ch != glyph::SPACE)
         {
             self.flush();
         }
@@ -282,9 +283,9 @@ impl Out {
     }
 
     fn push_space(&mut self) {
-        if self.cur.iter().any(|c| c.ch != b' ') && (self.cur.len() as i16) < self.width {
+        if self.cur.iter().any(|c| c.ch != glyph::SPACE) && (self.cur.len() as i16) < self.width {
             self.cur.push(HCell {
-                ch: b' ',
+                ch: glyph::SPACE,
                 style: self.style,
                 link: self.link,
             });
@@ -397,8 +398,10 @@ fn parse(src: &str, width: i16) -> (Vec<Vec<HCell>>, Vec<Link>, Vec<(String, i16
                         }
                         // No wrapping and no collapsing inside <pre>: that is
                         // the whole reason it exists.
-                        for ch in line.bytes() {
-                            let ch = if ch == b'\t' { b' ' } else { ch };
+                        // Characters, not bytes: each char here is a glyph
+                        // index up to 255, and a byte walk would split it.
+                        for ch in line.chars() {
+                            let ch = if ch == '\t' { glyph::SPACE } else { crate::cell::glyph_of(ch) };
                             o.cur.push(HCell {
                                 ch,
                                 style: o.style,
@@ -416,7 +419,7 @@ fn parse(src: &str, width: i16) -> (Vec<Vec<HCell>>, Vec<Link>, Vec<(String, i16
                         if n > 0 || leading {
                             o.push_space();
                         }
-                        o.push_word(word.as_bytes());
+                        o.push_word(&crate::cell::glyphs(word));
                     }
                     if t.ends_with(char::is_whitespace) {
                         o.push_space();
@@ -426,10 +429,20 @@ fn parse(src: &str, width: i16) -> (Vec<Vec<HCell>>, Vec<Link>, Vec<(String, i16
         };
     }
 
+    // What the text looked like before a link began, so `</a>` can put it
+    // back. `<b><a>go</a> on</b>` must leave "on" bold.
+    let mut before_link = Style::Text;
+
     while i < b.len() {
         if b[i] != b'<' {
-            text.push(b[i] as char);
-            i += 1;
+            // One character, however many bytes it takes. The core carries
+            // glyph indices as chars up to U+00FF - the backend's code page
+            // put them there - and anything above that is drawn as `?`, the
+            // same answer `Buffer::text` gives, rather than as the bytes of
+            // its encoding shown one by one.
+            let ch = src[i..].chars().next().unwrap_or('?');
+            text.push(if (ch as u32) <= crate::cell::GLYPH_MAX { ch } else { '?' });
+            i += ch.len_utf8().max(1);
             continue;
         }
         let Some(close) = src[i..].find('>') else { break };
@@ -497,7 +510,7 @@ fn parse(src: &str, width: i16) -> (Vec<Vec<HCell>>, Vec<Link>, Vec<(String, i16
                     link: NO_LINK,
                 });
                 o.cur.push(HCell {
-                    ch: b' ',
+                    ch: glyph::SPACE,
                     style: Style::Text,
                     link: NO_LINK,
                 });
@@ -521,6 +534,7 @@ fn parse(src: &str, width: i16) -> (Vec<Vec<HCell>>, Vec<Link>, Vec<(String, i16
                         at: Point::new(-1, -1),
                     });
                     o.link = (o.links.len() - 1) as u16;
+                    before_link = o.style;
                     if !heading {
                         o.style = Style::Link;
                     }
@@ -529,7 +543,7 @@ fn parse(src: &str, width: i16) -> (Vec<Vec<HCell>>, Vec<Link>, Vec<(String, i16
             "/a" => {
                 o.link = NO_LINK;
                 if !heading {
-                    o.style = Style::Text;
+                    o.style = before_link;
                 }
             }
             // Unknown tags are skipped rather than shown. Showing them is
@@ -542,10 +556,23 @@ fn parse(src: &str, width: i16) -> (Vec<Vec<HCell>>, Vec<Link>, Vec<(String, i16
     o.break_line();
 
     // A link whose text never arrived points nowhere; drop it rather than
-    // leave Tab landing on nothing.
-    for l in &o.links {
-        debug_assert!(l.at.y >= -1);
+    // leave Tab landing on nothing. Cells name their link by its index, so
+    // the survivors are renumbered and every cell follows.
+    let mut renumbered = vec![NO_LINK; o.links.len()];
+    let mut kept = Vec::new();
+    for (i, l) in o.links.into_iter().enumerate() {
+        if l.at.y >= 0 {
+            renumbered[i] = kept.len() as u16;
+            kept.push(l);
+        }
+    }
+    for line in &mut o.lines {
+        for c in line.iter_mut() {
+            if c.link != NO_LINK {
+                c.link = renumbered[c.link as usize];
+            }
+        }
     }
 
-    (o.lines, o.links, o.anchors)
+    (o.lines, kept, o.anchors)
 }

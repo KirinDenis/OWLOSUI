@@ -17,6 +17,7 @@
 
 using HW = HelloWorld.App;
 using NotesApp = Notes.App;
+using CommanderApp = Commander.App;
 
 internal static class Tests
 {
@@ -61,9 +62,9 @@ internal static class Tests
             using var owl = Owl();
             HW.Build(owl);
             owl.GetFrame();
-            owl.Press(ConsoleKey.Enter);
+            owl.Press(ConsoleKey.Enter); owl.Tick();
             Check(owl.Take().pressed == HW.CmOk, "Enter did not press the default button");
-            owl.Press(ConsoleKey.Escape);
+            owl.Press(ConsoleKey.Escape); owl.Tick();
             Check(owl.Take().pressed == HW.CmOk, "Escape did not press the last button");
         });
 
@@ -143,7 +144,7 @@ internal static class Tests
             var app = new NotesApp(owl, notesFile);
             owl.GetFrame();
             owl.Type("gone");
-            owl.Press(ConsoleKey.X, alt: true, ch: 'x');
+            owl.Press(ConsoleKey.X, alt: true, ch: 'x'); owl.Tick();
             var (exit, _) = owl.Take();
             Check(exit == NotesApp.CmExit, $"Alt+X pressed {exit}, not Exit");
             app.OnCommand(exit);
@@ -166,7 +167,7 @@ internal static class Tests
             var app = new NotesApp(owl, notesFile);
             owl.GetFrame();
             owl.Type("kept");
-            owl.Press(ConsoleKey.S, alt: true, ch: 's');
+            owl.Press(ConsoleKey.S, alt: true, ch: 's'); owl.Tick();
             var (save, _) = owl.Take();
             Check(save == NotesApp.CmSave, $"Alt+S pressed {save}, not Save");
             app.OnCommand(save);
@@ -233,7 +234,7 @@ internal static class Tests
             var app = new NotesApp(owl, notesFile);
             owl.GetFrame();
             owl.Type("a");
-            owl.Press(ConsoleKey.Enter);
+            owl.Press(ConsoleKey.Enter); owl.Tick();
             owl.Type("b");
             var (pressed, _) = owl.Take();
             Check(pressed == 0, $"Enter pressed button {pressed} instead of breaking the line");
@@ -248,7 +249,7 @@ internal static class Tests
             var app = new NotesApp(owl, notesFile);
             owl.GetFrame();
             owl.Type("x");
-            owl.Press(ConsoleKey.Escape);
+            owl.Press(ConsoleKey.Escape); owl.Tick();
             var (pressed, _) = owl.Take();
             Check(pressed == NotesApp.CmExit, $"Escape pressed {pressed}, not Exit");
             app.OnCommand(pressed);
@@ -364,6 +365,288 @@ internal static class Tests
             Check(owl.GetFrame().Find("Hello, world!") == null, "the close box did nothing");
         });
 
+        // ------------------------------------------------------------ code pages
+
+        Case("Notes: a Cyrillic file under code page 866 is shown, edited and saved intact", () =>
+        {
+            File.WriteAllText(notesFile, "Привет, мир!");
+            using var owl = Owl(codePage: 866);
+            var app = new NotesApp(owl, notesFile);
+            Check(!app.ReadOnly, "866 has these letters; the file should open for editing");
+            var f = owl.GetFrame();
+            Check(f.Find("Привет") != null, "the letters are not on the screen", f);
+            Check(f.Glyphs[0x80] == 'А', "the glyph table is not 866's");
+            owl.Press(ConsoleKey.End);
+            owl.Type(" Ёж");
+            owl.Press(ConsoleKey.S, alt: true, ch: 's'); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(File.ReadAllText(notesFile) == "Привет, мир! Ёж",
+                  $"the file holds '{File.ReadAllText(notesFile)}'");
+        });
+
+        Case("Notes: a Cyrillic file under code page 437 opens read-only and is never written", () =>
+        {
+            const string original = "Привет";
+            File.WriteAllText(notesFile, original);
+            using var owl = Owl();
+            var app = new NotesApp(owl, notesFile);
+            Check(app.ReadOnly, "437 cannot hold these letters; the file should be read-only");
+            var f = owl.GetFrame();
+            Check(f.Find("read-only") != null, "no word about it", f);
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            app.OnCommand(owl.Take().pressed); // OK on the message
+            owl.Type("x");
+            owl.Press(ConsoleKey.S, alt: true, ch: 's'); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(File.ReadAllText(notesFile) == original, "the file was written with ? in it");
+            Check(owl.GetFrame().Find("read-only") != null, "Save did not say why it refused");
+        });
+
+        Case("Commander: a Cyrillic file name is shown and comes back intact under 866", () =>
+        {
+            var (l, r) = TempTree();
+            const string name = "Отчёт.txt";
+            File.WriteAllText(Path.Combine(l, name), "x");
+            using var owl = Owl(codePage: 866);
+            var app = new CommanderApp(owl, l, r);
+            var f = owl.GetFrame();
+            Check(f.Find(name) != null, "the Cyrillic name is not on the screen", f);
+            Check(f.Find("?????") == null, "question marks where the name should be", f);
+            // Copy it across by name: the name the panel gives back must be the real one.
+            var (x, y) = Locate(f, name);
+            owl.Click(x, y);
+            app.OnCommand(CommanderApp.CmCopy);
+            owl.Press(ConsoleKey.Y, alt: true, ch: 'y'); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(File.Exists(Path.Combine(r, name)), "the file was not copied under its own name");
+        });
+
+        // ----------------------------------------- the first five of the pieces
+
+        Case("Controls: the status line shows its keys and binds them", () =>
+        {
+            using var owl = Owl();
+            owl.StatusLine(new Owlosui.StatusItem("~F1~ Help", 5, ConsoleKey.F1),
+                           new Owlosui.StatusItem("~Alt-X~ Exit", 6, ConsoleKey.X, Alt: true),
+                           ("About", 7));
+            var f = owl.GetFrame();
+            Check(f.Row(24).StartsWith(" F1 Help  Alt-X Exit  About"), $"'{f.Row(24)}'", f);
+            owl.Press(ConsoleKey.F1);
+            Check(owl.Take().command == 5, "F1 did not become Help");
+            owl.Press(ConsoleKey.X, alt: true, ch: 'x');
+            Check(owl.Take().command == 6, "Alt+X did not become Exit");
+            var (x, y) = Locate(f, "About");
+            owl.Click(x + 1, y);
+            Check(owl.Take().command == 7, "a click on the words did nothing");
+        });
+
+        Case("Controls: a label focuses its field, a list takes marks, a bar fills", () =>
+        {
+            using var owl = Owl();
+            var w = owl.Window("Pick", 60, 20, style: Owlosui.Style.Dialog);
+            var name = owl.Input(w, 8, 1, 30, "");
+            var list = owl.List(w, 2, 4, 20, 5, new[] { "one", "two", "three" }, multi: true);
+            owl.Label(w, 2, 1, "~N~ame:", name);
+            var bar = owl.Progress(w, 2, 12, 25);
+            owl.GetFrame();
+
+            owl.Press(ConsoleKey.Tab);
+            owl.Press(ConsoleKey.Insert);
+            owl.Press(ConsoleKey.Insert);
+            Check(owl.Marked(list).SequenceEqual(new[] { 0, 1 }), $"marked {string.Join(",", owl.Marked(list))}");
+            Check(owl.Current(list) == 2, "Insert did not step down");
+
+            owl.Press(ConsoleKey.N, alt: true, ch: 'n');
+            var f = owl.GetFrame();
+            var wr = f.Find("Name:")!.Value;
+            Check(f.CursorY == wr.y, "Alt+N did not put the caret in the field", f);
+
+            owl.SetProgress(bar, 75);
+            var g = owl.GetFrame();
+            var (bx, by) = (wr.x, wr.y + 11);
+            var line = g.Row(by).Substring(bx, 25);
+            Check(line.EndsWith(" 75%"), $"'{line}'", g);
+            Check(line.StartsWith(new string('█', 15)), $"'{line}'", g);
+        });
+
+        // ----------------------------------------------------------- Commander
+
+        Case("Commander: two panels, Tab between them, Enter into a folder and back", () =>
+        {
+            var (l, r) = TempTree();
+            using var owl = Owl();
+            var app = new CommanderApp(owl, l, r);
+            var f = owl.GetFrame();
+            Check(f.Find("a.txt") != null && f.Find("sub") != null, "the left panel is not showing its folder", f);
+            Check(f.Row(24).Contains("F5 Copy"), "no status line", f);
+            Check(app.Active == app.Left, "the left panel should start active");
+
+            owl.Press(ConsoleKey.Tab);
+            var (_, cmd) = owl.Take();
+            Check(cmd == CommanderApp.CmSwitch, "Tab did not become Switch");
+            app.OnCommand(cmd);
+            Check(app.Active == app.Right, "Tab did not switch panels");
+            app.OnCommand(CommanderApp.CmSwitch);
+            Check(app.Active == app.Left, "Tab did not switch back");
+
+            // `..` is first, `sub` next: Down, Enter, and we are inside.
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.Enter);
+            app.Poll();
+            Check(app.Left.Dir.EndsWith("sub"), $"Enter on the folder did not go in: {app.Left.Dir}");
+            var g = owl.GetFrame();
+            Check(g.Find("inner.txt") != null, "the folder's contents are not shown", g);
+            owl.Press(ConsoleKey.Enter); // `..`
+            app.Poll();
+            Check(app.Left.Dir == l, $"`..` did not come back out: {app.Left.Dir}");
+        });
+
+        Case("Commander: no path line above the names, and the foot says where you are", () =>
+        {
+            var (l, r) = TempTree();
+            using var owl = Owl();
+            _ = new CommanderApp(owl, l, r);
+            var f = owl.GetFrame();
+            // Row 1 is the first row inside the left window: a name, not `*.*`.
+            Check(!f.Row(1).Contains("*.*"), "a commander's panel should not show the mask line", f);
+            Check(f.Row(1).Contains(".."), "the names should start on the first row", f);
+            var foot = string.Join("\n", Enumerable.Range(0, f.H).Select(y => f.Row(y).Substring(0, 40)));
+            Check(foot.Contains(Path.GetFileName(l)), "the foot does not say where the panel is", f);
+        });
+
+        Case("Files: a panel with a path line goes where the path says, and filters by its mask", () =>
+        {
+            // The Open-dialog shape of the panel: a path line on top. Typing a
+            // folder and a mask there is the way to move; a folder that is not
+            // there leaves the listing alone and says so.
+            var (l, r) = TempTree();
+            using var owl = Owl();
+            var w = owl.Window("Open", 60, 20, style: Owlosui.Style.Dialog);
+            var files = owl.Files(w, l, Owlosui.ReadDirectory(l));
+            var pr = owl.GetFrame();
+            var (px, py) = Locate(pr, "Path:");
+            owl.Click(px + 8, py);
+            owl.Press(ConsoleKey.End);
+            for (var i = 0; i < 200; i++) owl.Press(ConsoleKey.Backspace);
+            owl.Type(Path.Combine(r, "*.log"));
+            owl.Press(ConsoleKey.Enter);
+            var (kind, text) = owl.TakeFiles(files);
+            Check(kind == Owlosui.FilesEvent.Path && text.EndsWith("*.log"), $"the panel reported {kind} '{text}'");
+            owl.SetFiles(files, r, Owlosui.ReadDirectory(r), "*.log");
+            var g = owl.GetFrame();
+            Check(g.Find("notes.log") != null, "the .log file is not shown", g);
+            Check(g.Find("other.txt") == null, "the mask did not filter", g);
+
+            owl.SetFilesError(files, "Folder not found: " + Path.Combine(r, "nowhere"));
+            var h = owl.GetFrame();
+            Check(h.Find("Folder not found") != null, "no message for a missing folder", h);
+            Check(h.Find("notes.log") != null, "the old listing was thrown away", h);
+        });
+
+        Case("Commander: Insert marks, F5 copies across, F8 deletes after asking", () =>
+        {
+            var (l, r) = TempTree();
+            using var owl = Owl();
+            var app = new CommanderApp(owl, l, r);
+            owl.GetFrame();
+            // Past `..` and `sub` to the files; mark both.
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.Insert);
+            owl.Press(ConsoleKey.Insert);
+            owl.Press(ConsoleKey.F5);
+            var (_, copy) = owl.Take();
+            Check(copy == CommanderApp.CmCopy, "F5 did not become Copy");
+            app.OnCommand(copy);
+            var f = owl.GetFrame();
+            Check(f.Find("Copy 2 file(s)") != null, "no question before copying", f);
+
+            // Enter is No: nothing happens.
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            var (no, _) = owl.Take();
+            Check(no == CommanderApp.CmNo, $"Enter pressed {no}, not No");
+            app.OnCommand(no);
+            Check(!File.Exists(Path.Combine(r, "a.txt")), "No copied anyway");
+
+            // Ask again, Alt+Y: copied, and the right panel shows them.
+            app.OnCommand(CommanderApp.CmCopy);
+            owl.Press(ConsoleKey.Y, alt: true, ch: 'y'); owl.Tick();
+            var (yes, _) = owl.Take();
+            Check(yes == CommanderApp.CmYes, $"Alt+Y pressed {yes}, not Yes");
+            app.OnCommand(yes);
+            Check(File.Exists(Path.Combine(r, "a.txt")) && File.Exists(Path.Combine(r, "b.txt")), "the files were not copied");
+            var g = owl.GetFrame();
+            Check(g.Find("Copy") == null || g.Find("Confirm") == null, "the progress or question window is still up", g);
+
+            // Over on the right, delete one of them.
+            app.OnCommand(CommanderApp.CmSwitch);
+            owl.Press(ConsoleKey.DownArrow); // past `..` to a.txt
+            owl.Press(ConsoleKey.F8);
+            app.OnCommand(owl.Take().command);
+            Check(owl.GetFrame().Find("Delete 1 file(s)") != null, "no question before deleting");
+            owl.Press(ConsoleKey.Y, alt: true, ch: 'y'); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(!File.Exists(Path.Combine(r, "a.txt")), "the file was not deleted");
+            Check(File.Exists(Path.Combine(r, "b.txt")), "the wrong file was deleted");
+            // The right half of the screen is the right panel.
+            var last = owl.GetFrame();
+            var rightHalf = string.Join("\n", Enumerable.Range(0, last.H).Select(y => last.Row(y).Substring(40)));
+            Check(!rightHalf.Contains("a.txt"), "the right panel still lists the deleted file", last);
+            Check(rightHalf.Contains("b.txt"), "the right panel lost the file that stayed", last);
+        });
+
+        Case("Commander: F3 views a file, F4 edits it, F7 makes a folder, F6 moves", () =>
+        {
+            var (l, r) = TempTree();
+            using var owl = Owl();
+            var app = new CommanderApp(owl, l, r);
+            owl.GetFrame();
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.DownArrow); // a.txt
+
+            // F3: a cyan viewer with the file's words; Escape closes it.
+            owl.Press(ConsoleKey.F3);
+            app.OnCommand(owl.Take().command);
+            var f = owl.GetFrame();
+            Check(f.Find("aaa") != null, "the viewer does not show the file", f);
+            owl.Press(ConsoleKey.Escape); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(owl.GetFrame().Find("aaa") == null, "the viewer did not close");
+
+            // F4: an editor; type, Alt+S, and the file has changed.
+            owl.Press(ConsoleKey.F4);
+            app.OnCommand(owl.Take().command);
+            owl.Press(ConsoleKey.End);
+            owl.Type("+");
+            owl.Press(ConsoleKey.S, alt: true, ch: 's'); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(File.ReadAllText(Path.Combine(l, "a.txt")) == "aaa+", "the edit was not saved");
+
+            // F7: a name, Enter, and the folder exists on the active side.
+            owl.Press(ConsoleKey.F7);
+            app.OnCommand(owl.Take().command);
+            owl.Type("made");
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(Directory.Exists(Path.Combine(l, "made")), "F7 did not make the folder");
+            Check(owl.GetFrame().Find("made") != null, "the new folder is not listed");
+
+            // F6 on b.txt: gone from the left, present on the right.
+            owl.Press(ConsoleKey.Home);
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.DownArrow); // .., made, sub, then a.txt... find b.txt by marks instead
+            var g = owl.GetFrame();
+            var (bx, by) = Locate(g, "b.txt");
+            owl.Click(bx, by);
+            owl.Press(ConsoleKey.F6);
+            app.OnCommand(owl.Take().command);
+            Check(owl.GetFrame().Find("Move 1 file(s)") != null, "no question before moving");
+            owl.Press(ConsoleKey.Y, alt: true, ch: 'y'); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(!File.Exists(Path.Combine(l, "b.txt")) && File.Exists(Path.Combine(r, "b.txt")), "the file was not moved");
+        });
+
         // ------------------------------------------------------------- desktop
 
         Case("The desktop follows the console size", () =>
@@ -416,7 +699,10 @@ internal static class Tests
 
     // ------------------------------------------------------------- harness
 
-    private static Owlosui Owl() => new(width: 80, height: 25);
+    // A key that presses a button puts it down first and fires on the tick;
+    // `Run` waits 90 ms between the two so the press is seen. A test has no
+    // eyes, so it ticks at once - that is the `owl.Tick()` after every Press.
+    private static Owlosui Owl(int codePage = 437) => new(width: 80, height: 25, codePage: codePage);
 
     private static void Case(string name, Action body)
     {
@@ -437,6 +723,25 @@ internal static class Tests
     {
         if (ok) return;
         throw new Exception(frame is { } f ? what + "\n" + f : what);
+    }
+
+    /// <summary>
+    /// Two fresh folders for the Commander: the left with two files and a
+    /// sub-folder holding one more, the right with a .log and a .txt.
+    /// </summary>
+    private static (string left, string right) TempTree()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "owlosui-cmd-" + Guid.NewGuid().ToString("N")[..8]);
+        var l = Path.Combine(root, "L");
+        var r = Path.Combine(root, "R");
+        Directory.CreateDirectory(Path.Combine(l, "sub"));
+        Directory.CreateDirectory(r);
+        File.WriteAllText(Path.Combine(l, "a.txt"), "aaa");
+        File.WriteAllText(Path.Combine(l, "b.txt"), "bbb");
+        File.WriteAllText(Path.Combine(l, "sub", "inner.txt"), "in");
+        File.WriteAllText(Path.Combine(r, "notes.log"), "log");
+        File.WriteAllText(Path.Combine(r, "other.txt"), "txt");
+        return (l, r);
     }
 
     private static (int x, int y) Locate(Owlosui.Frame f, string text) =>

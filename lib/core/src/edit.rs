@@ -16,6 +16,7 @@
 //! modern one, and it is why a test can be a script of command names rather
 //! than a simulation of somebody's fingers.
 
+use crate::cell::Glyph;
 use crate::geom::Point;
 use crate::views::TextView;
 
@@ -84,7 +85,7 @@ impl Cmd {
 pub struct Edit {
     from: Point,
     to: Point,
-    text: Vec<Vec<u8>>,
+    text: Vec<Vec<Glyph>>,
     /// Where the caret was before, so undo puts it back where the typist left
     /// it rather than where the machine finished.
     cur: Point,
@@ -102,19 +103,30 @@ fn ordered(a: Point, b: Point) -> (Point, Point) {
     }
 }
 
-fn is_word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+fn is_word(b: Glyph) -> bool {
+    // ASCII letters and digits, and `_`. Beyond ASCII every glyph is a
+    // letter: the core cannot tell a Cyrillic letter from a box-drawing
+    // piece, and a word boundary in the wrong place is the smaller sin.
+    b >= 128 || (b as u8).is_ascii_alphanumeric() || b == b'_' as Glyph
 }
 
 impl TextView {
     // ---------------------------------------------------------------- geometry
 
+    // Lengths and counts come back as `i16` because that is what a caret is
+    // made of, and a caret is that small because a screen is. A line longer
+    // than 32767 bytes, or a file with more lines than that, is therefore
+    // seen through a ceiling: the caret stops at the ceiling rather than
+    // wrapping round to a negative number and taking the program with it.
+    // (The hex view exists for exactly those files; this is only about not
+    // falling over when one is opened as text by mistake.)
+
     fn line_len(&self, y: i16) -> i16 {
-        self.lines.get(y as usize).map_or(0, |l| l.len()) as i16
+        self.lines.get(y as usize).map_or(0, |l| l.len().min(i16::MAX as usize) as i16)
     }
 
     fn last_line(&self) -> i16 {
-        (self.lines.len() as i16 - 1).max(0)
+        (self.lines.len().min(i16::MAX as usize) as i16 - 1).max(0)
     }
 
     /// Put the caret somewhere that exists. A caret past the end of a line is
@@ -136,7 +148,7 @@ impl TextView {
         Some(ordered(a, self.cur))
     }
 
-    pub fn selected_text(&self) -> Vec<Vec<u8>> {
+    pub fn selected_text(&self) -> Vec<Vec<Glyph>> {
         match self.selection() {
             Some((a, b)) => self.extract(a, b),
             None => Vec::new(),
@@ -154,7 +166,7 @@ impl TextView {
 
     // ------------------------------------------------------------------ splice
 
-    fn extract(&self, a: Point, b: Point) -> Vec<Vec<u8>> {
+    fn extract(&self, a: Point, b: Point) -> Vec<Vec<Glyph>> {
         if a.y == b.y {
             let l = &self.lines[a.y as usize];
             return vec![l[a.x as usize..b.x as usize].to_vec()];
@@ -169,14 +181,14 @@ impl TextView {
 
     /// Replace everything between two points with `new`, and return what was
     /// there. The single place the text changes.
-    fn splice(&mut self, a: Point, b: Point, new: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    fn splice(&mut self, a: Point, b: Point, new: &[Vec<Glyph>]) -> Vec<Vec<Glyph>> {
         let old = self.extract(a, b);
         self.modified = true;
 
         let prefix = self.lines[a.y as usize][..a.x as usize].to_vec();
         let suffix = self.lines[b.y as usize][b.x as usize..].to_vec();
 
-        let mut rebuilt: Vec<Vec<u8>> = Vec::with_capacity(new.len());
+        let mut rebuilt: Vec<Vec<Glyph>> = Vec::with_capacity(new.len());
         if new.len() <= 1 {
             let mut only = prefix;
             if let Some(n) = new.first() {
@@ -202,11 +214,14 @@ impl TextView {
     }
 
     /// Where a splice of `text` starting at `a` finishes.
-    fn end_of(a: Point, text: &[Vec<u8>]) -> Point {
+    fn end_of(a: Point, text: &[Vec<Glyph>]) -> Point {
         match text.len() {
             0 => a,
-            1 => Point::new(a.x + text[0].len() as i16, a.y),
-            n => Point::new(text[n - 1].len() as i16, a.y + n as i16 - 1),
+            1 => Point::new(a.x.saturating_add(text[0].len().min(i16::MAX as usize) as i16), a.y),
+            n => Point::new(
+                text[n - 1].len().min(i16::MAX as usize) as i16,
+                a.y.saturating_add(n.min(i16::MAX as usize) as i16 - 1),
+            ),
         }
     }
 
@@ -226,7 +241,7 @@ impl TextView {
         }
     }
 
-    fn change(&mut self, from: Point, to: Point, text: Vec<Vec<u8>>) {
+    fn change(&mut self, from: Point, to: Point, text: Vec<Vec<Glyph>>) {
         if self.readonly {
             return;
         }
@@ -253,8 +268,16 @@ impl TextView {
 
     /// Run one command. `page` is the height of the view, needed by PageUp and
     /// PageDown and by nothing else; `extend` is Shift being held.
-    pub fn exec(&mut self, cmd: Cmd, extend: bool, page: i16, clip: &mut Vec<Vec<u8>>) {
+    pub fn exec(&mut self, cmd: Cmd, extend: bool, page: i16, clip: &mut Vec<Vec<Glyph>>) {
         use Cmd::*;
+
+        // A viewer answers to movement and to copying, and to nothing that
+        // would change the text. Refusing in `change` alone was not enough:
+        // Backspace walks the caret back *before* asking to delete, and a
+        // refused delete left the caret moved.
+        if self.readonly && !cmd.is_movement() && !matches!(cmd, SelectAll | SelectNone | Copy) {
+            return;
+        }
 
         // Selection bookkeeping, in one place rather than in every movement.
         if cmd.is_movement() {
@@ -285,9 +308,9 @@ impl TextView {
                 }
             }
             LineUp => self.cur.y = (self.cur.y - 1).max(0),
-            LineDown => self.cur.y = (self.cur.y + 1).min(self.last_line()),
-            PageUp => self.cur.y = (self.cur.y - page).max(0),
-            PageDown => self.cur.y = (self.cur.y + page).min(self.last_line()),
+            LineDown => self.cur.y = self.cur.y.saturating_add(1).min(self.last_line()),
+            PageUp => self.cur.y = self.cur.y.saturating_sub(page).max(0),
+            PageDown => self.cur.y = self.cur.y.saturating_add(page).min(self.last_line()),
             LineStart => self.cur.x = 0,
             LineEnd => self.cur.x = self.line_len(self.cur.y),
             TextStart => self.cur = Point::new(0, 0),
@@ -324,7 +347,10 @@ impl TextView {
 
             Insert(c) => {
                 self.drop_selection();
-                let b = if (c as u32) < 128 { c as u8 } else { b'?' };
+                // A typed character arrives as its glyph index, a char up
+                // to U+00FF put there by the backend's code page; anything
+                // above that has no glyph and is typed as `?`.
+                let b = crate::cell::glyph_of(c);
                 let at = self.cur;
                 self.change(at, at, vec![vec![b]]);
             }
@@ -429,7 +455,7 @@ impl TextView {
     pub fn text(&self) -> String {
         self.lines
             .iter()
-            .map(|l| String::from_utf8_lossy(l).into_owned())
+            .map(|l| l.iter().map(|&g| char::from_u32(g as u32).unwrap_or('?')).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
     }

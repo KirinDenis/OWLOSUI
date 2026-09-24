@@ -123,21 +123,38 @@ impl FileKind {
 
 /// Does a name match a DOS-style mask? `*` and `?` only.
 pub fn matches(name: &str, mask: &str) -> bool {
-    fn go(n: &[u8], m: &[u8]) -> bool {
+    // Characters, not bytes: a name in a core string is one char per
+    // glyph, and `?` has to eat exactly one of them.
+    fn go(n: &[char], m: &[char]) -> bool {
         match (n.first(), m.first()) {
             (_, None) => n.is_empty(),
-            (_, Some(b'*')) => {
+            (_, Some('*')) => {
                 // The star matches nothing, then one more, then one more. The
                 // recursion is fine here: masks are a handful of characters,
                 // not a regular expression engine.
                 go(n, &m[1..]) || (!n.is_empty() && go(&n[1..], m))
             }
-            (Some(_), Some(b'?')) => go(&n[1..], &m[1..]),
+            (Some(_), Some('?')) => go(&n[1..], &m[1..]),
             (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) => go(&n[1..], &m[1..]),
             _ => false,
         }
     }
-    go(name.as_bytes(), mask.as_bytes())
+    // DOS saw every name as `NAME.EXT`, with the dot there whether or not
+    // anything followed it. That is why `*.*` meant "every file" and `*.`
+    // meant "the ones with no extension" - and why a name without a dot has
+    // to be tried with one added, or `README` is invisible to the default
+    // mask and the dialog looks empty in a folder that is not.
+    let m: Vec<char> = mask.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    if go(&n, &m) {
+        return true;
+    }
+    if !name.contains('.') {
+        let mut dotted = n;
+        dotted.push('.');
+        return go(&dotted, &m);
+    }
+    false
 }
 
 pub struct FileList {
@@ -159,6 +176,17 @@ pub struct FileList {
     /// Set when a file was chosen or a directory entered. The application
     /// takes it and decides what that means.
     pub chosen: Option<String>,
+    /// Insert marks the file under the cursor and moves on - Norton's way,
+    /// and the reason a two-panel file manager can be built on this. Marks
+    /// belong to entries, not to rows, so a new mask does not lose them.
+    pub multi: bool,
+    marked: Vec<bool>,
+    /// Show the path-and-mask line above the names. An Open dialog wants
+    /// it; a commander's panel does not - people who grew up on Norton read
+    /// a `*.*` at the top of a panel as something gone wrong, and they
+    /// navigate by Enter, not by typing. Without it the names start on the
+    /// first row and the foot still says where you are.
+    pub path_line: bool,
 
     /// The line at the top: a directory and a mask together, the way an open
     /// dialog has shown them since before any of us were typing. Editing it is
@@ -199,6 +227,9 @@ impl FileList {
             cols: 1,
             colw: 14,
             chosen: None,
+            multi: false,
+            marked: Vec::new(),
+            path_line: true,
             path: crate::input::InputLine::new("Path:", ""),
             focus: Focus::List,
             pending_path: None,
@@ -294,7 +325,7 @@ impl FileList {
             Some(msg) => (wrap(msg, width).len() as i16).clamp(2, 3),
             None => 2,
         };
-        self.rows = (r.h - 3 - self.foot).max(1);
+        self.rows = (r.h - 1 - self.top() - self.foot).max(1);
         // The column is as wide as the longest name it has to hold, within
         // reason. A fixed width is what a commander used because a fixed width
         // is what 8.3 names are; with names of any length it either wastes
@@ -383,6 +414,40 @@ impl FileList {
         (self.total_cols() - self.left).clamp(1, self.cols)
     }
 
+    /// Mark or unmark the entry under the cursor and step down. Directories
+    /// and `..` are not marked: a mark says "this file", and they are not.
+    pub fn toggle_mark(&mut self) {
+        if !self.multi {
+            return;
+        }
+        let Some(&e) = self.view.get(self.current) else { return };
+        if self.marked.len() != self.entries.len() {
+            self.marked.resize(self.entries.len(), false);
+        }
+        if !self.entries[e].is_dir() {
+            self.marked[e] = !self.marked[e];
+        }
+        self.step(1);
+    }
+
+    /// Whether the entry at a *row* of the view is marked.
+    pub fn is_marked(&self, view_ix: usize) -> bool {
+        self.view
+            .get(view_ix)
+            .and_then(|&e| self.marked.get(e))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// The marked names, in the order they are shown.
+    pub fn marked_names(&self) -> Vec<String> {
+        self.view
+            .iter()
+            .filter(|&&e| self.marked.get(e).copied().unwrap_or(false))
+            .map(|&e| self.entries[e].name.clone())
+            .collect()
+    }
+
     /// Move by whole entries (`1`) or whole columns (`rows`).
     pub fn step(&mut self, delta: i16) {
         if self.view.is_empty() {
@@ -413,14 +478,26 @@ impl FileList {
         self.left = self.left.max(0);
     }
 
+    /// The row the names start on: under the path line and its gap, or at
+    /// the top when there is no path line.
+    pub fn top(&self) -> i16 {
+        if self.path_line {
+            2
+        } else {
+            0
+        }
+    }
+
     /// Which entry is under a point inside the panel.
     pub fn at_point(&self, x: i16, y: i16) -> Option<usize> {
         // Row 0 is the path field and row 1 is the gap under it; the list
-        // starts at row 2 and the information pane is at the foot.
-        if y < 2 || y > self.rows + 1 {
+        // starts at row 2 (or at 0, without a path line) and the information
+        // pane is at the foot.
+        let top = self.top();
+        if y < top || y >= self.rows + top {
             return None;
         }
-        let y = y - 2;
+        let y = y - top;
         let col = self.left + (x - 1).max(0) / self.column_width();
         let ix = (col * self.rows + y) as usize;
         (ix < self.view.len()).then_some(ix)

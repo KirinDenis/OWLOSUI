@@ -120,13 +120,26 @@ public sealed class ConsoleAgent : IDisposable
 
     // --------------------------------------------------------------- screen
 
-    private static readonly Dictionary<char, byte> glyphOf = BuildGlyphMap();
+    /// <summary>
+    /// The table the program under test draws with - 437 unless it was
+    /// started with another code page, in which case set this to the same
+    /// one before reading its screen.
+    /// </summary>
+    public static string Glyphs { get; set; } = Owlosui.Cp437;
 
-    private static Dictionary<char, byte> BuildGlyphMap()
+    private static string mappedFor = "";
+    private static Dictionary<char, byte> glyphOf = new();
+
+    private static Dictionary<char, byte> GlyphMap()
     {
-        var m = new Dictionary<char, byte>();
-        for (var i = 255; i >= 0; i--) m[Owlosui.Cp437[i]] = (byte)i;
-        return m;
+        if (!ReferenceEquals(mappedFor, Glyphs))
+        {
+            var m = new Dictionary<char, byte>();
+            for (var i = 255; i >= 0; i--) m[Glyphs[i]] = (byte)i;
+            glyphOf = m;
+            mappedFor = Glyphs;
+        }
+        return glyphOf;
     }
 
     /// <summary>The visible window of the program's console, as the same kind of frame the wire returns.</summary>
@@ -141,15 +154,17 @@ public sealed class ConsoleAgent : IDisposable
         if (!ReadConsoleOutputW(output, buf, new COORD(w, h), new COORD(0, 0), ref region))
             throw new OwlosuiException($"ReadConsoleOutput failed: {Marshal.GetLastWin32Error()}");
 
+        var map = GlyphMap();
         var cells = new byte[w * h * 2];
         for (var i = 0; i < w * h; i++)
         {
-            cells[i * 2] = glyphOf.TryGetValue((char)buf[i].UnicodeChar, out var g) ? g : (byte)'?';
+            cells[i * 2] = map.TryGetValue((char)buf[i].UnicodeChar, out var g) ? g : (byte)'?';
             cells[i * 2 + 1] = (byte)(buf[i].Attributes & 0xFF);
         }
         var cx = info.dwCursorPosition.X - win.Left;
         var cy = info.dwCursorPosition.Y - win.Top;
-        return new Owlosui.Frame(w, h, cx, cy, cells);
+        // A screen has no "hold": that is between the core and its client.
+        return new Owlosui.Frame(w, h, cx, cy, false, cells, Glyphs);
     }
 
     /// <summary>Poll the screen until it satisfies the test, or give up. Returns the last screen seen.</summary>

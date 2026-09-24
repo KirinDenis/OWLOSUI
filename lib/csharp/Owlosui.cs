@@ -36,8 +36,27 @@ public sealed class Owlosui : IDisposable
     /// size given, for a program with no console to ask: a test, or a client
     /// that will put the cells somewhere else.
     /// </summary>
-    public Owlosui(string? serverPath = null, int width = 0, int height = 0)
+    public Owlosui(string? serverPath = null, int width = 0, int height = 0, int codePage = 0)
     {
+        // The code page: what the program asked for; else OWLOSUI_CODEPAGE in
+        // the environment; else the OEM code page of the machine's locale,
+        // which is what a DOS window here would have been running - 866 on
+        // a Russian Windows - if it is one the server knows; else 437. So an
+        // unchanged program shows Cyrillic names in Russia without being
+        // told, and a person elsewhere gets the page DOS shipped with.
+        if (codePage == 0)
+        {
+            var env = Environment.GetEnvironmentVariable("OWLOSUI_CODEPAGE");
+            if (int.TryParse(env, out var n) && n > 0) codePage = n;
+            else
+            {
+                // The system locale's OEM page (GetOEMCP), not the user's
+                // regional format: it is the "language for non-Unicode
+                // programs", the one a DOS window here would show.
+                var oem = OperatingSystem.IsWindows() ? (int)GetOEMCP() : 437;
+                codePage = oem is 437 or 866 ? oem : 437;
+            }
+        }
         var path = serverPath ?? FindServer();
         var psi = new ProcessStartInfo(path)
         {
@@ -68,7 +87,44 @@ public sealed class Owlosui : IDisposable
         }
         Width = Math.Max(width, 20);
         Height = Math.Max(height, 5);
-        Call(Op.Init, W.I16(Width), W.I16(Height));
+        Call(Op.Init, W.I16(Width), W.I16(Height), W.U16((ushort)codePage));
+        Glyphs = FetchGlyphs();
+    }
+
+    /// <summary>
+    /// What each of the 256 glyph indices looks like, as Unicode - the
+    /// server's table for the session's code page, fetched once, so this
+    /// client keeps no table of its own. Index it with a cell's glyph.
+    /// </summary>
+    public string Glyphs { get; private set; } = Cp437;
+
+    private HashSet<char> glyphSet = new();
+
+    private string FetchGlyphs()
+    {
+        var r = Call(Op.GetGlyphs);
+        var sb = new StringBuilder(256);
+        for (var i = 0; i < 256; i++) sb.Append((char)R.U16(r, i * 2));
+        var g = sb.ToString();
+        // Positions 0x20 up: the pictures below are not text.
+        glyphSet = new HashSet<char>(g.Skip(0x20));
+        return g;
+    }
+
+    /// <summary>
+    /// Whether every character of a text has a glyph on the session's code
+    /// page - so a program can know before the text goes in and comes back
+    /// as `?`. An editor that cannot show a file must not save it.
+    /// </summary>
+    public bool Fits(string text) =>
+        text.All(c => c < 128 || c == '\n' || c == '\r' || c == '\t' || glyphSet.Contains(c));
+
+    /// <summary>Switch the session to another code page: 437 or 866.</summary>
+    public void SetCodePage(int codePage)
+    {
+        Call(Op.CodePage, W.U16((ushort)codePage));
+        Glyphs = FetchGlyphs();
+        prev = null;
     }
 
     public int Width { get; private set; }
@@ -156,6 +212,193 @@ public sealed class Owlosui : IDisposable
         return R.U16(r);
     }
 
+    /// <summary>
+    /// One entry of the status line: what it says, what it sends, and the
+    /// key that sends it. A plain tuple <c>("~F1~ Help", 1)</c> is an entry
+    /// with no key - clickable only.
+    /// </summary>
+    public readonly record struct StatusItem(string Label, ushort Cmd, ConsoleKey Key = ConsoleKey.NoName,
+                                             bool Alt = false, bool Ctrl = false, bool Shift = false, char Ch = '\0')
+    {
+        public static implicit operator StatusItem((string label, ushort cmd) t) => new(t.label, t.cmd);
+    }
+
+    /// <summary>
+    /// The bottom row: keys and what they do. It shows them and it binds
+    /// them - press the key, or click the words, and the command comes back
+    /// through <see cref="Run"/> like a button's. One per program; calling
+    /// this again replaces it.
+    /// </summary>
+    public ushort StatusLine(params StatusItem[] items)
+    {
+        var v = new List<byte> { (byte)items.Length };
+        foreach (var it in items)
+        {
+            v.AddRange(W.U16(it.Cmd));
+            var ch = it.Ch;
+            if (ch == '\0' && it.Key >= ConsoleKey.A && it.Key <= ConsoleKey.Z)
+                ch = (char)('a' + (it.Key - ConsoleKey.A));
+            var k = it.Key == ConsoleKey.NoName ? null : EncodeKey(it.Key, ch, it.Shift, it.Alt, it.Ctrl);
+            if (k is { } key)
+            {
+                v.Add(key.kind);
+                v.AddRange(W.U16(key.value));
+                v.Add(key.mods);
+            }
+            else
+            {
+                v.Add(0xFF);
+                v.AddRange(W.U16(0));
+                v.Add(0);
+            }
+            v.AddRange(W.Str(it.Label));
+        }
+        return R.U16(Call(Op.Status, v.ToArray()));
+    }
+
+    /// <summary>
+    /// Words with a hotkey beside a control: <c>~N~ame:</c> next to an
+    /// input. Alt+N, or a click on the words, puts the focus on the target.
+    /// </summary>
+    public ushort Label(ushort parent, int x, int y, string text, ushort target = 0)
+    {
+        var w = text.Replace("~", "").Length;
+        var r = Call(Op.Label, W.U16(parent), W.Rect(x, y, w, 1), W.U16(target), W.Str(text));
+        return R.U16(r);
+    }
+
+    /// <summary>A bar that fills up: <see cref="SetProgress"/> moves it.</summary>
+    public ushort Progress(ushort parent, int x, int y, int w, uint max = 100, bool percent = true)
+    {
+        var r = Call(Op.Progress, W.U16(parent), W.Rect(x, y, w, 1), W.U32(max), new[] { (byte)(percent ? 1 : 0) });
+        return R.U16(r);
+    }
+
+    public void SetProgress(ushort id, uint value) => Call(Op.SetProgress, W.U16(id), W.U32(value));
+
+    /// <summary>
+    /// A list of strings. With <paramref name="multi"/>, Insert marks the
+    /// item under the cursor and moves down; <see cref="Marked"/> reads the
+    /// marks back and <see cref="Current"/> the cursor.
+    /// </summary>
+    public ushort List(ushort parent, int x, int y, int w, int h, IEnumerable<string> items, bool multi = false)
+    {
+        var list = items.ToList();
+        var v = new List<byte> { (byte)(multi ? 1 : 0) };
+        v.AddRange(W.U16((ushort)list.Count));
+        foreach (var s in list) v.AddRange(W.Str(s));
+        var r = Call(Op.List, W.U16(parent), W.Rect(x, y, w, h), v.ToArray());
+        return R.U16(r);
+    }
+
+    public int[] Marked(ushort id)
+    {
+        var r = Call(Op.GetMarked, W.U16(id));
+        var n = R.U16(r, 0);
+        var out_ = new int[n];
+        for (var i = 0; i < n; i++) out_[i] = R.U16(r, 2 + i * 2);
+        return out_;
+    }
+
+    public int Current(ushort id) => R.U16(Call(Op.GetCurrent, W.U16(id)));
+
+    // -------------------------------------------------------------- files
+
+    /// <summary>
+    /// One line of a directory listing, as the panel shows it. The bits in
+    /// <see cref="Attrs"/> are DOS's: 0x10 directory, 0x01 read-only, 0x02
+    /// hidden, 0x04 system, 0x20 archive.
+    /// </summary>
+    public readonly record struct FileEntry(string Name, uint Size, DateTime Date, byte Attrs)
+    {
+        public const byte Dir = 0x10, ReadOnly = 0x01, Hidden = 0x02, System = 0x04, Archive = 0x20;
+        public bool IsDir => (Attrs & Dir) != 0;
+    }
+
+    /// <summary>
+    /// Read a directory the way a file panel wants it: `..` first unless
+    /// this is a root, then everything else; the panel sorts. This is the
+    /// whole of what the client has to know about a file system - the
+    /// server never opens one. A directory that cannot be read throws, and
+    /// the program decides what to show for it.
+    /// </summary>
+    public static List<FileEntry> ReadDirectory(string path)
+    {
+        var dir = new DirectoryInfo(path);
+        var list = new List<FileEntry>();
+        if (dir.Parent != null)
+            list.Add(new FileEntry("..", 0, dir.LastWriteTime, FileEntry.Dir));
+        foreach (var e in dir.EnumerateFileSystemInfos())
+        {
+            byte attrs = 0;
+            if ((e.Attributes & FileAttributes.Directory) != 0) attrs |= FileEntry.Dir;
+            if ((e.Attributes & FileAttributes.ReadOnly) != 0) attrs |= FileEntry.ReadOnly;
+            if ((e.Attributes & FileAttributes.Hidden) != 0) attrs |= FileEntry.Hidden;
+            if ((e.Attributes & FileAttributes.System) != 0) attrs |= FileEntry.System;
+            if ((e.Attributes & FileAttributes.Archive) != 0) attrs |= FileEntry.Archive;
+            var size = e is FileInfo f ? (uint)Math.Min(f.Length, uint.MaxValue) : 0u;
+            list.Add(new FileEntry(e.Name, size, e.LastWriteTime, attrs));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// A file panel filling its window: the path line, the names in
+    /// columns, the details pane. With <paramref name="multi"/>, Insert
+    /// marks files. What the person does in it comes back through
+    /// <see cref="TakeFiles"/>.
+    /// </summary>
+    public ushort Files(ushort parent, string path, IEnumerable<FileEntry> entries, string mask = "*.*",
+                        bool multi = false, bool pathLabel = true, bool pathLine = true)
+    {
+        var flags = (byte)((multi ? 1 : 0) | (pathLabel ? 0 : 2) | (pathLine ? 0 : 4));
+        var r = Call(Op.Files, W.U16(parent), W.Rect(0, 0, 0, 0), new[] { flags },
+                     W.Str(mask), W.Str(Path.Combine(path, mask)), W.Entries(entries));
+        return R.U16(r);
+    }
+
+    /// <summary>A new listing for a panel: the person went somewhere else, or something changed.</summary>
+    public void SetFiles(ushort id, string path, IEnumerable<FileEntry> entries, string mask = "*.*") =>
+        Call(Op.SetFiles, W.U16(id), W.Str(Path.Combine(path, mask)), W.Str(mask), W.Entries(entries));
+
+    /// <summary>Something to say in the panel's pane instead of details: a folder that could not be read.</summary>
+    public void SetFilesError(ushort id, string text) => Call(Op.SetFilesError, W.U16(id), W.Str(text));
+
+    public enum FilesEvent : byte { None = 0, Chosen = 1, Path = 2 }
+
+    /// <summary>
+    /// What the person did in a panel since last asked: pressed Enter on a
+    /// name (<see cref="FilesEvent.Chosen"/>, with the name), or typed a
+    /// path and pressed Enter (<see cref="FilesEvent.Path"/>, with the
+    /// text). Read once, like <see cref="Take"/>.
+    /// </summary>
+    public (FilesEvent kind, string text) TakeFiles(ushort id)
+    {
+        var r = Call(Op.TakeFiles, W.U16(id));
+        return ((FilesEvent)r[0], R.Str(r, 1));
+    }
+
+    /// <summary>The marked names of a panel - or the one under the cursor, if none are marked.</summary>
+    public string[] MarkedNames(ushort id)
+    {
+        var r = Call(Op.MarkedNames, W.U16(id));
+        var n = R.U16(r, 0);
+        var names = new string[n];
+        var at = 2;
+        for (var i = 0; i < n; i++)
+        {
+            names[i] = R.Str(r, at);
+            at += 2 + Encoding.UTF8.GetByteCount(names[i]);
+        }
+        return names;
+    }
+
+    /// <summary>Bring a window to the front and give it the keys.</summary>
+    public void Activate(ushort window) => Call(Op.Activate, W.U16(window));
+
+    /// <summary>The window in front, or 0.</summary>
+    public ushort Active() => R.U16(Call(Op.Active));
+
     public void Close(ushort id) => Call(Op.Close, W.U16(id));
 
     /// <summary>What a Text, Memo or Input holds right now.</summary>
@@ -190,13 +433,29 @@ public sealed class Owlosui : IDisposable
     /// <summary>Send one key. Returns false if it was one the wire has no name for.</summary>
     public bool SendKey(ConsoleKeyInfo k)
     {
+        var shift = k.Modifiers.HasFlag(ConsoleModifiers.Shift);
+        var ctrl = k.Modifiers.HasFlag(ConsoleModifiers.Control);
+        var alt = k.Modifiers.HasFlag(ConsoleModifiers.Alt);
+        if (EncodeKey(k.Key, k.KeyChar, shift, alt, ctrl) is not { } code) return false;
+        Call(Op.Key, new[] { code.kind }, W.U16(code.value), new[] { code.mods });
+        return true;
+    }
+
+    /// <summary>
+    /// A key as the wire spells it: a named key, a function key, or a
+    /// character with its modifiers. Null for a key the wire has no name
+    /// for. The one place this is decided, so the status line and a
+    /// keystroke cannot disagree about what Alt+X is.
+    /// </summary>
+    private static (byte kind, ushort value, byte mods)? EncodeKey(ConsoleKey key, char ch, bool shift, bool alt, bool ctrl)
+    {
         byte mods = 0;
-        if (k.Modifiers.HasFlag(ConsoleModifiers.Shift)) mods |= 1;
-        if (k.Modifiers.HasFlag(ConsoleModifiers.Control)) mods |= 2;
-        if (k.Modifiers.HasFlag(ConsoleModifiers.Alt)) mods |= 4;
+        if (shift) mods |= 1;
+        if (ctrl) mods |= 2;
+        if (alt) mods |= 4;
 
         static (byte kind, ushort value)? Named(ushort v) => ((byte)2, v);
-        (byte kind, ushort value)? code = k.Key switch
+        (byte kind, ushort value)? code = key switch
         {
             ConsoleKey.Enter => Named(0),
             ConsoleKey.Escape => Named(1),
@@ -212,23 +471,21 @@ public sealed class Owlosui : IDisposable
             ConsoleKey.DownArrow => Named(12),
             ConsoleKey.LeftArrow => Named(13),
             ConsoleKey.RightArrow => Named(14),
-            >= ConsoleKey.F1 and <= ConsoleKey.F12 => ((byte)1, (ushort)(k.Key - ConsoleKey.F1 + 1)),
+            >= ConsoleKey.F1 and <= ConsoleKey.F12 => ((byte)1, (ushort)(key - ConsoleKey.F1 + 1)),
             _ => null,
         };
         if (code is null)
         {
-            var ch = k.KeyChar;
             // Ctrl+letter arrives as a control character; the core wants the
             // letter and the modifier, as a keymap table would spell it.
             if (ch >= 1 && ch <= 26 && (mods & 2) != 0) ch = (char)('a' + ch - 1);
-            if (ch == '\0' || char.IsControl(ch)) return false;
+            if (ch == '\0' || char.IsControl(ch)) return null;
             // Shift is already in the character's case. Sending it as well
             // would make Shift+A a different key from A, which it is not.
             if ((mods & 6) == 0) mods = 0;
             code = (0, ch);
         }
-        Call(Op.Key, new[] { code.Value.kind }, W.U16(code.Value.value), new[] { mods });
-        return true;
+        return (code.Value.kind, code.Value.value, mods);
     }
 
     /// <summary>A named key with modifiers, for a program or a test that has no keyboard in hand.</summary>
@@ -257,14 +514,28 @@ public sealed class Owlosui : IDisposable
     public Frame GetFrame()
     {
         var r = Call(Op.Frame);
-        return new Frame(R.I16(r, 0), R.I16(r, 2), R.I16(r, 4), R.I16(r, 6), r[8..]);
+        return new Frame(R.I16(r, 0), R.I16(r, 2), R.I16(r, 4), R.I16(r, 6), r[8] != 0, r[9..], Glyphs);
     }
 
-    public readonly record struct Frame(int W, int H, int CursorX, int CursorY, byte[] Cells)
+    /// <summary>
+    /// The moment has passed: deliver what the last frame was holding - a
+    /// button a key put down, a menu item chosen. `Run` sends this itself
+    /// after showing such a frame for 90 ms; a headless client sends it
+    /// when it has "looked".
+    /// </summary>
+    public void Tick() => Call(Op.Tick);
+
+    /// <summary>
+    /// The screen as the core drew it: two bytes per cell, glyph then
+    /// attribute. <see cref="Hold"/> means "show this one for a moment, then
+    /// <see cref="Tick"/>": something chosen is being shown before it happens.
+    /// </summary>
+    public readonly record struct Frame(int W, int H, int CursorX, int CursorY, bool Hold, byte[] Cells, string Glyphs)
     {
         public byte Glyph(int x, int y) => Cells[(y * W + x) * 2];
         public byte Attr(int x, int y) => Cells[(y * W + x) * 2 + 1];
-        public char Char(int x, int y) => Cp437[Glyph(x, y)];
+        /// <summary>The cell as a character, through the table the server gave for its code page.</summary>
+        public char Char(int x, int y) => Glyphs[Glyph(x, y)];
 
         /// <summary>One row as text, for looking at and for searching.</summary>
         public string Row(int y)
@@ -301,7 +572,14 @@ public sealed class Owlosui : IDisposable
     /// <paramref name="onCommand"/> returns false. This is the whole event
     /// loop of an application; most programs never need anything else.
     /// </summary>
-    public void Run(Func<ushort, bool> onCommand)
+    public void Run(Func<ushort, bool> onCommand) => Run(onCommand, null);
+
+    /// <summary>
+    /// As <see cref="Run(Func{ushort, bool})"/>, with <paramref name="afterInput"/>
+    /// called after every event as well - for what a program has to poll
+    /// rather than be told: a name chosen in a file panel is not a command.
+    /// </summary>
+    public void Run(Func<ushort, bool> onCommand, Action? afterInput)
     {
         var enc = Console.OutputEncoding;
         Console.OutputEncoding = Encoding.UTF8;
@@ -321,7 +599,19 @@ public sealed class Owlosui : IDisposable
         {
             while (true)
             {
-                Draw();
+                var hold = Draw();
+                if (hold)
+                {
+                    // A button a key just pressed is on the screen, down.
+                    // Leave it there long enough to be seen, then let it
+                    // happen. Turbo Vision did the same for a menu item.
+                    Thread.Sleep(90);
+                    Tick();
+                    var (p, c) = Take();
+                    if (p != 0 && !onCommand(p)) return;
+                    if (c != 0 && !onCommand(c)) return;
+                    continue;
+                }
                 foreach (var ev in input.Read())
                 {
                     var sent = ev switch
@@ -335,6 +625,7 @@ public sealed class Owlosui : IDisposable
                     var (pressed, command) = Take();
                     if (pressed != 0 && !onCommand(pressed)) return;
                     if (command != 0 && !onCommand(command)) return;
+                    afterInput?.Invoke();
                 }
             }
         }
@@ -396,12 +687,15 @@ public sealed class Owlosui : IDisposable
 
     private byte[]? prev;
 
-    /// <summary>Fetch the frame and put what changed on the console.</summary>
-    public void Draw()
+    /// <summary>
+    /// Fetch the frame and put what changed on the console. Returns whether
+    /// the frame asked to be held - see <see cref="Frame.Hold"/>.
+    /// </summary>
+    public bool Draw()
     {
         try
         {
-            DrawCells();
+            return DrawCells();
         }
         catch (ArgumentOutOfRangeException)
         {
@@ -410,14 +704,16 @@ public sealed class Owlosui : IDisposable
             // and the size event that explains it is already queued. Nothing
             // is lost: the next frame is drawn in full.
             prev = null;
+            return false;
         }
         catch (IOException)
         {
             prev = null;
+            return false;
         }
     }
 
-    private void DrawCells()
+    private bool DrawCells()
     {
         var f = GetFrame();
         var full = prev is null || prev.Length != f.Cells.Length;
@@ -448,7 +744,7 @@ public sealed class Owlosui : IDisposable
                 {
                     var j = (y * f.W + x) * 2;
                     if (f.Cells[j + 1] != attr) break;
-                    sb.Append(Cp437[f.Cells[j]]);
+                    sb.Append(f.Glyphs[f.Cells[j]]);
                     x++;
                 }
                 Console.SetCursorPosition(start, y);
@@ -468,6 +764,7 @@ public sealed class Owlosui : IDisposable
         {
             Console.CursorVisible = false;
         }
+        return f.Hold;
     }
 
     // ------------------------------------------------------- console input
@@ -652,11 +949,13 @@ public sealed class Owlosui : IDisposable
 
     private static class Op
     {
-        public const byte Quit = 0x00, Init = 0x01, Resize = 0x02;
+        public const byte Quit = 0x00, Init = 0x01, Resize = 0x02, CodePage = 0x03;
         public const byte Window = 0x10, Text = 0x11, Static = 0x12, Input = 0x13, Buttons = 0x14, MessageBox = 0x15;
-        public const byte Close = 0x20, GetText = 0x21;
-        public const byte Key = 0x30, Mouse = 0x31;
-        public const byte Frame = 0x40, Take = 0x41;
+        public const byte Status = 0x16, Label = 0x17, Progress = 0x18, List = 0x19, Files = 0x1A;
+        public const byte Close = 0x20, GetText = 0x21, SetProgress = 0x22, GetMarked = 0x23, GetCurrent = 0x24;
+        public const byte SetFiles = 0x25, TakeFiles = 0x26, Activate = 0x27, MarkedNames = 0x28, SetFilesError = 0x29, Active = 0x2A;
+        public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
+        public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;
     }
 
     private readonly Process proc;
@@ -738,6 +1037,25 @@ public sealed class Owlosui : IDisposable
     private static class W
     {
         public static byte[] U16(ushort v) => BitConverter.GetBytes(v);
+        public static byte[] U32(uint v) => BitConverter.GetBytes(v);
+        public static byte[] Entries(IEnumerable<FileEntry> entries)
+        {
+            var list = entries.ToList();
+            var v = new List<byte>();
+            v.AddRange(U16((ushort)Math.Min(list.Count, ushort.MaxValue)));
+            foreach (var e in list.Take(ushort.MaxValue))
+            {
+                v.AddRange(Str(e.Name));
+                v.AddRange(U32(e.Size));
+                v.AddRange(U16((ushort)e.Date.Year));
+                v.Add((byte)e.Date.Month);
+                v.Add((byte)e.Date.Day);
+                v.Add((byte)e.Date.Hour);
+                v.Add((byte)e.Date.Minute);
+                v.Add(e.Attrs);
+            }
+            return v.ToArray();
+        }
         public static byte[] I16(int v) => BitConverter.GetBytes((short)v);
         public static byte[] Rect(int x, int y, int w, int h) =>
             I16(x).Concat(I16(y)).Concat(I16(w)).Concat(I16(h)).ToArray();
@@ -775,7 +1093,11 @@ public sealed class Owlosui : IDisposable
         }
     }
 
-    /// <summary>Code page 437, glyph index to Unicode. Same table as the Rust side.</summary>
+    /// <summary>
+    /// Code page 437, glyph index to Unicode: the default before a session
+    /// has told us its own (see <see cref="Glyphs"/>), and what the console
+    /// agent reads a screen with unless told otherwise.
+    /// </summary>
     public static readonly string Cp437 = "\u0020\u263A\u263B\u2665\u2666\u2663\u2660\u2022\u25D8\u25CB\u25D9\u2642\u2640\u266A\u266B\u263C" +
         "\u25BA\u25C4\u2195\u203C\u00B6\u00A7\u25AC\u21A8\u2191\u2193\u2192\u2190\u221F\u2194\u25B2\u25BC" +
         "\u0020\u0021\u0022\u0023\u0024\u0025\u0026\u0027\u0028\u0029\u002A\u002B\u002C\u002D\u002E\u002F" +

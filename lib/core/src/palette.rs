@@ -134,6 +134,14 @@ pub struct Palette {
     pub status: u8,
     pub status_key: u8,
     pub status_disabled: u8,
+
+    /// A label beside a control: its words, its hotkey letter, and the
+    /// whole of it when its control has the focus.
+    pub label: u8,
+    pub label_key: u8,
+    pub label_active: u8,
+    /// A marked item in a list or a file panel - yellow, as Norton had it.
+    pub list_marked: u8,
 }
 
 impl Palette {
@@ -145,6 +153,14 @@ impl Palette {
     /// is dark grey so that it is there at all. The background is the
     /// surface's, always: a shadow that brought its own background would be
     /// a grey smear on a blue window, which is what this replaced.
+    /// A progress bar on a surface: blue where the surface is not, cyan
+    /// where it is, so the bar is never the colour of what it sits on.
+    pub fn progress_on(surface: u8) -> u8 {
+        let bg = attr_bg(surface);
+        let fg = if bg == Color::Blue { Color::Cyan } else { Color::Blue };
+        attr(fg, bg)
+    }
+
     pub fn shadow_on(surface: u8) -> u8 {
         let bg = attr_bg(surface);
         let fg = match bg {
@@ -315,6 +331,14 @@ impl Palette {
             status: attr(Color::Black, Color::LightGray),
             status_key: attr(Color::Red, Color::LightGray),
             status_disabled: attr(Color::DarkGray, Color::LightGray),
+
+            // CDialog's label entries: black, yellow for the letter, white
+            // when its control is current. From the palette table rather
+            // than measured; there is no reference scene with a label yet.
+            label: attr(Color::Black, Color::LightGray),
+            label_key: attr(Color::Yellow, Color::LightGray),
+            label_active: attr(Color::White, Color::LightGray),
+            list_marked: attr(Color::Yellow, Color::Blue),
         }
     }
 }

@@ -28,7 +28,7 @@ fn picture(buf: &Buffer) -> String {
                 0x19 | 0x1F => 'v',     // ↓ ▼
                 0x10 | 0x11 => '<',     // ► ◄
                 0xFE => '*',            // ■ close box
-                b if b.is_ascii_graphic() || b == b' ' => b as char,
+                b if b < 128 && ((b as u8).is_ascii_graphic() || b == 32) => (b as u8) as char,
                 _ => '?',
             });
         }

@@ -94,10 +94,16 @@ pub struct ButtonRow {
 
 impl ButtonRow {
     pub fn new(buttons: Vec<Button>) -> Self {
+        // The cursor starts on the default button, not on the first. Enter on
+        // a focused row presses the button under the cursor - Turbo Vision
+        // made the focused button the default for as long as it was focused
+        // - so a row whose cursor started elsewhere would press the wrong
+        // one on the first Enter: "Yes" in a box built to answer "No".
+        let current = buttons.iter().position(|b| b.default).unwrap_or(0);
         ButtonRow {
             align: Align::Right,
             buttons,
-            current: 0,
+            current,
             focused: false,
             pressed: None,
             down: None,
