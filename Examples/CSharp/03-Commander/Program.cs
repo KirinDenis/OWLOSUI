@@ -54,6 +54,9 @@ public sealed class App
     public const ushort CmSave = 23;
     public const ushort CmCloseEdit = 24;
     public const ushort CmCloseView = 25;
+    public const ushort CmProperties = 26;
+    // The tree mode of a panel, and the drive dialog for either.
+    public const ushort CmTree = 27, CmDriveLeft = 28, CmDriveRight = 29, CmDriveOk = 30;
 
     private readonly Owlosui owl;
 
@@ -64,6 +67,11 @@ public sealed class App
         public ushort Files;
         public string Dir = "";
         public string Mask = "*.*";
+        /// <summary>The tree, while the panel shows the folders of its drive instead of files.</summary>
+        public ushort Tree;
+        public string TreeRoot = "";
+        /// <summary>The folder the tree's cursor was on, so the other panel is sent there once.</summary>
+        public string TreeDir = "";
     }
 
     public Panel Left { get; }
@@ -99,7 +107,13 @@ public sealed class App
                        new Owlosui.StatusItem("~F7~ MkDir", CmMkdir, ConsoleKey.F7),
                        new Owlosui.StatusItem("~F8~ Del", CmDelete, ConsoleKey.F8),
                        new Owlosui.StatusItem("~F10~ Quit", CmQuit, ConsoleKey.F10),
-                       new Owlosui.StatusItem("", CmSwitch, ConsoleKey.Tab));
+                       new Owlosui.StatusItem("", CmSwitch, ConsoleKey.Tab),
+                       // Bound without labels, as the commanders had them:
+                       // Alt+F1 and Alt+F2 choose a drive, Alt+F10 shows
+                       // the drive as a tree of folders.
+                       new Owlosui.StatusItem("", CmDriveLeft, ConsoleKey.F1, Alt: true),
+                       new Owlosui.StatusItem("", CmDriveRight, ConsoleKey.F2, Alt: true),
+                       new Owlosui.StatusItem("", CmTree, ConsoleKey.F10, Alt: true));
 
         // Two windows, each half the screen, above the status line. They are
         // ordinary document windows - drag one aside if you like - and
@@ -148,8 +162,26 @@ public sealed class App
                 if (editor == 0 && viewer == 0) owl.Activate(Other.Window);
                 return true;
 
+            case CmTree: ToggleTree(Active); return true;
+            case CmDriveLeft: ShowDrives(Left); return true;
+            case CmDriveRight: ShowDrives(Right); return true;
+            case CmDriveOk:
+            {
+                var drives = DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => d.RootDirectory.FullName).ToArray();
+                var ix = owl.Current(driveList);
+                var panel = drivePanel;
+                CloseBox();
+                if (panel != null && ix >= 0 && ix < drives.Length)
+                {
+                    if (panel.Tree != 0) ToggleTree(panel);
+                    Go(panel, drives[ix], "*.*");
+                }
+                return true;
+            }
+
             case CmHelp:
-                Tell("Enter opens the folder under the cursor, or views the file. Insert marks. " +
+                Tell("Enter opens the folder under the cursor, or shows the file's properties; F3 views, F4 edits. Insert marks. " +
+                     "Alt+F1 and Alt+F2 choose a drive for the left and the right panel; Alt+F10 shows the drive as a tree of folders, and the other panel follows the cursor. " +
                      "F5, F6 and F8 use the marks, or the cursor if there are none; copy and move go " +
                      "to the other panel. Tab or a click changes panel. F10 quits.");
                 return true;
@@ -252,6 +284,11 @@ public sealed class App
     {
         foreach (var p in new[] { Left, Right })
         {
+            if (p.Tree != 0)
+            {
+                PollTree(p);
+                continue;
+            }
             var (kind, text) = owl.TakeFiles(p.Files);
             switch (kind)
             {
@@ -263,9 +300,12 @@ public sealed class App
                         if (up != null) Go(p, up.FullName, p.Mask);
                         break;
                     }
+                    // Enter, or a double click, on a name: a folder is
+                    // entered, a file shows its properties. Viewing is F3
+                    // and editing F4, as they were in the commanders.
                     var full = Path.Combine(p.Dir, text);
                     if (Directory.Exists(full)) Go(p, full, p.Mask);
-                    else if (File.Exists(full)) ViewFile(full);
+                    else if (File.Exists(full)) ShowProperties(full);
                     break;
                 }
 
@@ -288,6 +328,88 @@ public sealed class App
     // ---------------------------------------------------------------- panels
 
     /// <summary>Show another folder in a panel - or say why not, and stay.</summary>
+    // ------------------------------------------------------------ the tree
+
+    /// <summary>
+    /// Alt+F10: the panel shows the folders of its drive as a tree instead
+    /// of the files of one folder, and back. The tree is filled as it is
+    /// opened - a folder's subfolders are read when its node is - and the
+    /// other panel follows the cursor, which is what a tree panel was for.
+    /// </summary>
+    private void ToggleTree(Panel p)
+    {
+        if (p.Tree == 0)
+        {
+            p.TreeRoot = Path.GetPathRoot(p.Dir) ?? p.Dir;
+            owl.Close(p.Files);
+            p.Files = 0;
+            p.Tree = owl.Tree(p.Window, new Owlosui.TreeNode(p.TreeRoot.TrimEnd('\\'), Subfolders(p.TreeRoot), Open: true));
+            p.TreeDir = "";
+            return;
+        }
+        var dir = TreeDir(p, owl.TreePath(p.Tree));
+        owl.Close(p.Tree);
+        p.Tree = 0;
+        p.Files = owl.Files(p.Window, p.Dir, Owlosui.ReadDirectory(p.Dir), p.Mask, multi: true, pathLine: false);
+        Go(p, dir, p.Mask);
+    }
+
+    /// <summary>A folder's subfolders as lazy nodes: each is read when opened.</summary>
+    private static Owlosui.TreeNode[] Subfolders(string dir)
+    {
+        try
+        {
+            return Directory.EnumerateDirectories(dir)
+                .Select(Path.GetFileName)
+                .Where(n => n != null)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Select(n => new Owlosui.TreeNode(n!, Lazy: true))
+                .ToArray();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return Array.Empty<Owlosui.TreeNode>();
+        }
+    }
+
+    /// <summary>The folder a path of tree texts names: the root, then each name.</summary>
+    private static string TreeDir(Panel p, string[] texts) =>
+        texts.Length <= 1 ? p.TreeRoot : Path.Combine(new[] { p.TreeRoot }.Concat(texts.Skip(1)).ToArray());
+
+    /// <summary>A tree panel, after every input: fill what was opened, and send the other panel where the cursor is.</summary>
+    private void PollTree(Panel p)
+    {
+        if (p.Tree == 0) return;
+        if (owl.TreeExpand(p.Tree) is { } ask)
+            owl.TreeChildren(p.Tree, ask.path, Subfolders(TreeDir(p, ask.texts)));
+        var dir = TreeDir(p, owl.TreePath(p.Tree));
+        if (dir != p.TreeDir)
+        {
+            p.TreeDir = dir;
+            var other = p == Left ? Right : Left;
+            if (other.Tree == 0 && Directory.Exists(dir)) Go(other, dir, other.Mask);
+        }
+    }
+
+    // ---------------------------------------------------------- the drives
+
+    private ushort driveList;
+    private Panel? drivePanel;
+
+    /// <summary>Alt+F1 / Alt+F2: a drive for the left or the right panel.</summary>
+    private void ShowDrives(Panel p)
+    {
+        CloseBox();
+        onYes = null;
+        drivePanel = p;
+        var drives = DriveInfo.GetDrives().Where(d => d.IsReady)
+            .Select(d => $"{d.RootDirectory.FullName.TrimEnd('\\')}  {d.DriveType}  {d.VolumeLabel}".TrimEnd())
+            .ToArray();
+        box = owl.Window("Drive", 40, 6 + Math.Min(drives.Length, 8), style: Owlosui.Style.ModalDialog, closeCmd: CmNo);
+        driveList = owl.List(box, 1, 1, 34, Math.Min(drives.Length, 8), drives);
+        owl.Buttons(box, new Owlosui.Button("~O~K", CmDriveOk, Default: true), new Owlosui.Button("~C~ancel", CmNo, Cancel: true));
+    }
+
     private void Go(Panel p, string dir, string mask)
     {
         try
@@ -442,13 +564,49 @@ public sealed class App
             if (Binary(path)) { Tell("Not a text file."); return; }
             var text = ReadText(path);
             if (viewer != 0) owl.Close(viewer);
-            // Cyan, like a help window: something to read, not to change.
+            // Blue, like an editor: a viewer is an editor that does not
+            // take typing, and its title says [view]. The file managers
+            // people learned on did not colour the two apart either.
             viewer = owl.Window(Path.GetFileName(path), owl.Width - 8, owl.Height - 4,
-                                style: Owlosui.Style.Help, closeCmd: CmCloseView);
+                                style: Owlosui.Style.Document, closeCmd: CmCloseView);
             owl.Text(viewer, text, readOnly: true);
             owl.Buttons(viewer, ("~C~lose", CmCloseView));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Tell(e.Message); }
+    }
+
+    /// <summary>
+    /// What a double click on a file name opens: where it is, how big it
+    /// is, its three dates and its attributes, in a modal dialog.
+    /// </summary>
+    private void ShowProperties(string path)
+    {
+        CloseBox();
+        var fi = new FileInfo(path);
+        var a = fi.Attributes;
+        var attrs = new List<string>();
+        if ((a & FileAttributes.ReadOnly) != 0) attrs.Add("read-only");
+        if ((a & FileAttributes.Hidden) != 0) attrs.Add("hidden");
+        if ((a & FileAttributes.System) != 0) attrs.Add("system");
+        if ((a & FileAttributes.Archive) != 0) attrs.Add("archive");
+        var rows = new (string label, string value)[]
+        {
+            ("Name", fi.Name),
+            ("Folder", fi.DirectoryName ?? ""),
+            ("Size", $"{fi.Length:N0} bytes"),
+            ("Created", fi.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")),
+            ("Modified", fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")),
+            ("Accessed", fi.LastAccessTime.ToString("yyyy-MM-dd HH:mm:ss")),
+            ("Attributes", attrs.Count == 0 ? "none" : string.Join(", ", attrs)),
+        };
+        var w = Math.Min(owl.Width - 4, Math.Max(44, rows.Max(r => r.value.Length) + 18));
+        box = owl.Window("Properties", w, rows.Length + 6, style: Owlosui.Style.ModalDialog, closeCmd: CmNo);
+        for (var i = 0; i < rows.Length; i++)
+        {
+            owl.Static(box, 2, 1 + i, rows[i].label + ":");
+            owl.Static(box, 14, 1 + i, rows[i].value, w - 18);
+        }
+        owl.Buttons(box, ("~O~K", CmNo));
     }
 
     private void EditFile(string path)

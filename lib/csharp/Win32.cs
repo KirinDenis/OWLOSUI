@@ -26,6 +26,7 @@ internal static class Win32
     public const ushort WINDOW_BUFFER_SIZE_EVENT = 0x0004;
 
     public const uint MOUSE_MOVED = 0x0001;
+    public const uint DOUBLE_CLICK = 0x0002;
     public const uint MOUSE_WHEELED = 0x0004;
     public const uint MOUSE_HWHEELED = 0x0008;
 

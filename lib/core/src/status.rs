@@ -12,6 +12,7 @@
 
 use crate::event::Key;
 
+#[derive(Clone)]
 pub struct StatusItem {
     /// The label, with the key's name between tildes: `~F1~ Help`. What is
     /// between the tildes is drawn in the key colour; the rest in the text
@@ -53,12 +54,17 @@ impl StatusItem {
 }
 
 pub struct StatusLine {
+    /// What is shown and bound right now: the application's own items and,
+    /// after them, whatever the active window brought. Composed by the
+    /// desktop before every event and every frame.
     pub items: Vec<StatusItem>,
+    /// The application's own items, which every composition starts from.
+    pub base: Vec<StatusItem>,
 }
 
 impl StatusLine {
     pub fn new(items: Vec<StatusItem>) -> Self {
-        StatusLine { items }
+        StatusLine { base: items.clone(), items }
     }
 
     /// Where an item starts. One column in from the left, two between items

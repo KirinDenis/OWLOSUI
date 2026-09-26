@@ -168,6 +168,169 @@ public sealed class Owlosui : IDisposable
         return R.U16(r);
     }
 
+    /// <summary>
+    /// A viewer becomes an editor, or the other way round. The window's
+    /// title says <c>[view]</c> while it is one; the colour does not
+    /// change, as it did not in the file managers people learned on.
+    /// </summary>
+    public void SetReadOnly(ushort text, bool on) => Call(Op.SetReadOnly, W.U16(text), new[] { (byte)(on ? 1 : 0) });
+
+    /// <summary>
+    /// What an input line has been given before, newest first. Down, or
+    /// the ▼ at the field's end, lists them; a pick fills the field. Enter
+    /// in the field adds to the list.
+    /// </summary>
+    public void SetHistory(ushort input, params string[] items)
+    {
+        var v = new List<byte> { (byte)Math.Min(items.Length, 255) };
+        foreach (var it in items.Take(255)) v.AddRange(W.Str(it));
+        Call(Op.SetHistory, W.U16(input), v.ToArray());
+    }
+
+    /// <summary>
+    /// Find the next match after the caret in a text view and select it.
+    /// False when there is none; the search does not wrap.
+    /// </summary>
+    public bool Find(ushort text, string pattern, bool caseSensitive = false, bool wholeWord = false)
+    {
+        var flags = (byte)((caseSensitive ? 1 : 0) | (wholeWord ? 2 : 0));
+        return Call(Op.Find, W.U16(text), new[] { flags }, W.Str(pattern))[0] != 0;
+    }
+
+    /// <summary>Replace the selected match and find the next: (replaced, found).</summary>
+    public (bool replaced, bool found) Replace(ushort text, string pattern, string with, bool caseSensitive = false, bool wholeWord = false)
+    {
+        var flags = (byte)((caseSensitive ? 1 : 0) | (wholeWord ? 2 : 0));
+        var r = Call(Op.Replace, W.U16(text), new[] { flags }, W.Str(pattern), W.Str(with));
+        return (r[0] != 0, r[1] != 0);
+    }
+
+    /// <summary>Replace every match; how many.</summary>
+    public int ReplaceAll(ushort text, string pattern, string with, bool caseSensitive = false, bool wholeWord = false)
+    {
+        var flags = (byte)((caseSensitive ? 1 : 0) | (wholeWord ? 2 : 0));
+        return R.U16(Call(Op.ReplaceAll, W.U16(text), new[] { flags }, W.Str(pattern), W.Str(with)));
+    }
+
+    /// <summary>
+    /// A node of a tree. <c>Lazy</c> says children exist but are given
+    /// only when the node is opened - <see cref="TreeExpand"/> then names
+    /// it and <see cref="TreeChildren"/> fills it. A disk is not read whole.
+    /// </summary>
+    public sealed record TreeNode(string Text, TreeNode[]? Children = null, bool Open = false, bool Lazy = false);
+
+    /// <summary>A tree filling its window.</summary>
+    public ushort Tree(ushort parent, params TreeNode[] nodes) =>
+        R.U16(Call(Op.Tree, W.U16(parent), W.Rect(0, 0, 0, 0), W.Nodes(nodes)));
+
+    /// <summary>The children of the node at <paramref name="path"/>; the node opens.</summary>
+    public void TreeChildren(ushort tree, int[] path, params TreeNode[] nodes)
+    {
+        var v = new List<byte> { (byte)path.Length };
+        foreach (var i in path) v.AddRange(W.U16((ushort)i));
+        Call(Op.TreeChildren, W.U16(tree), v.ToArray(), W.Nodes(nodes));
+    }
+
+    /// <summary>
+    /// The lazy node somebody opened, once: its path as indices and as
+    /// the texts along it, or null. Answer with <see cref="TreeChildren"/>.
+    /// </summary>
+    public (int[] path, string[] texts)? TreeExpand(ushort tree)
+    {
+        var r = Call(Op.TreeExpand, W.U16(tree));
+        var n = r[0];
+        if (n == 0) return null;
+        var path = new int[n];
+        var texts = new string[n];
+        var at = 1;
+        for (var i = 0; i < n; i++)
+        {
+            path[i] = r[at] | (r[at + 1] << 8);
+            at += 2;
+            var len = r[at] | (r[at + 1] << 8);
+            texts[i] = System.Text.Encoding.UTF8.GetString(r, at + 2, len);
+            at += 2 + len;
+        }
+        return (path, texts);
+    }
+
+    /// <summary>The texts from the root down to the tree's current row.</summary>
+    public string[] TreePath(ushort tree)
+    {
+        var r = Call(Op.TreePath, W.U16(tree));
+        var n = r[0];
+        var texts = new string[n];
+        var at = 1;
+        for (var i = 0; i < n; i++)
+        {
+            var len = r[at] | (r[at + 1] << 8);
+            texts[i] = System.Text.Encoding.UTF8.GetString(r, at + 2, len);
+            at += 2 + len;
+        }
+        return texts;
+    }
+
+    /// <summary>One colour of the palette: its group, its name, and the attribute it wears.</summary>
+    public readonly record struct PaletteEntry(string Group, string Name, byte Attr);
+
+    /// <summary>
+    /// Every colour the toolkit draws with, by role, in the order
+    /// <see cref="SetColor"/> indexes. Colour comes from the palette by
+    /// role, never from the element, so changing an entry here changes
+    /// everything that plays that role.
+    /// </summary>
+    public PaletteEntry[] Palette()
+    {
+        var r = Call(Op.Palette);
+        var n = r[0];
+        var items = new PaletteEntry[n];
+        var at = 1;
+        string Str()
+        {
+            var len = r[at] | (r[at + 1] << 8);
+            var s = System.Text.Encoding.UTF8.GetString(r, at + 2, len);
+            at += 2 + len;
+            return s;
+        }
+        for (var i = 0; i < n; i++)
+        {
+            var group = Str();
+            var name = Str();
+            items[i] = new PaletteEntry(group, name, r[at++]);
+        }
+        return items;
+    }
+
+    /// <summary>Change one colour of the palette; the next frame wears it.</summary>
+    public void SetColor(int index, byte attr) => Call(Op.SetColor, new[] { (byte)index, attr });
+
+    /// <summary>The history of an input line, newest first, to keep for next time.</summary>
+    public string[] GetHistory(ushort input)
+    {
+        var r = Call(Op.GetHistory, W.U16(input));
+        var n = r[0];
+        var items = new string[n];
+        var at = 1;
+        for (var i = 0; i < n; i++)
+        {
+            var len = r[at] | (r[at + 1] << 8);
+            items[i] = System.Text.Encoding.UTF8.GetString(r, at + 2, len);
+            at += 2 + len;
+        }
+        return items;
+    }
+
+    /// <summary>
+    /// A hex dump filling its window: offsets, bytes, characters. At most
+    /// 64K of bytes cross the wire in one call; send the part to be seen.
+    /// </summary>
+    public ushort Hex(ushort parent, byte[] bytes)
+    {
+        if (bytes.Length > 60000) bytes = bytes[..60000];
+        var r = Call(Op.Hex, W.U16(parent), W.Rect(0, 0, 0, 0), bytes);
+        return R.U16(r);
+    }
+
     /// <summary>A boxed memo at a place of its own inside the window.</summary>
     public ushort Memo(ushort parent, int x, int y, int w, int h, string text = "", bool readOnly = false)
     {
@@ -196,10 +359,48 @@ public sealed class Owlosui : IDisposable
     /// sends, and whether Enter presses it from anywhere in the dialog.
     /// A plain tuple <c>("~O~K", 1)</c> converts to one.
     /// </summary>
-    public readonly record struct Button(string Label, ushort Cmd, bool Default = false)
+    public enum ButtonStyle : byte { Normal = 0, Accent = 1, Danger = 2 }
+
+    /// <summary>
+    /// A button: its label with the hotkey between tildes, the command it
+    /// sends, whether Enter presses it (<c>Default</c>) and whether Escape
+    /// does (<c>Cancel</c>), its colour and whether it can be pressed.
+    /// </summary>
+    public readonly record struct Button(string Label, ushort Cmd, bool Default = false,
+                                         ButtonStyle Style = ButtonStyle.Normal, bool Enabled = true,
+                                         bool Cancel = false)
     {
         public static implicit operator Button((string label, ushort cmd) t) => new(t.label, t.cmd);
+        public static implicit operator Button((string label, ushort cmd, ButtonStyle style) t) => new(t.label, t.cmd, Style: t.style);
     }
+
+    /// <summary>
+    /// A row of buttons placed by hand, from <paramref name="x"/>,
+    /// <paramref name="y"/>: one row of a keypad. Enter finds a Default in
+    /// it; a click presses without moving the focus. Two rows tall (the
+    /// second is the shadow).
+    /// </summary>
+    public ushort ButtonRow(ushort parent, int x, int y, params Button[] buttons) =>
+        ButtonRow(parent, x, y, true, buttons);
+
+    /// <summary>
+    /// The same row, and whether Tab stops at it. A keypad says no: it is
+    /// pressed with the mouse or with Enter, and the keys typed go on to
+    /// the display without a detour through thirty buttons.
+    /// </summary>
+    public ushort ButtonRow(ushort parent, int x, int y, bool selectable, params Button[] buttons)
+    {
+        var flags = (byte)(selectable ? 0 : 1);
+        var r = Call(Op.ButtonRow, W.U16(parent), W.Rect(x, y, 0, 2), new[] { flags }, W.Buttons(buttons, implyDefault: false));
+        return R.U16(r);
+    }
+
+    /// <summary>Put the focus on one control of a window.</summary>
+    public void Focus(ushort id) => Call(Op.Focus, W.U16(id));
+
+    /// <summary>Turn one button of a row on or off, by its place in the row.</summary>
+    public void EnableButton(ushort row, int index, bool on) =>
+        Call(Op.SetButton, W.U16(row), new[] { (byte)index, (byte)(on ? 1 : 0) });
 
     /// <summary>
     /// Buttons, bottom right. Enter presses the one marked Default, or the
@@ -237,7 +438,27 @@ public sealed class Owlosui : IDisposable
     /// through <see cref="Run"/> like a button's. One per program; calling
     /// this again replaces it.
     /// </summary>
-    public ushort StatusLine(params StatusItem[] items)
+    public ushort StatusLine(params StatusItem[] items) => R.U16(Call(Op.Status, StatusBytes(items)));
+
+    /// <summary>
+    /// The keys a window carries: shown on the status line, and bound,
+    /// only while that window is the active one. An editor's F4 does not
+    /// belong to the program - it belongs to the editor, and it goes when
+    /// the editor is behind something else.
+    /// </summary>
+    public void WindowStatus(ushort window, params StatusItem[] items) =>
+        Call(Op.WindowStatus, W.U16(window), StatusBytes(items));
+
+    /// <summary>
+    /// The menus a window carries, on the bar only while it is active. A
+    /// submenu named like one already on the bar (<c>"~O~ptions"</c>) puts
+    /// its items into that menu after a line; any other becomes a new
+    /// menu at the end.
+    /// </summary>
+    public void WindowMenu(ushort window, params MenuItem[] menus) =>
+        Call(Op.WindowMenu, W.U16(window), W.Menu(menus));
+
+    private static byte[] StatusBytes(StatusItem[] items)
     {
         var v = new List<byte> { (byte)items.Length };
         foreach (var it in items)
@@ -261,7 +482,7 @@ public sealed class Owlosui : IDisposable
             }
             v.AddRange(W.Str(it.Label));
         }
-        return R.U16(Call(Op.Status, v.ToArray()));
+        return v.ToArray();
     }
 
     /// <summary>
@@ -357,10 +578,11 @@ public sealed class Owlosui : IDisposable
     /// <see cref="TakeFiles"/>.
     /// </summary>
     public ushort Files(ushort parent, string path, IEnumerable<FileEntry> entries, string mask = "*.*",
-                        bool multi = false, bool pathLabel = true, bool pathLine = true)
+                        bool multi = false, bool pathLabel = true, bool pathLine = true, int top = 0)
     {
+        // The panel fills the window; `top` rows are left free above it.
         var flags = (byte)((multi ? 1 : 0) | (pathLabel ? 0 : 2) | (pathLine ? 0 : 4));
-        var r = Call(Op.Files, W.U16(parent), W.Rect(0, 0, 0, 0), new[] { flags },
+        var r = Call(Op.Files, W.U16(parent), W.Rect(0, top, 0, 0), new[] { flags },
                      W.Str(mask), W.Str(Path.Combine(path, mask)), W.Entries(entries));
         return R.U16(r);
     }
@@ -416,8 +638,14 @@ public sealed class Owlosui : IDisposable
     /// tuple <c>("~O~pen", 1)</c> is an entry; <see cref="Line"/> is a
     /// separator; <see cref="Sub"/> nests.
     /// </summary>
+    /// <summary>
+    /// A menu item: its label with the hotkey between tildes, the command,
+    /// the shortcut shown at the right, and a <c>Hint</c> - one line that
+    /// the status line shows while the cursor stands on the item.
+    /// </summary>
     public sealed record MenuItem(string Label, ushort Cmd, string Shortcut = "", bool Checked = false,
-                                  bool Enabled = true, bool Separator = false, MenuItem[]? Items = null)
+                                  bool Enabled = true, bool Separator = false, MenuItem[]? Items = null,
+                                  string Hint = "")
     {
         public static implicit operator MenuItem((string label, ushort cmd) t) => new(t.label, t.cmd);
         public static implicit operator MenuItem((string label, ushort cmd, string shortcut) t) => new(t.label, t.cmd, t.shortcut);
@@ -437,6 +665,24 @@ public sealed class Owlosui : IDisposable
 
     /// <summary>The front window goes to the back: Turbo Vision's F6.</summary>
     public void NextWindow() => Call(Op.Cycle);
+
+    /// <summary>The window at the back comes to the front: Shift+F6.</summary>
+    public void PreviousWindow() => Call(Op.CycleBack);
+
+    /// <summary>The list of windows, a modal dialog; Enter brings the chosen one to the front: Alt+0.</summary>
+    public void WindowList() => Call(Op.WindowList);
+
+    /// <summary>
+    /// Move or resize the active window from the keyboard: arrows move,
+    /// Shift+arrows resize, Enter keeps, Escape puts it back. Ctrl+F5.
+    /// </summary>
+    public void SizeMove() => Call(Op.SizeMove);
+
+    /// <summary>The windows along the diagonal, every title bar showing.</summary>
+    public void Cascade() => Call(Op.Cascade);
+
+    /// <summary>The windows share the desktop in cells; a fixed-size one stands in its cell at its own size.</summary>
+    public void Tile() => Call(Op.Tile);
 
     /// <summary>A window fills the work area, or goes back to its size: F5.</summary>
     public void Zoom(ushort window) => Call(Op.Zoom, W.U16(window));
@@ -545,7 +791,7 @@ public sealed class Owlosui : IDisposable
 
     // -------------------------------------------------------------- events
 
-    public enum MouseKind : byte { Down = 0, Up = 1, Drag = 2, Move = 3, WheelUp = 4, WheelDown = 5 }
+    public enum MouseKind : byte { Down = 0, Up = 1, Drag = 2, Move = 3, WheelUp = 4, WheelDown = 5, Double = 6 }
     public enum MouseButton : byte { Left = 0, Right = 1, Middle = 2 }
 
     /// <summary>One mouse event, in screen cells.</summary>
@@ -559,6 +805,18 @@ public sealed class Owlosui : IDisposable
     {
         SendMouse(MouseKind.Down, x, y, button);
         SendMouse(MouseKind.Up, x, y, button);
+    }
+
+    /// <summary>
+    /// Two clicks on a cell, the second one a double. A title bar zooms,
+    /// a file name is chosen as Enter would choose it, a list item presses
+    /// the default button.
+    /// </summary>
+    public void DoubleClick(int x, int y)
+    {
+        Click(x, y);
+        SendMouse(MouseKind.Double, x, y);
+        SendMouse(MouseKind.Up, x, y);
     }
 
     /// <summary>Press at one cell, drag to another, release. Moving or resizing a window.</summary>
@@ -1050,6 +1308,9 @@ public sealed class Owlosui : IDisposable
                 return new KeyEv(new ConsoleKeyInfo(ch, (ConsoleKey)vk, shift, alt, ctrl));
             }
 
+            private long lastDown;
+            private (int x, int y, MouseButton b) lastDownAt;
+
             private IEnumerable<Ev> Mouse(MOUSE_EVENT_RECORD m)
             {
                 var x = m.dwMousePosition.X;
@@ -1083,6 +1344,18 @@ public sealed class Owlosui : IDisposable
                     if ((changed & bit) == 0) continue;
                     var button = b switch { 0 => MouseButton.Left, 1 => MouseButton.Right, _ => MouseButton.Middle };
                     var kind = (now & bit) != 0 ? MouseKind.Down : MouseKind.Up;
+                    if (kind == MouseKind.Down)
+                    {
+                        // The console says "double" itself; a terminal that
+                        // does not is timed: a second press on the same cell
+                        // within half a second is the same gesture.
+                        var t = Environment.TickCount64;
+                        var quick = (m.dwEventFlags & DOUBLE_CLICK) != 0
+                                    || (t - lastDown < 500 && lastDownAt == (x, y, button));
+                        lastDown = quick ? 0 : t;
+                        lastDownAt = (x, y, button);
+                        if (quick) kind = MouseKind.Double;
+                    }
                     Trace($"  -> {kind} {button} at ({x},{y})");
                     yield return new MouseEv(kind, button, x, y);
                 }
@@ -1104,11 +1377,15 @@ public sealed class Owlosui : IDisposable
     {
         public const byte Quit = 0x00, Init = 0x01, Resize = 0x02, CodePage = 0x03;
         public const byte Window = 0x10, Text = 0x11, Static = 0x12, Input = 0x13, Buttons = 0x14, MessageBox = 0x15;
-        public const byte Status = 0x16, Label = 0x17, Progress = 0x18, List = 0x19, Files = 0x1A, Canvas = 0x1B, MenuBar = 0x1C, Cluster = 0x1D;
+        public const byte Status = 0x16, Label = 0x17, Progress = 0x18, List = 0x19, Files = 0x1A, Canvas = 0x1B, MenuBar = 0x1C, Cluster = 0x1D, ButtonRow = 0x1E, Hex = 0x1F;
         public const byte Close = 0x20, GetText = 0x21, SetProgress = 0x22, GetMarked = 0x23, GetCurrent = 0x24;
         public const byte SetFiles = 0x25, TakeFiles = 0x26, Activate = 0x27, MarkedNames = 0x28, SetFilesError = 0x29, Active = 0x2A;
         public const byte SetText = 0x2B, Blit = 0x2C, MenuCheck = 0x2D, GetCluster = 0x2E, GetClick = 0x2F;
-        public const byte Cycle = 0x43, Zoom = 0x44;
+        public const byte Cycle = 0x43, Zoom = 0x44, SetButton = 0x45, Focus = 0x46, Cascade = 0x47, Tile = 0x48, SetReadOnly = 0x49;
+        public const byte WindowStatus = 0x4A, WindowMenu = 0x4B, WindowList = 0x4C, CycleBack = 0x4D, SizeMove = 0x4E;
+        public const byte SetHistory = 0x4F, GetHistory = 0x50, Palette = 0x51, SetColor = 0x52;
+        public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
+        public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;
     }
@@ -1203,7 +1480,20 @@ public sealed class Owlosui : IDisposable
                 v.AddRange(U16(it.Cmd));
                 v.AddRange(Str(it.Label));
                 v.AddRange(Str(it.Shortcut));
+                v.AddRange(Str(it.Hint));
                 v.AddRange(Menu(it.Items ?? Array.Empty<MenuItem>()));
+            }
+            return v.ToArray();
+        }
+
+        public static byte[] Nodes(TreeNode[] nodes)
+        {
+            var v = new List<byte> { (byte)Math.Min(nodes.Length, 255) };
+            foreach (var n in nodes.Take(255))
+            {
+                v.Add((byte)((n.Open ? 1 : 0) | (n.Lazy ? 2 : 0)));
+                v.AddRange(Str(n.Text));
+                v.AddRange(Nodes(n.Children ?? Array.Empty<TreeNode>()));
             }
             return v.ToArray();
         }
@@ -1235,17 +1525,24 @@ public sealed class Owlosui : IDisposable
             if (b.Length > ushort.MaxValue) throw new ArgumentException("string too long for the wire");
             return U16((ushort)b.Length).Concat(b).ToArray();
         }
-        public static byte[] Buttons(Button[] buttons)
+        /// <summary>
+        /// A docked row makes its first button the default when none is
+        /// marked - Enter in a one-button box presses the one button. A
+        /// placed row does not: a keypad with a default in every row would
+        /// give Enter six answers, and the first would be Clear.
+        /// </summary>
+        public static byte[] Buttons(Button[] buttons, bool implyDefault = true)
         {
             if (buttons.Length == 0) throw new ArgumentException("a button row needs at least one button");
             var dflt = Array.FindIndex(buttons, b => b.Default);
-            if (dflt < 0) dflt = 0;
+            if (dflt < 0 && implyDefault) dflt = 0;
             var v = new List<byte> { (byte)buttons.Length };
             for (var i = 0; i < buttons.Length; i++)
             {
                 if (buttons[i].Cmd == 0) throw new ArgumentException($"button '{buttons[i].Label}' has command 0, which means none");
                 v.AddRange(U16(buttons[i].Cmd));
-                v.Add((byte)(i == dflt ? 1 : 0));
+                var flags = (i == dflt ? 1 : 0) | ((int)buttons[i].Style << 1) | (buttons[i].Enabled ? 0 : 8) | (buttons[i].Cancel ? 16 : 0);
+                v.Add((byte)flags);
                 v.AddRange(Str(buttons[i].Label));
             }
             return v.ToArray();

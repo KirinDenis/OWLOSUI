@@ -37,6 +37,10 @@ pub struct MenuItem {
     /// sends its command; turning the tick off is the program's answer to
     /// it, not the menu's.
     pub checked: bool,
+    /// One line about the item, shown on the status line while the cursor
+    /// stands on it. Turbo Vision's `getHint`, kept with the item instead
+    /// of in a table beside it.
+    pub hint: String,
 }
 
 impl MenuItem {
@@ -49,7 +53,13 @@ impl MenuItem {
             items: Vec::new(),
             separator: false,
             checked: false,
+            hint: String::new(),
         }
+    }
+
+    pub fn hint(mut self, hint: &str) -> Self {
+        self.hint = hint.into();
+        self
     }
 
     pub fn checked(mut self, on: bool) -> Self {
@@ -82,6 +92,7 @@ impl MenuItem {
             items,
             separator: false,
             checked: false,
+            hint: String::new(),
         }
     }
 
@@ -94,6 +105,7 @@ impl MenuItem {
             items: Vec::new(),
             separator: true,
             checked: false,
+            hint: String::new(),
         }
     }
 
@@ -126,14 +138,19 @@ impl MenuItem {
 
 /// The bar across the top.
 pub struct MenuBar {
+    /// What is on the bar right now: the application's menus with the
+    /// active window's items merged in. Composed by the desktop before
+    /// every event and every frame, while no panel is open.
     pub items: Vec<MenuItem>,
+    /// The application's own menus, which every composition starts from.
+    pub base: Vec<MenuItem>,
     /// Which top-level item is showing its panel.
     pub open: Option<usize>,
 }
 
 impl MenuBar {
     pub fn new(items: Vec<MenuItem>) -> Self {
-        MenuBar { items, open: None }
+        MenuBar { base: clone_items(&items), items, open: None }
     }
 
     /// Where each item's label starts. Measured from a real screen: two spaces
@@ -239,6 +256,31 @@ impl MenuBox {
 /// would be the efficient thing and it would also mean the tree holding a
 /// reference into one of its own nodes, which is exactly the shape this whole
 /// design exists to avoid.
+/// The application's menus with a window's items folded in. A window
+/// item that is a submenu with the same name as one on the bar (`~E~dit`
+/// and `Edit` are the same name) goes INTO that menu, after a line; any
+/// other goes on the end of the bar. So a window puts "Edit / view"
+/// under Options without owning Options, and only while it is active.
+pub fn merge_items(base: &[MenuItem], extra: &[MenuItem]) -> Vec<MenuItem> {
+    let name = |t: &str| t.replace('~', "").to_lowercase();
+    let mut out = clone_items(base);
+    for it in extra {
+        let into = if it.items.is_empty() {
+            None
+        } else {
+            out.iter().position(|b| !b.items.is_empty() && name(&b.text) == name(&it.text))
+        };
+        match into {
+            Some(ix) => {
+                out[ix].items.push(MenuItem::line());
+                out[ix].items.extend(clone_items(&it.items));
+            }
+            None => out.extend(clone_items(std::slice::from_ref(it))),
+        }
+    }
+    out
+}
+
 pub fn clone_items(items: &[MenuItem]) -> Vec<MenuItem> {
     items
         .iter()
@@ -250,6 +292,7 @@ pub fn clone_items(items: &[MenuItem]) -> Vec<MenuItem> {
             items: clone_items(&i.items),
             separator: i.separator,
             checked: i.checked,
+            hint: i.hint.clone(),
         })
         .collect()
 }

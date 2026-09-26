@@ -10,6 +10,20 @@
 //! shape: the thing it stands in for can replace it without the parts
 //! changing.
 
+/// What a button is for, which is what colour it wears. Turbo Vision had
+/// one colour of button; a keypad needs the eye to tell a digit from an
+/// operator from the key that throws everything away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ButtonStyle {
+    /// The ordinary one: green, as the original's were.
+    #[default]
+    Normal,
+    /// Set apart: an operator, a mode, a function.
+    Accent,
+    /// Destructive: Clear, Delete. Red, so the hand hesitates.
+    Danger,
+}
+
 pub struct Button {
     /// With the hotkey between tildes: `~O~pen`.
     pub text: String,
@@ -18,7 +32,12 @@ pub struct Button {
     /// Vision called this `bfDefault` and it is the whole of the bargain
     /// between "Enter confirms" and "Enter does whatever I am standing on".
     pub default: bool,
+    /// The one Escape presses, wherever its row is: Cancel in a dialog,
+    /// Clear on a calculator. The mirror of `default`. Without one, Escape
+    /// falls back to the last button of the docked row.
+    pub cancel: bool,
     pub enabled: bool,
+    pub style: ButtonStyle,
 }
 
 impl Button {
@@ -27,12 +46,29 @@ impl Button {
             text: text.into(),
             cmd,
             default: false,
+            cancel: false,
             enabled: true,
+            style: ButtonStyle::Normal,
         }
     }
 
     pub fn default(mut self) -> Self {
         self.default = true;
+        self
+    }
+
+    pub fn cancel(mut self) -> Self {
+        self.cancel = true;
+        self
+    }
+
+    pub fn style(mut self, style: ButtonStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    pub fn disabled(mut self) -> Self {
+        self.enabled = false;
         self
     }
 
@@ -65,6 +101,9 @@ impl Button {
 pub enum Align {
     Right,
     Centre,
+    /// From the left edge of the row, with no margin: a row placed by hand,
+    /// one of several making a keypad.
+    Left,
 }
 
 pub struct ButtonRow {
@@ -72,6 +111,10 @@ pub struct ButtonRow {
     pub buttons: Vec<Button>,
     pub current: usize,
     pub focused: bool,
+    /// Whether Tab stops here. Turbo Vision's `ofSelectable`. A keypad is
+    /// pressed with the mouse or typed past, and a Tab that walked its
+    /// thirty keys one by one would be a Tab nobody pressed twice.
+    pub selectable: bool,
     /// Set when one was pressed.
     pub pressed: Option<u16>,
     /// The one being held down right now.
@@ -105,6 +148,7 @@ impl ButtonRow {
             buttons,
             current,
             focused: false,
+            selectable: true,
             pressed: None,
             down: None,
             pending: None,
@@ -134,6 +178,7 @@ impl ButtonRow {
         let mut x = match self.align {
             Align::Right => (total - self.width() - 3).max(0),
             Align::Centre => ((total - self.width()) / 2).max(0),
+            Align::Left => 0,
         };
         for b in &self.buttons[..ix] {
             x += b.width() + 2;

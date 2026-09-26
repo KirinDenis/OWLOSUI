@@ -295,3 +295,33 @@ fn a_key_press_is_seen_before_it_happens() {
     assert!(shadow(&buf), "the button did not come back up");
     assert_eq!(ui.take_pressed(), Some(CM_OK));
 }
+
+#[test]
+fn a_modal_window_says_so_in_its_title() {
+    use owlosui_core::{Buffer, Color, Kind, Rect, Ui, Window};
+    let mut ui = Ui::new(60, 12);
+    let root = ui.root();
+    let mut win = Window::new("Save");
+    win.modal = true;
+    ui.insert(root, Rect::new(5, 2, 40, 8), Kind::Window(win));
+    let mut buf = Buffer::new(60, 12);
+    ui.draw(&mut buf);
+    let row: String = (0..60).map(|x| buf.get(x, 2).unwrap().to_char()).collect();
+    assert!(row.contains(" Save [modal] "), "{row:?}");
+    // A char position, not a byte one: the frame is drawn in glyphs that
+    // take three bytes each once they are chars.
+    let chars: Vec<char> = row.chars().collect();
+    let x = chars.windows(7).position(|w| w.iter().collect::<String>() == "[modal]").unwrap() as i16;
+    let fg = |c: u8| c & 0x0F;
+    assert_eq!(fg(buf.get(x, 2).unwrap().attr), Color::White as u8, "the bracket is white");
+    assert_eq!(fg(buf.get(x + 1, 2).unwrap().attr), Color::LightGreen as u8, "the word is green");
+    assert_eq!(fg(buf.get(x + 6, 2).unwrap().attr), Color::White as u8, "the bracket is white");
+    // The same window, not modal, says nothing.
+    let mut ui = Ui::new(60, 12);
+    let root = ui.root();
+    ui.insert(root, Rect::new(5, 2, 40, 8), Kind::Window(Window::new("Save")));
+    let mut buf = Buffer::new(60, 12);
+    ui.draw(&mut buf);
+    let row: String = (0..60).map(|x| buf.get(x, 2).unwrap().to_char()).collect();
+    assert!(row.contains(" Save ") && !row.contains("modal"), "{row:?}");
+}

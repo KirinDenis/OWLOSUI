@@ -88,6 +88,13 @@ pub enum Button {
 pub enum MouseKind {
     Down(Button),
     Up(Button),
+    /// The second press of a double click, in place of its `Down`. The
+    /// core has no clock, so the backend decides what "double" is - the
+    /// console says so itself on Windows, and a terminal times it - and
+    /// the core only says what it means: a click, and then the thing's
+    /// second meaning. A title bar zooms; a file is chosen as Enter would
+    /// choose it; a list presses the default button.
+    Double(Button),
     Drag,
     Move,
     ScrollUp,

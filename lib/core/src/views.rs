@@ -6,6 +6,8 @@
 //! ends up and what colour it takes are decided above it.
 
 use crate::geom::Rect;
+use crate::menu::MenuItem;
+use crate::status::StatusItem;
 
 /// The patterned background everything else sits on.
 pub struct Desktop {
@@ -89,6 +91,15 @@ pub struct Window {
     pub close_cmd: u16,
     /// Set while zoomed; holds the rectangle to restore.
     pub(crate) unzoomed: Option<Rect>,
+    /// What this window adds to the status line while it is the active
+    /// one: its own keys, bound and shown, and gone when it is not.
+    /// Turbo Vision changed the status line by help context; a window
+    /// that carries its keys with it is the same idea with less
+    /// machinery.
+    pub status: Vec<StatusItem>,
+    /// What this window adds to the menu bar while it is active - see
+    /// `menu::merge_items` for where an item lands.
+    pub menu: Vec<MenuItem>,
 }
 
 impl Window {
@@ -111,6 +122,8 @@ impl Window {
             centred: false,
             close_cmd: 0,
             unzoomed: None,
+            status: Vec::new(),
+            menu: Vec::new(),
         }
     }
 
@@ -249,6 +262,9 @@ pub enum Kind {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Dock {
     Fill,
+    /// Fills what is left, but leaves that many rows free above itself:
+    /// a panel that wants a line of air under the title bar.
+    FillFrom(i16),
     Bottom(i16),
     Top(i16),
     /// A box in the bottom-right corner that takes no room from anyone.

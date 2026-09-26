@@ -32,6 +32,21 @@ fn a_cluster_keeps_its_own_rule() {
 }
 
 #[test]
+fn in_radio_buttons_the_arrows_choose() {
+    use owlosui_core::{Dock, Event, Key, KeyCode, Kind, Mods, Rect, Ui, Window};
+    let mut ui = Ui::new(40, 10);
+    let root = ui.root();
+    let w = ui.insert(root, Rect::new(0, 0, 30, 8), Kind::Window(Window::new("W")));
+    let r = ui.insert(w, Rect::new(1, 0, 20, 3), Kind::Cluster(Cluster::radio(&["Dec", "Hex", "Bin"])));
+    ui.set_dock(r, Dock::Manual);
+    ui.focus_first();
+    ui.handle(Event::Key(Key { code: KeyCode::Down, mods: Mods::default() }));
+    let Kind::Cluster(c) = ui.kind(r) else { panic!() };
+    assert_eq!(c.chosen(), vec![1], "Down chose Hex; a check box would only have moved");
+    assert_eq!(c.current, 1);
+}
+
+#[test]
 fn the_bracket_says_which_kind_it_is() {
     let c = Cluster::checks(&["x"]);
     assert_eq!(&c.marker(0)[..], b"[ ]");

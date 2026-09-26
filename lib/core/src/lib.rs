@@ -31,7 +31,7 @@ pub mod ui;
 pub mod views;
 
 pub use buffer::Buffer;
-pub use button::{Align, Button as PushButton, ButtonRow};
+pub use button::{Align, Button as PushButton, ButtonRow, ButtonStyle};
 pub use cell::{attr, glyph_of, glyphs, Cell, Color, Glyph, GLYPH_MAX};
 pub use event::{Button, Event, Key, KeyCode, Mods, Mouse, MouseKind};
 pub use files::{FileEntry, FileKind, FileList};
@@ -46,5 +46,5 @@ pub use input::InputLine;
 pub use keymap::Keymap;
 pub use menu::{MenuBar, MenuBox, MenuItem};
 pub use tree::{TreeNode, TreeView};
-pub use ui::{Ui, ViewId};
+pub use ui::{Ui, ViewId, CM_INTERNAL};
 pub use views::{Desktop, Dock, Kind, TextView, Window};

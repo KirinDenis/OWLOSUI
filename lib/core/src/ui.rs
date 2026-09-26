@@ -16,7 +16,7 @@ use crate::hex::HexView;
 use crate::controls::{Cluster, ListBox, StaticText};
 use crate::html::{Html, Style};
 use crate::keymap::Keymap;
-use crate::menu::{clone_items, Cmd, MenuBar, MenuBox};
+use crate::menu::{clone_items, merge_items, Cmd, MenuBar, MenuBox};
 use crate::palette::{Palette, WinColors};
 use crate::button::ButtonRow;
 use crate::views::{Desktop, Dock, Kind, TextView, Window};
@@ -56,6 +56,10 @@ fn draw_input(
     };
     buf.fill(Rect::new(fx, r.y, fw, 1), b' ', a, clip);
     buf.text(fx, r.y, &i.visible(r.w), a, clip);
+    // A field with a past has a ▼ at its end: click it, or press Down.
+    if !i.history.is_empty() && fw > 4 {
+        buf.put(r.right() - 1, r.y, 0x1F as Glyph, p.file_path_label, clip);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -168,10 +172,45 @@ struct Drag {
     orig: Rect,
 }
 
+/// A window being moved or resized from the keyboard: Turbo Vision's
+/// Ctrl+F5. Arrows move it, Shift+arrows resize it, Enter keeps the
+/// result, Escape puts `orig` back.
+struct Sizing {
+    id: ViewId,
+    orig: Rect,
+}
+
+/// The window list Alt+0 opens: the dialog, its list, and which window
+/// each row stands for, front to back.
+struct WindowList {
+    dialog: ViewId,
+    list: ViewId,
+    windows: Vec<ViewId>,
+}
+
+/// Commands from this number up are the toolkit's own: the buttons of the
+/// dialogs it builds for itself send them, and `take_pressed` acts on
+/// them instead of handing them out.
+pub const CM_INTERNAL: Cmd = 0xFF00;
+const CM_WINLIST_OK: Cmd = 0xFF01;
+const CM_WINLIST_CANCEL: Cmd = 0xFF02;
+/// The rows of a history list, one command each: 0xFF10 + the row.
+const CM_HISTORY: Cmd = 0xFF10;
+
 pub struct Ui {
     nodes: Vec<Node>,
     root: ViewId,
     drag: Option<Drag>,
+    sizing: Option<Sizing>,
+    winlist: Option<WindowList>,
+    /// The input line whose history is open as a panel.
+    history_for: Option<ViewId>,
+    /// The desktop's own keys, on by default: Alt+1..9 bring a numbered
+    /// window to the front, Alt+0 lists them, Shift+F6 is the previous
+    /// window, Ctrl+F5 moves or resizes the active one from the keyboard.
+    /// An application that wants those keys for itself turns this off
+    /// and calls the primitives from its own table.
+    pub desktop_keys: bool,
     pub palette: Palette,
     /// Which arrangement of keys is in force. Data, not code.
     pub keymap: Keymap,
@@ -210,6 +249,10 @@ impl Ui {
             nodes: vec![root],
             root: ViewId(0),
             drag: None,
+            sizing: None,
+            winlist: None,
+            history_for: None,
+            desktop_keys: true,
             palette: Palette::classic(),
             keymap: Keymap::Modern,
             clipboard: Vec::new(),
@@ -224,6 +267,26 @@ impl Ui {
 
     pub fn insert(&mut self, parent: ViewId, rect: Rect, kind: Kind) -> ViewId {
         let id = ViewId(self.nodes.len() as u32);
+        // A window on the desktop takes the first free number from 1 to 9,
+        // as Borland's did, so Alt+that brings it to the front. A modal
+        // one does not: it is the only window there is while it is up. A
+        // tenth window has no number and is reached from the list.
+        let mut kind = kind;
+        if parent == self.root {
+            if let Kind::Window(w) = &mut kind {
+                if w.number.is_none() && !w.modal {
+                    let taken: Vec<u8> = self.nodes[self.root.ix()]
+                        .children
+                        .iter()
+                        .filter_map(|c| match &self.nodes[c.ix()].kind {
+                            Kind::Window(o) => o.number,
+                            _ => None,
+                        })
+                        .collect();
+                    w.number = (1..=9).find(|n| !taken.contains(n));
+                }
+            }
+        }
         self.nodes.push(Node {
             parent: Some(parent),
             children: Vec::new(),
@@ -419,7 +482,130 @@ impl Ui {
     }
 
     pub fn take_command(&mut self) -> Option<Cmd> {
-        self.command.take()
+        let cmd = self.command.take()?;
+        if cmd >= CM_HISTORY && cmd < CM_HISTORY + 32 {
+            // A row of a history list: into its field, and no further.
+            let row = (cmd - CM_HISTORY) as usize;
+            if let Some(id) = self.history_for.take() {
+                if let Kind::Input(i) = &mut self.nodes[id.ix()].kind {
+                    if let Some(t) = i.history.get(row).cloned() {
+                        i.set_text(&t);
+                    }
+                }
+            }
+            return None;
+        }
+        if cmd >= CM_INTERNAL {
+            return None;
+        }
+        Some(cmd)
+    }
+
+    /// Drop an input line's history under it as a panel: a row a line,
+    /// newest first, chosen like a menu item. Nothing happens for a
+    /// field that has none.
+    pub fn open_history(&mut self, id: ViewId) {
+        let (items, abs) = match &self.nodes[id.ix()].kind {
+            Kind::Input(i) if !i.history.is_empty() => {
+                let items: Vec<crate::menu::MenuItem> = i
+                    .history
+                    .iter()
+                    .take(32)
+                    .enumerate()
+                    .map(|(n, h)| crate::menu::MenuItem::new(h, "", CM_HISTORY + n as Cmd))
+                    .collect();
+                (items, self.abs_rect(id))
+            }
+            _ => return,
+        };
+        self.close_menu();
+        let mut b = MenuBox::new(items);
+        b.parent = None;
+        let (w, h) = (b.width(), b.height());
+        let screen = self.nodes[self.root.ix()].rect;
+        let fx = match &self.nodes[id.ix()].kind {
+            Kind::Input(i) => abs.x + i.field_x(),
+            _ => abs.x,
+        };
+        let x = fx.min((screen.w - w).max(0));
+        let y = (abs.y + 1).min((screen.h - h).max(0));
+        let root = self.root;
+        self.insert(root, Rect::new(x, y, w, h), Kind::MenuBox(b));
+        self.history_for = Some(id);
+    }
+
+    /// Find in a text view: the next match after the caret, selected.
+    pub fn find_text(&mut self, id: ViewId, pat: &[Glyph], case_sensitive: bool, whole_word: bool) -> bool {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Text(t) => t.find(pat, case_sensitive, whole_word),
+            _ => false,
+        }
+    }
+
+    /// Replace the selected match and find the next: (replaced, found).
+    pub fn replace_text(&mut self, id: ViewId, pat: &[Glyph], with: &[Glyph], case_sensitive: bool, whole_word: bool) -> (bool, bool) {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Text(t) => t.replace(pat, with, case_sensitive, whole_word),
+            _ => (false, false),
+        }
+    }
+
+    /// Replace every match; how many.
+    pub fn replace_all_text(&mut self, id: ViewId, pat: &[Glyph], with: &[Glyph], case_sensitive: bool, whole_word: bool) -> u16 {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Text(t) => t.replace_all(pat, with, case_sensitive, whole_word),
+            _ => 0,
+        }
+    }
+
+    /// A tree node somebody tried to open that has no children yet: its
+    /// path, once. The program answers with `tree_set_children`.
+    pub fn tree_take_expand(&mut self, id: ViewId) -> Option<Vec<usize>> {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Tree(t) => t.pending.take(),
+            _ => None,
+        }
+    }
+
+    pub fn tree_set_children(&mut self, id: ViewId, path: &[usize], children: Vec<crate::tree::TreeNode>) -> bool {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Tree(t) => t.set_children(path, children),
+            _ => false,
+        }
+    }
+
+    /// The texts from the root down to the current row of a tree.
+    pub fn tree_path(&self, id: ViewId) -> Vec<String> {
+        match &self.nodes[id.ix()].kind {
+            Kind::Tree(t) => t.texts(&t.current_path()),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The texts from the root down to a node.
+    pub fn tree_texts(&self, id: ViewId, path: &[usize]) -> Vec<String> {
+        match &self.nodes[id.ix()].kind {
+            Kind::Tree(t) => t.texts(path),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The history of an input line, newest first.
+    pub fn history(&self, id: ViewId) -> Vec<String> {
+        match &self.nodes[id.ix()].kind {
+            Kind::Input(i) => i.history.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn set_history(&mut self, id: ViewId, items: Vec<String>) -> bool {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Input(i) => {
+                i.history = items;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// True when something has been chosen and is showing as chosen: a menu
@@ -430,12 +616,11 @@ impl Ui {
         if self.pending_pick.is_some() {
             return true;
         }
-        self.active_window()
-            .and_then(|w| self.button_row(w))
-            .is_some_and(|row| match &self.nodes[row.ix()].kind {
-                Kind::Buttons(b) => b.pending.is_some(),
-                _ => false,
-            })
+        let Some(w) = self.active_window() else { return false };
+        self.button_rows(w).iter().any(|row| match &self.nodes[row.ix()].kind {
+            Kind::Buttons(b) => b.pending.is_some(),
+            _ => false,
+        })
     }
 
     /// Deliver what `pick_pending` was holding.
@@ -444,9 +629,11 @@ impl Ui {
             self.close_menu();
             self.command = Some(cmd);
         }
-        if let Some(row) = self.active_window().and_then(|w| self.button_row(w)) {
-            if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
-                b.complete();
+        if let Some(w) = self.active_window() {
+            for row in self.button_rows(w) {
+                if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
+                    b.complete();
+                }
             }
         }
     }
@@ -492,11 +679,72 @@ impl Ui {
 
     /// Set or clear the tick on the menu item that sends `cmd`, wherever it
     /// is in the bar. For an option that a program turns on and off.
+    ///
+    /// On the application's menus and on every window's, because the bar
+    /// is composed from those before each frame and a tick set on the
+    /// composition alone would be gone by the next.
     pub fn set_menu_checked(&mut self, cmd: Cmd, on: bool) -> bool {
-        let Some(bar) = self.menu_bar_id() else { return false };
-        match &mut self.nodes[bar.ix()].kind {
-            Kind::MenuBar(m) => crate::menu::MenuItem::set_checked(&mut m.items, cmd, on),
+        let mut found = false;
+        if let Some(bar) = self.menu_bar_id() {
+            if let Kind::MenuBar(m) = &mut self.nodes[bar.ix()].kind {
+                found |= crate::menu::MenuItem::set_checked(&mut m.base, cmd, on);
+                crate::menu::MenuItem::set_checked(&mut m.items, cmd, on);
+            }
+        }
+        for n in &mut self.nodes {
+            if let Kind::Window(w) = &mut n.kind {
+                found |= crate::menu::MenuItem::set_checked(&mut w.menu, cmd, on);
+            }
+        }
+        found
+    }
+
+    /// What a window adds to the status line while it is active.
+    pub fn set_window_status(&mut self, id: ViewId, items: Vec<crate::status::StatusItem>) -> bool {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Window(w) => {
+                w.status = items;
+                true
+            }
             _ => false,
+        }
+    }
+
+    /// What a window adds to the menu bar while it is active.
+    pub fn set_window_menu(&mut self, id: ViewId, items: Vec<crate::menu::MenuItem>) -> bool {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Window(w) => {
+                w.menu = items;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Put the active window's keys and menus onto the bars. Before every
+    /// event, so a key is bound the moment its window comes to the front,
+    /// and before every frame, so the picture agrees. Not while a panel
+    /// is open: the panel was cut from the bar as it was, and its numbers
+    /// have to keep meaning the same items until it closes.
+    fn compose_bars(&mut self) {
+        if self.menu_box_id().is_some() {
+            return;
+        }
+        let active = self.active_window();
+        let (status, menu) = match active.map(|a| &self.nodes[a.ix()].kind) {
+            Some(Kind::Window(w)) => (w.status.clone(), clone_items(&w.menu)),
+            _ => (Vec::new(), Vec::new()),
+        };
+        if let Some(sid) = self.status_id() {
+            if let Kind::Status(s) = &mut self.nodes[sid.ix()].kind {
+                s.items = s.base.clone();
+                s.items.extend(status);
+            }
+        }
+        if let Some(bar) = self.menu_bar_id() {
+            if let Kind::MenuBar(m) = &mut self.nodes[bar.ix()].kind {
+                m.items = merge_items(&m.base, &menu);
+            }
         }
     }
 
@@ -695,6 +943,310 @@ impl Ui {
         }
     }
 
+    /// The other way round: the window at the back comes to the front.
+    /// Turbo Vision's Shift+F6.
+    pub fn cycle_windows_back(&mut self) {
+        if self.modal().is_some() {
+            return;
+        }
+        let root = self.root.ix();
+        let first = self.nodes[root]
+            .children
+            .iter()
+            .position(|k| matches!(self.nodes[k.ix()].kind, Kind::Window(_)));
+        if let Some(pos) = first {
+            let kids = &mut self.nodes[root].children;
+            if kids.len() > 1 {
+                let v = kids.remove(pos);
+                kids.push(v);
+            }
+        }
+    }
+
+    /// The window numbered `n` comes to the front, if there is one.
+    pub fn activate_numbered(&mut self, n: u8) -> bool {
+        if self.modal().is_some() {
+            return false;
+        }
+        let hit = self.nodes[self.root.ix()]
+            .children
+            .iter()
+            .copied()
+            .find(|c| matches!(&self.nodes[c.ix()].kind, Kind::Window(w) if w.number == Some(n)));
+        match hit {
+            Some(id) => {
+                self.activate(id);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Start moving or resizing the active window from the keyboard:
+    /// Turbo Vision's Ctrl+F5. Arrows move, Shift+arrows resize, Enter
+    /// keeps it, Escape puts it back. The frame shows the dragging colour
+    /// meanwhile, as it does under the mouse.
+    pub fn begin_size_move(&mut self) -> bool {
+        if self.modal().is_some() {
+            return false;
+        }
+        let Some(id) = self.active_window() else { return false };
+        let ok = matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if w.movable || w.resizable);
+        if !ok {
+            return false;
+        }
+        self.sizing = Some(Sizing { id, orig: self.nodes[id.ix()].rect });
+        true
+    }
+
+    /// Whether a window is being moved or resized from the keyboard.
+    pub fn sizing(&self) -> Option<ViewId> {
+        self.sizing.as_ref().map(|s| s.id)
+    }
+
+    fn sizing_key(&mut self, k: Key) {
+        use crate::event::KeyCode as K;
+        let Some(s) = &self.sizing else { return };
+        let (id, orig) = (s.id, s.orig);
+        let (movable, resizable) = match &self.nodes[id.ix()].kind {
+            Kind::Window(w) => (w.movable, w.resizable),
+            _ => (false, false),
+        };
+        let (dx, dy) = match k.code {
+            K::Left => (-1, 0),
+            K::Right => (1, 0),
+            K::Up => (0, -1),
+            K::Down => (0, 1),
+            K::Enter => {
+                self.sizing = None;
+                return;
+            }
+            K::Esc => {
+                self.nodes[id.ix()].rect = orig;
+                self.sizing = None;
+                return;
+            }
+            _ => return,
+        };
+        let r = self.nodes[id.ix()].rect;
+        let area = self.work_area();
+        let wanted = if k.mods.shift {
+            if !resizable {
+                return;
+            }
+            Rect::new(r.x, r.y, r.w + dx, r.h + dy)
+        } else {
+            if !movable {
+                return;
+            }
+            Rect::new(r.x + dx, r.y + dy, r.w, r.h)
+        };
+        // The same limits the mouse has: a window may not be smaller than
+        // its own floor nor leave the screen, and a resize is a resize
+        // and not a move.
+        self.arrange_free(id, wanted, area, k.mods.shift);
+    }
+
+    /// A rect for a window, kept to what it allows, without the tiling
+    /// rule that pulls it fully inside the work area: a window dragged by
+    /// hand may hang off the edge, as under the mouse.
+    fn arrange_free(&mut self, id: ViewId, r: Rect, area: Rect, resizing: bool) {
+        let screen = self.nodes[self.root.ix()].rect;
+        let Kind::Window(w) = &mut self.nodes[id.ix()].kind else { return };
+        let mut r = r;
+        if resizing {
+            let (min_w, min_h) = (w.min_w.max(6), w.min_h.max(3));
+            let max_w = if w.max_w > 0 { w.max_w } else { i16::MAX };
+            let max_h = if w.max_h > 0 { w.max_h } else { i16::MAX };
+            r.w = r.w.clamp(min_w, max_w.max(min_w));
+            r.h = r.h.clamp(min_h, max_h.max(min_h));
+        } else {
+            r.x = r.x.clamp(1 - r.w, screen.w - 1);
+            r.y = r.y.clamp(area.y, screen.h - 1);
+        }
+        w.centred = false;
+        w.unzoomed = None;
+        self.nodes[id.ix()].rect = r;
+    }
+
+    /// The list of windows, as a modal dialog: Turbo Vision's Alt+0. A
+    /// row per window, front to back, its number first when it has one;
+    /// Enter or OK brings the chosen one to the front.
+    pub fn window_list(&mut self) {
+        if self.modal().is_some() {
+            return;
+        }
+        let windows: Vec<ViewId> = self.nodes[self.root.ix()]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .filter(|c| matches!(&self.nodes[c.ix()].kind, Kind::Window(_)))
+            .collect();
+        if windows.is_empty() {
+            return;
+        }
+        let names: Vec<String> = windows
+            .iter()
+            .map(|id| match &self.nodes[id.ix()].kind {
+                Kind::Window(w) => match w.number {
+                    Some(n) => format!("{n}  {}", w.title),
+                    None => format!("   {}", w.title),
+                },
+                _ => String::new(),
+            })
+            .collect();
+        let work = self.work_area();
+        let rows = (names.len() as i16).clamp(3, (work.h - 8).max(3));
+        let w = 44.min(work.w - 4).max(24);
+        let h = rows + 6;
+        let mut win = Window::new("Windows");
+        win.palette = crate::palette::WinPalette::Gray;
+        win.modal = true;
+        win.resizable = false;
+        win.zoomable = false;
+        win.closable = false;
+        let r = Rect::new(work.x + (work.w - w) / 2, work.y + (work.h - h) / 2, w, h);
+        let root = self.root;
+        let dialog = self.insert(root, r, Kind::Window(win));
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let list = self.insert(dialog, Rect::new(2, 1, w - 6, rows), Kind::List(crate::controls::ListBox::new(&refs)));
+        self.set_dock(list, Dock::Manual);
+        let row = self.insert(
+            dialog,
+            Rect::default(),
+            Kind::Buttons(ButtonRow::new(vec![
+                crate::button::Button::new("~O~K", CM_WINLIST_OK).default(),
+                crate::button::Button::new("~C~ancel", CM_WINLIST_CANCEL).cancel(),
+            ])),
+        );
+        self.set_dock(row, Dock::BottomRight(w - 2, 2));
+        self.focus_first();
+        self.winlist = Some(WindowList { dialog, list, windows });
+    }
+
+    /// A command from a dialog the toolkit built for itself. True when it
+    /// was one and has been dealt with.
+    fn internal_command(&mut self, cmd: Cmd) -> bool {
+        if cmd < CM_INTERNAL {
+            return false;
+        }
+        if let Some(wl) = self.winlist.take() {
+            let chosen = match &self.nodes[wl.list.ix()].kind {
+                Kind::List(l) => wl.windows.get(l.current).copied(),
+                _ => None,
+            };
+            self.close(wl.dialog);
+            if cmd == CM_WINLIST_OK {
+                if let Some(id) = chosen {
+                    if self.is_alive(id) {
+                        self.activate(id);
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// The windows the desktop may arrange: on the desktop, not modal,
+    /// and allowed to move. Back to front, which is the order they are
+    /// kept in.
+    fn arrangeable(&self) -> Vec<ViewId> {
+        self.nodes[self.root.ix()]
+            .children
+            .iter()
+            .copied()
+            .filter(|c| matches!(&self.nodes[c.ix()].kind, Kind::Window(w) if w.movable && !w.modal))
+            .collect()
+    }
+
+    /// Give a window a new place and size, within what it allows: a fixed
+    /// window keeps its size and only moves; a resizable one is clamped to
+    /// its own limits. Either forgets that it was centred or zoomed - it
+    /// has been put somewhere on purpose now.
+    fn arrange(&mut self, id: ViewId, r: Rect, area: Rect) {
+        let own = self.nodes[id.ix()].rect;
+        let Kind::Window(w) = &mut self.nodes[id.ix()].kind else {
+            return;
+        };
+        let mut r = r;
+        if !w.resizable {
+            r.w = own.w;
+            r.h = own.h;
+        } else {
+            let (min_w, min_h) = (w.min_w.max(6), w.min_h.max(3));
+            let max_w = if w.max_w > 0 { w.max_w } else { i16::MAX };
+            let max_h = if w.max_h > 0 { w.max_h } else { i16::MAX };
+            r.w = r.w.clamp(min_w, max_w.max(min_w));
+            r.h = r.h.clamp(min_h, max_h.max(min_h));
+        }
+        // Inside the work area if it can be; a window bigger than the
+        // desktop keeps its top-left corner in sight.
+        r.x = r.x.min(area.x + area.w - r.w).max(area.x);
+        r.y = r.y.min(area.y + area.h - r.h).max(area.y);
+        w.centred = false;
+        w.unzoomed = None;
+        self.nodes[id.ix()].rect = r;
+    }
+
+    /// Lay the windows along the diagonal, the back one at the top-left of
+    /// the work area and each one in front a cell down and to the right,
+    /// every title bar showing. Turbo Vision's `TDeskTop::cascade`.
+    ///
+    /// The desktop's job and not the application's: which windows there
+    /// are, which may move and which are modal is the desktop's knowledge,
+    /// and an application that had to ask for all of it to draw one
+    /// staircase would be doing the desktop's work with worse tools.
+    pub fn cascade(&mut self) {
+        if self.modal().is_some() {
+            return;
+        }
+        let area = self.work_area();
+        for (i, id) in self.arrangeable().into_iter().enumerate() {
+            let off = (i as i16).min(area.w - 6).min(area.h - 3).max(0);
+            let r = Rect::new(area.x + off, area.y + off, area.w - off, area.h - off);
+            self.arrange(id, r, area);
+        }
+    }
+
+    /// Divide the work area between the windows so that none overlaps:
+    /// the square root of their number in columns, the rest in rows, the
+    /// columns on the right one window taller when it does not come out
+    /// even. Turbo Vision's `TDeskTop::tile`, which took the same road.
+    ///
+    /// A window that cannot be resized gets a cell like the others and
+    /// stands in its top-left corner at its own size. The first cut left
+    /// such windows where they were, and on a desktop of dialogs - a
+    /// calculator, a calendar - Tile then did nothing at all, which is
+    /// worse than a dialog that overhangs its cell.
+    pub fn tile(&mut self) {
+        if self.modal().is_some() {
+            return;
+        }
+        let area = self.work_area();
+        let wins: Vec<ViewId> = self.arrangeable();
+        let n = wins.len() as i16;
+        if n == 0 || area.w < 6 || area.h < 3 {
+            return;
+        }
+        let cols = (1..=n).rev().find(|c| c * c <= n).unwrap_or(1);
+        let rows = n / cols;
+        let extra = n % cols;
+        let mut next = wins.into_iter();
+        for c in 0..cols {
+            let x0 = area.x + (area.w as i32 * c as i32 / cols as i32) as i16;
+            let x1 = area.x + (area.w as i32 * (c + 1) as i32 / cols as i32) as i16;
+            let in_col = rows + if c >= cols - extra { 1 } else { 0 };
+            for r in 0..in_col {
+                let y0 = area.y + (area.h as i32 * r as i32 / in_col as i32) as i16;
+                let y1 = area.y + (area.h as i32 * (r + 1) as i32 / in_col as i32) as i16;
+                if let Some(id) = next.next() {
+                    self.arrange(id, Rect::new(x0, y0, x1 - x0, y1 - y0), area);
+                }
+            }
+        }
+    }
+
     pub fn toggle_zoom(&mut self, id: ViewId) {
         // Zoomed means the work area, not the screen: a window covering the
         // menu bar is a window you cannot get out from under.
@@ -770,6 +1322,7 @@ impl Ui {
     }
 
     pub fn draw(&mut self, buf: &mut Buffer) {
+        self.compose_bars();
         self.measure();
         let clip = buf.rect();
         let blue = self.palette.blue;
@@ -835,7 +1388,7 @@ impl Ui {
                         self.nodes[k.ix()].rect = Rect::new(free.x, free.bottom() - h, free.w, h);
                         free.h -= h;
                     }
-                    Dock::Fill | Dock::BottomRight(..) | Dock::Manual => {}
+                    Dock::Fill | Dock::FillFrom(_) | Dock::BottomRight(..) | Dock::Manual => {}
                 }
             }
             for k in &kids {
@@ -847,8 +1400,13 @@ impl Ui {
                 }
             }
             for k in &kids {
-                if self.nodes[k.ix()].dock == Dock::Fill {
-                    self.nodes[k.ix()].rect = free;
+                match self.nodes[k.ix()].dock {
+                    Dock::Fill => self.nodes[k.ix()].rect = free,
+                    Dock::FillFrom(top) => {
+                        let top = top.clamp(0, free.h);
+                        self.nodes[k.ix()].rect = Rect::new(free.x, free.y + top, free.w, free.h - top);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -966,7 +1524,7 @@ impl Ui {
 
     fn draw_window(&self, id: ViewId, w: &Window, abs: Rect, buf: &mut Buffer, clip: Rect) {
         let active = self.active_window() == Some(id);
-        let dragging = self.drag.as_ref().map(|d| d.id) == Some(id);
+        let dragging = self.drag.as_ref().map(|d| d.id) == Some(id) || self.sizing.as_ref().map(|s| s.id) == Some(id);
         let p = self.palette.window(w.palette);
         let fa = if dragging {
             p.frame_dragging
@@ -1055,11 +1613,33 @@ impl Ui {
             // the frame is not reads as a label stuck on rather than part of
             // the window.
             let ta = fa;
-            let n = w.title.chars().count() as i16 + 2;
+            // A modal window says so after its name - `[modal]`, the
+            // brackets white and the word green - because a window that
+            // will not let the others be touched, and does not say why,
+            // reads as a desktop that has stopped working.
+            //
+            // The same tag says `[view]` on a window whose text cannot be
+            // typed into and `[hex]` on a hex dump: a viewer is the same
+            // blue as an editor, as it was in the file managers people
+            // learned on, and the word is how the two are told apart.
+            let tag = self.title_tag(id, w);
+            let extra = tag.map_or(0, |t| t.chars().count() as i16 + 3);
+            let n = w.title.chars().count() as i16 + 2 + extra;
             if n < abs.w - 10 {
                 let tx = abs.x + (abs.w - n) / 2;
                 buf.put(tx, abs.y, b' ', ta, clip);
-                let used = buf.text(tx + 1, abs.y, &w.title, ta, clip);
+                let mut used = buf.text(tx + 1, abs.y, &w.title, ta, clip);
+                if let Some(t) = tag {
+                    let bg = fa & 0xF0;
+                    let bracket = bg | crate::cell::Color::White as u8;
+                    let word = bg | crate::cell::Color::LightGreen as u8;
+                    let x = tx + 1 + used;
+                    buf.put(x, abs.y, b' ', ta, clip);
+                    buf.put(x + 1, abs.y, b'[', bracket, clip);
+                    let n = buf.text(x + 2, abs.y, t, word, clip);
+                    buf.put(x + 2 + n, abs.y, b']', bracket, clip);
+                    used += extra;
+                }
                 buf.put(tx + 1 + used, abs.y, b' ', ta, clip);
             }
         }
@@ -1114,39 +1694,119 @@ impl Ui {
         }
     }
 
+    /// The dialog's own buttons: the row docked against an edge, which is
+    /// where Enter finds its default and Escape its Cancel. Rows placed by
+    /// hand - a keypad - are buttons too, but they are not *the* buttons.
     fn button_row(&self, win: ViewId) -> Option<ViewId> {
         self.nodes[win.ix()]
             .children
             .iter()
             .copied()
-            .find(|c| matches!(self.nodes[c.ix()].kind, Kind::Buttons(_)))
+            .find(|c| matches!(self.nodes[c.ix()].kind, Kind::Buttons(_)) && self.nodes[c.ix()].dock != Dock::Manual)
+    }
+
+    /// Every row of buttons in a window, docked or placed.
+    fn button_rows(&self, win: ViewId) -> Vec<ViewId> {
+        self.nodes[win.ix()]
+            .children
+            .iter()
+            .copied()
+            .filter(|c| matches!(self.nodes[c.ix()].kind, Kind::Buttons(_)))
+            .collect()
+    }
+
+    /// Turn a button on or off by its place in its row.
+    pub fn set_button_enabled(&mut self, row: ViewId, ix: usize, on: bool) -> bool {
+        match &mut self.nodes[row.ix()].kind {
+            Kind::Buttons(b) => match b.buttons.get_mut(ix) {
+                Some(btn) => {
+                    btn.enabled = on;
+                    true
+                }
+                None => false,
+            },
+            _ => false,
+        }
     }
 
     /// A command from a button, waiting to be collected. The same door as the
     /// menu's, because it is the same kind of news.
     pub fn take_pressed(&mut self) -> Option<Cmd> {
-        let win = self.active_window()?;
-        let row = self.button_row(win)?;
-        match &mut self.nodes[row.ix()].kind {
-            Kind::Buttons(b) => b.pressed.take(),
-            _ => None,
+        loop {
+            let win = self.active_window()?;
+            let mut got = None;
+            for row in self.button_rows(win) {
+                if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
+                    if let Some(cmd) = b.pressed.take() {
+                        got = Some(cmd);
+                        break;
+                    }
+                }
+            }
+            let cmd = got?;
+            // The toolkit's own dialogs answer to the toolkit, not to the
+            // application: their buttons never come out of here.
+            if !self.internal_command(cmd) {
+                return Some(cmd);
+            }
         }
     }
 
-    fn press_default(&mut self, win: ViewId) -> bool {
-        let Some(row) = self.button_row(win) else {
-            return false;
-        };
-        let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind else {
-            return false;
-        };
-        match b.default_ix() {
-            Some(ix) => {
-                b.press_by_key(ix);
-                true
+    /// Escape: the button marked `cancel`, wherever its row is, and
+    /// failing that the last button of the docked row, which is Cancel by
+    /// convention. A dialog with neither simply cannot be escaped from,
+    /// which is a thing it is allowed to want.
+    fn press_cancel(&mut self, win: ViewId) -> bool {
+        for row in self.button_rows(win) {
+            if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
+                if let Some(ix) = b.buttons.iter().position(|x| x.cancel) {
+                    b.press_by_key(ix);
+                    return true;
+                }
             }
-            None => false,
         }
+        if let Some(row) = self.button_row(win) {
+            if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
+                if !b.buttons.is_empty() {
+                    let last = b.buttons.len() - 1;
+                    b.press_by_key(last);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// The window a view is in: itself if it is one, else the nearest
+    /// window above it.
+    pub fn window_of(&self, id: ViewId) -> Option<ViewId> {
+        let mut at = Some(id);
+        while let Some(v) = at {
+            if matches!(self.nodes[v.ix()].kind, Kind::Window(_)) {
+                return Some(v);
+            }
+            at = self.nodes[v.ix()].parent;
+        }
+        None
+    }
+
+    /// Enter, with nothing else wanting it: the default button, wherever
+    /// its row is - the docked row first, then any placed one.
+    fn press_default(&mut self, win: ViewId) -> bool {
+        let mut rows = self.button_rows(win);
+        if let Some(docked) = self.button_row(win) {
+            rows.retain(|r| *r != docked);
+            rows.insert(0, docked);
+        }
+        for row in rows {
+            if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
+                if let Some(ix) = b.default_ix() {
+                    b.press_by_key(ix);
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// A file panel in the active window, if there is one.
@@ -1183,17 +1843,7 @@ impl Ui {
         }
 
         if k.code == K::Esc {
-            if let Some(row) = self.button_row(win) {
-                if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
-                    // The last button is Cancel by convention; a dialog that
-                    // has no such button simply cannot be escaped from, which
-                    // is a thing it is allowed to want.
-                    if !b.buttons.is_empty() {
-                        let last = b.buttons.len() - 1;
-                        b.press_by_key(last);
-                    }
-                }
-            }
+            self.press_cancel(win);
             return;
         }
 
@@ -1283,6 +1933,35 @@ impl Ui {
     }
 
     /// The first child, if it is anything that scrolls at all.
+    /// The word after a window's title, if it has one: what the window
+    /// is that its name does not say.
+    fn title_tag(&self, id: ViewId, w: &Window) -> Option<&'static str> {
+        if w.modal {
+            return Some("modal");
+        }
+        let first = self.scrolling_child(id)?;
+        match &self.nodes[first.ix()].kind {
+            Kind::Text(t) if t.readonly => Some("view"),
+            Kind::Hex(_) => Some("hex"),
+            _ => None,
+        }
+    }
+
+    /// Make a text view a viewer, or an editor again. A viewer keeps no
+    /// caret and takes no focus, so turning one on lets go of both.
+    pub fn set_readonly(&mut self, id: ViewId, on: bool) -> bool {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Text(t) => {
+                t.readonly = on;
+                if on {
+                    t.focused = false;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn scrolling_child(&self, id: ViewId) -> Option<ViewId> {
         let first = *self.nodes[id.ix()].children.first()?;
         match self.nodes[first.ix()].kind {
@@ -1680,10 +2359,14 @@ impl Ui {
             let w = b.width();
 
             let sel = r.focused && i == r.current;
-            let (a, ka) = match (sel, b.enabled) {
-                (true, true) => (p.button_focus, p.button_focus_key),
-                (_, false) => (p.button_disabled, p.button_disabled),
-                _ => (p.button, p.button_key),
+            let (a, ka) = match (b.style, sel, b.enabled) {
+                (_, _, false) => (p.button_disabled, p.button_disabled),
+                (crate::button::ButtonStyle::Normal, true, _) => (p.button_focus, p.button_focus_key),
+                (crate::button::ButtonStyle::Normal, false, _) => (p.button, p.button_key),
+                (crate::button::ButtonStyle::Accent, true, _) => (p.button_accent_focus, p.button_accent_key),
+                (crate::button::ButtonStyle::Accent, false, _) => (p.button_accent, p.button_accent_key),
+                (crate::button::ButtonStyle::Danger, true, _) => (p.button_danger_focus, p.button_danger_key),
+                (crate::button::ButtonStyle::Danger, false, _) => (p.button_danger, p.button_danger_key),
             };
 
             if !held {
@@ -1713,9 +2396,26 @@ impl Ui {
         }
     }
 
+    /// The hint of the menu item the cursor stands on, if a panel is open
+    /// and the item has one.
+    fn menu_hint(&self) -> Option<String> {
+        let mb = self.menu_box_id()?;
+        match &self.nodes[mb.ix()].kind {
+            Kind::MenuBox(m) => m.items.get(m.current).filter(|it| !it.hint.is_empty()).map(|it| it.hint.clone()),
+            _ => None,
+        }
+    }
+
     fn draw_status(&self, s: &crate::status::StatusLine, abs: Rect, buf: &mut Buffer, clip: Rect) {
         let p = &self.palette;
         buf.fill(abs, b' ', p.status, clip);
+        // While a menu item with a hint is under the cursor, the line says
+        // what the item does instead of what the keys do - as Turbo
+        // Vision's did. The keys come back the moment the menu closes.
+        if let Some(hint) = self.menu_hint() {
+            buf.text(abs.x + 1, abs.y, &hint, p.status, clip);
+            return;
+        }
         for (i, it) in s.items.iter().enumerate() {
             let x = abs.x + s.item_x(i);
             let a = if it.enabled { p.status } else { p.status_disabled };
@@ -1929,6 +2629,7 @@ impl Ui {
     // ------------------------------------------------------------------ events
 
     pub fn handle(&mut self, ev: Event) {
+        self.compose_bars();
         match ev {
             Event::Resize(w, h) => self.resize(w, h),
             Event::Mouse(m) => self.handle_mouse(m),
@@ -1952,10 +2653,67 @@ impl Ui {
             .find(|id| self.abs_rect(*id).contains(p))
     }
 
+    /// The second meaning of what is under the pointer. The `Down` that
+    /// came with the double click has already been handled: the window
+    /// is active and the cursor is on the entry.
+    fn double_click(&mut self, p: Point) {
+        if self.menu_box_id().is_some() {
+            return;
+        }
+        let Some(id) = self.window_at(p) else { return };
+        let abs = self.abs_rect(id);
+        if p.y == abs.y {
+            // The title bar: zoom, or back. Not on the close box and not
+            // on the zoom box, which have meanings of their own and got
+            // them from the click already. And no drag: the press that
+            // came before this started one, and a zoomed window that is
+            // also being dragged is two answers to one gesture.
+            let zoomable = matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if w.zoomable);
+            let on_close = p.x >= abs.x + 2 && p.x <= abs.x + 4;
+            let on_zoom = p.x >= abs.right() - 5 && p.x <= abs.right() - 3;
+            if zoomable && !on_close && !on_zoom {
+                self.drag = None;
+                self.toggle_zoom(id);
+            }
+            return;
+        }
+        let Some(hit) = self.nodes[id.ix()].children.iter().copied().find(|c| self.abs_rect(*c).contains(p)) else {
+            return;
+        };
+        let r = self.abs_rect(hit);
+        let (row, col) = (p.y - r.y, p.x - r.x);
+        let press = match &mut self.nodes[hit.ix()].kind {
+            // A name: what Enter does to it. A folder is entered; a file is
+            // chosen and the dialog's default button pressed.
+            Kind::Files(f) => {
+                if f.at_point(col, row).is_none() {
+                    return;
+                }
+                let is_dir = f.selected().map(|e| e.is_dir()).unwrap_or(false);
+                f.choose();
+                !is_dir
+            }
+            // An item in a list: chosen, which is the default button.
+            Kind::List(l) => l.at_row(row).is_some(),
+            _ => false,
+        };
+        if press {
+            self.press_default(id);
+        }
+    }
+
     fn handle_mouse(&mut self, m: Mouse) {
         let p = Point::new(m.x, m.y);
 
         match m.kind {
+            MouseKind::Double(b) => {
+                // A double click is a click first - it puts the cursor on
+                // the thing - and then that thing's second meaning.
+                self.handle_mouse(Mouse { x: m.x, y: m.y, kind: MouseKind::Down(b) });
+                if b == Button::Left {
+                    self.double_click(p);
+                }
+            }
             MouseKind::Down(Button::Left) => {
                 // A click outside a modal window does nothing at all. Not
                 // "activates what is under it quietly" — nothing, because the
@@ -2104,27 +2862,25 @@ impl Ui {
                 }
 
                 // A button: it goes down now and does its work on release.
-                if let Some(row) = self.button_row(id) {
+                // The focus stays where it was - Turbo Vision's buttons did
+                // not take it on a click either - so a keypad pressed with
+                // the mouse leaves the caret in the display it types into.
+                for row in self.button_rows(id) {
                     let r = self.abs_rect(row);
-                    if r.contains(p) {
-                        let hit = match &self.nodes[row.ix()].kind {
-                            Kind::Buttons(b) => b.at(p.x - r.x, r.w),
-                            _ => None,
-                        };
-                        if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
-                            b.down = hit;
-                            b.focused = true;
-                            if let Some(i) = hit {
-                                b.current = i;
-                            }
-                        }
-                        if let Some(first) = self.scrolling_child(id) {
-                            if let Kind::Files(f) = &mut self.nodes[first.ix()].kind {
-                                f.path.focused = false;
-                            }
-                        }
-                        return;
+                    if !r.contains(p) {
+                        continue;
                     }
+                    let hit = match &self.nodes[row.ix()].kind {
+                        Kind::Buttons(b) => b.at(p.x - r.x, r.w),
+                        _ => None,
+                    };
+                    if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
+                        b.down = hit;
+                        if let Some(i) = hit {
+                            b.current = i;
+                        }
+                    }
+                    return;
                 }
 
                 // A canvas: the click is remembered, in its own cells, for
@@ -2229,7 +2985,7 @@ impl Ui {
                 // Release over the button that went down does the thing;
                 // release anywhere else is how you change your mind.
                 if let Some(win) = self.active_window() {
-                    if let Some(row) = self.button_row(win) {
+                    for row in self.button_rows(win) {
                         let r = self.abs_rect(row);
                         let over = r.contains(p);
                         if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
@@ -2448,6 +3204,37 @@ impl Ui {
             }
         }
 
+        // A window being moved from the keyboard has every key until Enter
+        // or Escape lets go of it.
+        if self.sizing.is_some() {
+            return self.sizing_key(k);
+        }
+
+        // The desktop's own keys, the ones Turbo Vision's desktop had:
+        // Alt+1..9, Alt+0, Shift+F6, Ctrl+F5. Before the status line, so a
+        // program's F6 does not shadow Shift+F6.
+        if self.desktop_keys && self.modal().is_none() {
+            match (k.code, k.mods.alt, k.mods.shift, k.mods.ctrl) {
+                (K::Char(c), true, false, false) if c.is_ascii_digit() => {
+                    if c == '0' {
+                        self.window_list();
+                    } else {
+                        self.activate_numbered(c as u8 - b'0');
+                    }
+                    return;
+                }
+                (K::F(6), false, true, false) => {
+                    self.cycle_windows_back();
+                    return;
+                }
+                (K::F(5), false, false, true) => {
+                    self.begin_size_move();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // The status line binds keys of its own - F1, Alt-X - and turns
         // them into commands. Not while a modal dialog is up: it is asking
         // something, and Help over an unanswered question is the mess
@@ -2485,7 +3272,7 @@ impl Ui {
         // failures by a long way.
         if k.mods.alt {
             if let crate::event::KeyCode::Char(c) = k.code {
-                if let Some(row) = self.button_row(win) {
+                for row in self.button_rows(win) {
                     let hit = match &self.nodes[row.ix()].kind {
                         Kind::Buttons(b) => b.by_hotkey(c),
                         _ => None,
@@ -2522,14 +3309,7 @@ impl Ui {
                 return;
             }
             if k.code == K::Esc {
-                if let Some(row) = self.button_row(win) {
-                    if let Kind::Buttons(b) = &mut self.nodes[row.ix()].kind {
-                        if !b.buttons.is_empty() {
-                            let last = b.buttons.len() - 1;
-                            b.press_by_key(last);
-                        }
-                    }
-                }
+                self.press_cancel(win);
                 return;
             }
             if let Some(f) = self.focused_or_first() {
@@ -2635,7 +3415,7 @@ impl Ui {
             Kind::Tree(_) => true,
             Kind::Input(_) | Kind::Files(_) | Kind::Html(_) | Kind::Hex(_) | Kind::List(_) => true,
             Kind::Cluster(c) => c.enabled,
-            Kind::Buttons(b) => !b.buttons.is_empty(),
+            Kind::Buttons(b) => b.selectable && !b.buttons.is_empty(),
             _ => false,
         }
     }
@@ -2898,9 +3678,14 @@ impl Ui {
                 }
             }
             Kind::Input(i) => {
-                // Into the text, not into the field: the field may be
-                // scrolled, and the column under the pointer is that many
-                // characters past the first one showing.
+                // The ▼ at the end opens the history; anywhere else puts
+                // the caret into the text - not into the field: the field
+                // may be scrolled, and the column under the pointer is
+                // that many characters past the first one showing.
+                if !i.history.is_empty() && col == r.w - 1 {
+                    self.open_history(id);
+                    return;
+                }
                 let x = i.left(r.w) + (col - i.field_x()).max(0) as usize;
                 i.set_cursor(x);
             }
@@ -2937,8 +3722,21 @@ impl Ui {
 
         match &mut self.nodes[id.ix()].kind {
             Kind::Cluster(c) => match k.code {
-                K::Up => c.step(-1),
-                K::Down => c.step(1),
+                // In radio buttons the arrows choose, not merely point:
+                // Turbo Vision's did, and a dot that stays behind while
+                // the cursor moves shows one answer and means another.
+                K::Up => {
+                    c.step(-1);
+                    if c.mode == crate::controls::Choice::One {
+                        c.toggle();
+                    }
+                }
+                K::Down => {
+                    c.step(1);
+                    if c.mode == crate::controls::Choice::One {
+                        c.toggle();
+                    }
+                }
                 // Space marks, Enter does not: Enter belongs to the dialog's
                 // default button, and a control that takes it makes the one
                 // key everybody presses mean something different here.
@@ -2971,7 +3769,14 @@ impl Ui {
             },
             Kind::Input(i) => {
                 if k.code == K::Enter {
+                    // What was entered is worth remembering; then the
+                    // dialog's default button, as Enter always is.
+                    i.remember();
                     self.press_default(win);
+                } else if k.code == K::Down && !i.history.is_empty() {
+                    // Out of the borrow first: the panel is a new node.
+                    let id = id;
+                    self.open_history(id);
                 } else {
                     i.key(k);
                 }

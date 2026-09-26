@@ -806,7 +806,12 @@ fn a_canvas_shows_the_cells_it_was_given_and_a_static_takes_new_words() {
 
 /// `flags cmd text shortcut sub...` for one plain item.
 fn item(flags: u8, cmd: u16, text: &str, shortcut: &str, sub: Vec<u8>) -> Vec<u8> {
-    [vec![flags], u16(cmd).to_vec(), s(text), s(shortcut), sub].concat()
+    [vec![flags], u16(cmd).to_vec(), s(text), s(shortcut), s(""), sub].concat()
+}
+
+/// The same, with a hint for the status line.
+fn hinted(cmd: u16, text: &str, hint: &str) -> Vec<u8> {
+    [vec![0], u16(cmd).to_vec(), s(text), s(""), s(hint), vec![0]].concat()
 }
 
 #[test]
@@ -904,6 +909,368 @@ fn clusters_canvas_clicks_next_and_zoom_over_the_wire() {
     c.ok(0x44, &u16(b));
     let f = frame(&mut c);
     assert!(corner(&f, 49, 14), "not back\n{}", picture(&f));
+}
+
+fn attr_at(f: &Frame, x: i16, y: i16) -> u8 {
+    f.cells[((y * f.w + x) * 3 + 2) as usize]
+}
+
+/// A row placed by hand: `parent rect n` then `cmd flags label` each.
+fn button_row(c: &mut Client, win: u16, y: i16, keys: &[(u16, u8, &str)]) -> u16 {
+    // Row flags 1: not a Tab stop.
+    let mut p = [u16(win).to_vec(), rect(1, y, 0, 2), vec![1, keys.len() as u8]].concat();
+    for (cmd, flags, label) in keys {
+        p.extend(u16(*cmd));
+        p.push(*flags);
+        p.extend(s(label));
+    }
+    id_of(&c.ok(0x1E, &p))
+}
+
+fn take(c: &mut Client) -> u16 {
+    let t = c.ok(0x41, &[]);
+    u16::from_le_bytes([t[0], t[1]])
+}
+
+#[test]
+fn a_keypad_of_placed_rows_over_the_wire() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(20)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(-1, -1, 50, 12), vec![0x20], s("Calc")].concat()));
+    // A display first, so it has the focus.
+    let display = id_of(&c.ok(0x13, &[u16(win).to_vec(), rect(1, 0, 30, 1), u16(0).to_vec(), s(""), s("")].concat()));
+    // Flags: bit0 default, bits1-2 style (1 accent, 2 danger), bit3 disabled.
+    // C: danger and cancel (bit 4). A: disabled.
+    let row1 = button_row(&mut c, win, 2, &[(22, 4 | 16, " C "), (7, 0, " 7 "), (10, 8, " A ")]);
+    let _row2 = button_row(&mut c, win, 4, &[(20, 2, " + "), (21, 1 | 2, " = ")]);
+
+    let f = frame(&mut c);
+    let (cx, cy) = find(&f, "  C  ").expect("C on screen");
+    let (sx, sy) = find(&f, "  7  ").expect("7 on screen");
+    let (ax, ay) = find(&f, "  A  ").expect("A on screen");
+    let (px, py) = find(&f, "  +  ").expect("+ on screen");
+    assert_eq!(sy, cy, "one row");
+    assert_eq!(py, cy + 2, "the next row two below");
+    assert_eq!(attr_at(&f, cx + 2, cy), 0x4F, "danger: white on red");
+    assert_eq!(attr_at(&f, sx + 2, sy), 0x20, "normal: black on green");
+    assert_eq!(attr_at(&f, px + 2, py), 0x30, "accent: black on cyan");
+    assert_eq!(attr_at(&f, ax + 2, ay), 0x78, "disabled: dark grey on grey");
+    // The last key of a row keeps its right-hand shadow.
+    assert_eq!(f.glyph(ax + 6, ay), 0xDD, "the shadow beside the last key");
+    // Only = wears the default marks: a placed row implies no default.
+    assert!(find(&f, "\u{10}  =  \u{11}").is_some(), "= is the default");
+    assert!(find(&f, "\u{10}  C  \u{11}").is_none(), "C is not");
+
+    // A click on 7 presses it and the display keeps the caret: the next key
+    // typed lands in it.
+    mouse(&mut c, 0, sx + 2, sy);
+    mouse(&mut c, 1, sx + 2, sy);
+    assert_eq!(take(&mut c), 7);
+    c.ok(0x30, &[0, b'8', 0, 0]);
+    let t = c.ok(0x21, &u16(display));
+    assert_eq!(&t[2..], b"8", "the 8 went into the display, not into the keypad");
+    // Enter presses the default in the placed row; Escape the cancel one.
+    c.ok(0x30, &[2, 0, 0, 0]);
+    c.ok(0x32, &[]);
+    assert_eq!(take(&mut c), 21, "Enter found = in a placed row");
+    c.ok(0x30, &[2, 1, 0, 0]);
+    c.ok(0x32, &[]);
+    assert_eq!(take(&mut c), 22, "Escape found C");
+    // Tab does not stop at the keypad: the display is the only stop, so
+    // Tab leaves the focus where it was and the next key still types.
+    c.ok(0x30, &[2, 2, 0, 0]);
+    c.ok(0x30, &[0, b'9', 0, 0]);
+    let t = c.ok(0x21, &u16(display));
+    assert_eq!(&t[2..], b"89", "after Tab the 9 still went into the display");
+    // FOCUS puts the caret on a control by its id, and refuses a stranger.
+    c.ok(0x46, &u16(display));
+    let (status, _) = c.call(0x46, &u16(9999));
+    assert_ne!(status, 0);
+    // A disabled key does not press; enabled by SET_BUTTON, it does.
+    mouse(&mut c, 0, ax + 2, ay);
+    mouse(&mut c, 1, ax + 2, ay);
+    assert_eq!(take(&mut c), 0, "disabled");
+    c.ok(0x45, &[u16(row1).to_vec(), vec![2, 1]].concat());
+    mouse(&mut c, 0, ax + 2, ay);
+    mouse(&mut c, 1, ax + 2, ay);
+    assert_eq!(take(&mut c), 10, "enabled");
+    let (status, _) = c.call(0x45, &[u16(row1).to_vec(), vec![9, 1]].concat());
+    assert_ne!(status, 0, "no button 9 is an error, not a crash");
+}
+
+#[test]
+fn cascade_and_tile_over_the_wire() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    for t in ["A", "B"] {
+        c.ok(0x10, &[u16(0).to_vec(), rect(10, 5, 30, 8), vec![0], s(t)].concat());
+    }
+    c.ok(0x48, &[]);
+    let f = frame(&mut c);
+    // Two windows tiled: one column, two rows; the corners say where.
+    assert!(corner(&f, 79, 11), "A's corner: rows 0..11 of 25");
+    assert!(corner(&f, 79, 24), "B's corner");
+    c.ok(0x47, &[]);
+    let f = frame(&mut c);
+    assert!(find(&f, " A ").is_some() && find(&f, " B ").is_some(), "both titles show after a cascade");
+    assert!(corner(&f, 79, 24), "A fills the work area");
+    assert!(corner(&f, 79, 24) && f.glyph(1, 1) != b' ' as u16, "B starts one cell in");
+    let (_, by) = find(&f, " B ").unwrap();
+    let (_, ay) = find(&f, " A ").unwrap();
+    assert_eq!((ay, by), (0, 1), "A's title on row 0, B's a row lower");
+}
+
+#[test]
+fn a_viewer_becomes_an_editor_and_a_hex_dump_shows_bytes() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 60, 10), vec![0], s("A.TXT")].concat()));
+    // Read-only text: flags bit 0.
+    let text = id_of(&c.ok(0x11, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 1], s("hello")].concat()));
+    let f = frame(&mut c);
+    assert!(find(&f, " A.TXT [view] ").is_some(), "a viewer says so");
+    c.ok(0x30, &[0, b'x', 0, 0]);
+    let t = c.ok(0x21, &u16(text));
+    assert_eq!(&t[2..], b"hello", "typing into a viewer does nothing");
+    // SET_READONLY off: an editor now.
+    c.ok(0x49, &[u16(text).to_vec(), vec![0]].concat());
+    let f = frame(&mut c);
+    assert!(find(&f, " A.TXT ").is_some() && find(&f, "[view]").is_none(), "the tag is gone");
+    c.ok(0x30, &[0, b'x', 0, 0]);
+    let t = c.ok(0x21, &u16(text));
+    assert_eq!(&t[2..], b"xhello", "typing lands in the editor");
+    c.ok(0x49, &[u16(text).to_vec(), vec![1]].concat());
+    assert!(find(&frame(&mut c), "[view]").is_some());
+    let (status, _) = c.call(0x49, &[u16(win).to_vec(), vec![1]].concat());
+    assert_ne!(status, 0, "a window is not a text");
+
+    // A hex window of a few bytes.
+    let hw = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 12, 70, 8), vec![0], s("A.BIN")].concat()));
+    c.ok(0x1F, &[u16(hw).to_vec(), rect(0, 0, 0, 0), b"Hello".to_vec()].concat());
+    let f = frame(&mut c);
+    assert!(find(&f, " A.BIN [hex] ").is_some(), "a hex window says so");
+    assert!(find(&f, "00000000").is_some(), "the offset column");
+    assert!(find(&f, "48 65 6C 6C 6F").is_some(), "the bytes");
+}
+
+#[test]
+fn a_window_carries_its_keys_and_menu_items_over_the_wire() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    // A bar with File and Options, and a status line with F3.
+    c.ok(0x1C, &[vec![2], item(0, 0, "~F~ile", "", [vec![1], item(0, 1, "~O~pen", "F3", vec![0])].concat()),
+                 item(0, 0, "~O~ptions", "", [vec![1], item(0, 2, "~M~ouse...", "", vec![0])].concat())].concat());
+    c.ok(0x16, &[vec![1], u16(1).to_vec(), vec![1], u16(3).to_vec(), vec![0], s("~F3~ Open")].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(2, 2, 40, 10), vec![0], s("A.TXT")].concat()));
+    // WINDOW_STATUS: F4 Edit, command 10. WINDOW_MENU: into Options.
+    c.ok(0x4A, &[u16(win).to_vec(), vec![1], u16(10).to_vec(), vec![1], u16(4).to_vec(), vec![0], s("~F4~ Edit")].concat());
+    c.ok(0x4B, &[u16(win).to_vec(), vec![1], item(0, 0, "~O~ptions", "", [vec![1], item(0, 10, "~E~dit / view", "F4", vec![0])].concat())].concat());
+    let f = frame(&mut c);
+    assert!(f.row(24).contains("F3 Open") && f.row(24).contains("F4 Edit"), "{:?}", f.row(24));
+    c.ok(0x30, &[1, 4, 0, 0]);
+    let t = c.ok(0x41, &[]);
+    assert_eq!(u16::from_le_bytes([t[2], t[3]]), 10, "F4 is the window's command while it is active");
+    // Alt+O: the Options panel holds Mouse... and Edit / view.
+    c.ok(0x30, &[0, b'o', 0, 4]);
+    let f = frame(&mut c);
+    assert!(find(&f, "Mouse...").is_some() && find(&f, "Edit / view").is_some(), "the window's item is not in Options");
+    c.ok(0x30, &[2, 1, 0, 0]);
+    // Another window in front: F4 gone from the line and unbound.
+    c.ok(0x10, &[u16(0).to_vec(), rect(10, 5, 40, 10), vec![0], s("B")].concat());
+    let f = frame(&mut c);
+    assert!(!f.row(24).contains("F4"), "{:?}", f.row(24));
+    c.ok(0x30, &[1, 4, 0, 0]);
+    let t = c.ok(0x41, &[]);
+    assert_eq!(u16::from_le_bytes([t[2], t[3]]), 0, "F4 still bound with B in front");
+    let (status, _) = c.call(0x4A, &[u16(9999).to_vec(), vec![0]].concat());
+    assert_ne!(status, 0);
+}
+
+#[test]
+fn a_double_click_over_the_wire_zooms_a_title_bar() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    c.ok(0x10, &[u16(0).to_vec(), rect(10, 5, 40, 10), vec![0], s("Doc")].concat());
+    // Down, up, double (kind 6), up on the title row.
+    mouse(&mut c, 0, 20, 5);
+    mouse(&mut c, 1, 20, 5);
+    mouse(&mut c, 6, 20, 5);
+    mouse(&mut c, 1, 20, 5);
+    let f = frame(&mut c);
+    assert!(corner(&f, 79, 24), "the window did not zoom");
+    mouse(&mut c, 0, 20, 0);
+    mouse(&mut c, 1, 20, 0);
+    mouse(&mut c, 6, 20, 0);
+    mouse(&mut c, 1, 20, 0);
+    let f = frame(&mut c);
+    assert!(corner(&f, 49, 14), "the window did not zoom back");
+    let (status, _) = c.call(0x31, &[vec![9, 0], i16(0).to_vec(), i16(0).to_vec()].concat());
+    assert_ne!(status, 0, "no mouse kind 9");
+}
+
+#[test]
+fn the_desktop_keys_work_over_the_wire() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    for (i, t) in ["Alpha", "Beta"].iter().enumerate() {
+        c.ok(0x10, &[u16(0).to_vec(), rect(40 * i as i16, 3, 30, 8), vec![0], s(t)].concat());
+    }
+    let f = frame(&mut c);
+    assert!(f.row(3).contains('1') && f.row(3).contains('2'), "numbers in the frames: {:?}", f.row(3));
+    // Alt+1: Alpha comes to the front.
+    c.ok(0x30, &[0, b'1', 0, 4]);
+    let a = c.ok(0x2A, &[]);
+    let alpha = u16::from_le_bytes([a[0], a[1]]);
+    assert_eq!(alpha, 1, "Alpha is the first window made");
+    // Shift+F6: Beta again.
+    c.ok(0x30, &[1, 6, 0, 1]);
+    let a = c.ok(0x2A, &[]);
+    assert_eq!(u16::from_le_bytes([a[0], a[1]]), 2);
+    // Alt+0: the list; Down, Enter picks Alpha; TAKE reports nothing.
+    c.ok(0x30, &[0, b'0', 0, 4]);
+    let f = frame(&mut c);
+    assert!(find(&f, "Windows [modal]").is_some() && find(&f, "1  Alpha").is_some(), "{}", picture(&f));
+    c.ok(0x30, &[2, 12, 0, 0]);
+    c.ok(0x30, &[2, 0, 0, 0]);
+    c.ok(0x32, &[]);
+    let t = c.ok(0x41, &[]);
+    assert_eq!(&t[..4], &[0, 0, 0, 0], "the list's buttons are the toolkit's");
+    let a = c.ok(0x2A, &[]);
+    assert_eq!(u16::from_le_bytes([a[0], a[1]]), 1, "Alpha again");
+    // Ctrl+F5, Right, Enter: Alpha moved one cell.
+    c.ok(0x30, &[1, 5, 0, 2]);
+    c.ok(0x30, &[2, 14, 0, 0]);
+    c.ok(0x30, &[2, 0, 0, 0]);
+    let f = frame(&mut c);
+    let (x, _) = find(&f, " Alpha ").unwrap();
+    assert_eq!(x, 1 + (30 - 7) / 2, "the title moved with the window");
+    // The three verbs as ops too.
+    c.ok(0x4D, &[]);
+    c.ok(0x4E, &[]);
+    c.ok(0x30, &[2, 1, 0, 0]);
+    c.ok(0x4C, &[]);
+    assert!(find(&frame(&mut c), "Windows [modal]").is_some());
+}
+
+#[test]
+fn hints_and_history_over_the_wire() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    c.ok(0x1C, &[vec![1], item(0, 0, "~F~ile", "", [vec![1], hinted(1, "~O~pen", "Open a file")].concat())].concat());
+    c.ok(0x16, &[vec![1], u16(9).to_vec(), vec![0xFF], u16(0).to_vec(), vec![0], s("~F1~ Help")].concat());
+    c.ok(0x30, &[1, 10, 0, 0]); // F10
+    let f = frame(&mut c);
+    assert!(f.row(24).contains("Open a file") && !f.row(24).contains("F1 Help"), "{:?}", f.row(24));
+    c.ok(0x30, &[2, 1, 0, 0]); // Esc
+    assert!(frame(&mut c).row(24).contains("F1 Help"));
+
+    // An input with a history set from outside; Down, Enter fills it.
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(5, 5, 50, 8), vec![0], s("Go")].concat()));
+    let input = id_of(&c.ok(0x13, &[u16(win).to_vec(), rect(1, 1, 40, 1), u16(0).to_vec(), s("Path:"), s("")].concat()));
+    c.ok(0x4F, &[u16(input).to_vec(), vec![2], s("D:\\B"), s("C:\\A")].concat());
+    let f = frame(&mut c);
+    assert_eq!(f.glyph(5 + 1 + 40, 7), 0x1F, "the ▼ at the field's end");
+    c.ok(0x30, &[2, 12, 0, 0]); // Down
+    assert!(find(&frame(&mut c), "D:\\B").is_some(), "the history panel");
+    c.ok(0x30, &[2, 12, 0, 0]);
+    c.ok(0x30, &[2, 0, 0, 0]); // Enter on C:\A
+    c.ok(0x32, &[]);
+    let t = c.ok(0x41, &[]);
+    assert_eq!(&t[..4], &[0, 0, 0, 0], "a history pick is not a command");
+    let t = c.ok(0x21, &u16(input));
+    assert_eq!(&t[2..], b"C:\\A");
+    // Enter in the field adds to the history; GET_HISTORY reads it back.
+    c.ok(0x30, &[2, 0, 0, 0]);
+    let h = c.ok(0x50, &u16(input));
+    assert_eq!(h[0], 2, "still two: C:\\A moved to the top, not doubled");
+    assert_eq!(&h[3..7], b"C:\\A");
+}
+
+#[test]
+fn the_palette_is_listed_and_set_over_the_wire() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(40), i16(10)].concat());
+    let p = c.ok(0x51, &[]);
+    let n = p[0] as usize;
+    assert!(n > 60);
+    // Walk the entries to find "Desktop: desktop".
+    let mut at = 1;
+    let mut desktop = None;
+    for ix in 0..n {
+        let gl = u16::from_le_bytes([p[at], p[at + 1]]) as usize;
+        let group = String::from_utf8_lossy(&p[at + 2..at + 2 + gl]).to_string();
+        at += 2 + gl;
+        let nl = u16::from_le_bytes([p[at], p[at + 1]]) as usize;
+        let name = String::from_utf8_lossy(&p[at + 2..at + 2 + nl]).to_string();
+        at += 2 + nl;
+        let _attr = p[at];
+        at += 1;
+        if group == "Desktop" && name == "desktop" {
+            desktop = Some(ix as u8);
+        }
+    }
+    let desktop = desktop.expect("the desktop colour is listed");
+    let f = frame(&mut c);
+    let before = f.cells[(5 * 40 + 5) * 3 + 2];
+    c.ok(0x52, &[desktop, 0x4F]);
+    let f = frame(&mut c);
+    assert_eq!(f.cells[(5 * 40 + 5) * 3 + 2], 0x4F, "the desktop wears the new colour");
+    assert_ne!(before, 0x4F);
+    let (status, _) = c.call(0x52, &[250, 0]);
+    assert_ne!(status, 0, "no entry 250");
+}
+
+#[test]
+fn a_lazy_tree_over_the_wire() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(20)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 40, 15), vec![0], s("Tree")].concat()));
+    // Nodes: n then (flags text children). C: open, with Users and Windows lazy.
+    let nodes = [vec![1], vec![1], s("C:"), vec![2], vec![2], s("Users"), vec![0], vec![2], s("Windows"), vec![0]].concat();
+    let tree = id_of(&c.ok(0x53, &[u16(win).to_vec(), rect(0, 0, 0, 0), nodes].concat()));
+    let f = frame(&mut c);
+    assert!(find(&f, "+ Users").is_some(), "{}", picture(&f));
+    c.ok(0x30, &[2, 12, 0, 0]); // Down
+    c.ok(0x30, &[2, 14, 0, 0]); // Right
+    let e = c.ok(0x55, &u16(tree));
+    assert_eq!(e[0], 2, "a path of two");
+    assert_eq!(&e[1..3], &[0, 0]);
+    assert_eq!(&e[5..7], b"C:");
+    let e2 = c.ok(0x55, &u16(tree));
+    assert_eq!(e2[0], 0, "asked once");
+    // The answer: one child.
+    c.ok(0x54, &[u16(tree).to_vec(), vec![2], u16(0).to_vec(), u16(0).to_vec(), vec![1], vec![2], s("Egor"), vec![0]].concat());
+    let f = frame(&mut c);
+    assert!(find(&f, "- Users").is_some() && find(&f, "+ Egor").is_some(), "{}", picture(&f));
+    let p = c.ok(0x56, &u16(tree));
+    assert_eq!(p[0], 2);
+    assert_eq!(&p[3..5], b"C:");
+    let (status, _) = c.call(0x54, &[u16(tree).to_vec(), vec![1], u16(7).to_vec(), vec![0]].concat());
+    assert_ne!(status, 0, "no node 7");
+}
+
+#[test]
+fn find_and_replace_over_the_wire() {
+    let mut c = Client::start();
+    let win = notes(&mut c);
+    let text = id_of(&[2, 0]);
+    let _ = win;
+    // "one two three": find "t", case-insensitive: "two".
+    let f = c.ok(0x57, &[u16(text).to_vec(), vec![0], s("tw")].concat());
+    assert_eq!(f[0], 1);
+    let (r, f2) = {
+        let r = c.ok(0x58, &[u16(text).to_vec(), vec![0], s("tw"), s("TW")].concat());
+        (r[0], r[1])
+    };
+    assert_eq!((r, f2), (1, 0), "replaced, and no next");
+    let t = c.ok(0x21, &u16(text));
+    assert_eq!(&t[2..], b"one\nTWo\nthree");
+    let n = c.ok(0x59, &[u16(text).to_vec(), vec![0], s("e"), s("E")].concat());
+    assert_eq!(u16::from_le_bytes([n[0], n[1]]), 3);
+    let t = c.ok(0x21, &u16(text));
+    assert_eq!(&t[2..], b"onE\nTWo\nthrEE");
+    let (status, _) = c.call(0x57, &[u16(win).to_vec(), vec![0], s("x")].concat());
+    assert_ne!(status, 0, "a window is not a text");
 }
 
 #[test]

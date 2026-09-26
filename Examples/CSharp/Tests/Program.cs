@@ -598,6 +598,124 @@ internal static class Tests
             Check(rightHalf.Contains("b.txt"), "the right panel lost the file that stayed", last);
         });
 
+        Case("Commander: a double click on a file shows its properties, on a folder enters it", () =>
+        {
+            var (l, r) = TempTree();
+            using var owl = Owl();
+            var app = new CommanderApp(owl, l, r);
+            var f = owl.GetFrame();
+            var (ax, ay) = Locate(f, "a.txt");
+            owl.DoubleClick(ax + 1, ay);
+            app.Poll();
+            var g = owl.GetFrame();
+            Check(g.Find(" Properties [modal] ") != null, "no properties dialog", g);
+            Check(g.Find("a.txt") != null && g.Find("Size:") != null && g.Find("3 bytes") != null, "the size is not there", g);
+            Check(g.Find("Modified:") != null && g.Find("Attributes:") != null && g.Find("Folder:") != null, "dates and attributes are not there", g);
+            // Enter is OK: the dialog goes.
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(owl.GetFrame().Find("Properties") == null, "OK did not close the dialog", owl.GetFrame());
+            // A folder: entered.
+            var (sx, sy) = Locate(owl.GetFrame(), "sub");
+            owl.DoubleClick(sx + 1, sy);
+            app.Poll();
+            Check(owl.GetFrame().Find("inner.txt") != null, "the double click did not enter the folder", owl.GetFrame());
+        });
+
+        Case("Notes: Find finds and finds again, Replace all replaces", () =>
+        {
+            File.WriteAllText(notesFile, "the cat sat\non the mat\nthe end\n");
+            using var owl = Owl();
+            var app = new NotesApp(owl, notesFile);
+            var f = owl.GetFrame();
+            Check(f.Find(" Find ") != null && f.Find(" Replace ") != null, "no Find and Replace buttons", f);
+            void Hotkey(char c) { owl.Press((ConsoleKey)char.ToUpper(c), alt: true, ch: c); owl.Tick(); app.OnCommand(owl.Take().pressed); }
+            Hotkey('f');
+            var g = owl.GetFrame();
+            Check(g.Find(" Find [modal] ") != null && g.Find("Case sensitive") != null, "no Find dialog", g);
+            owl.Type("the");
+            owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check(app.LastPattern == "the" && owl.GetFrame().Find("Find [modal]") == null, "OK did not take the pattern", owl.GetFrame());
+            // Find again, twice, with the remembered pattern: the third "the";
+            // a fourth time says not found.
+            for (var k = 0; k < 3; k++)
+            {
+                Hotkey('f');
+                owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            }
+            var h = owl.GetFrame();
+            Check(h.Find("not found") != null, "the end of the text did not say so", h);
+            owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+
+            // Replace all "the" with "a".
+            Hotkey('r');
+            var i = owl.GetFrame();
+            Check(i.Find(" Replace [modal] ") != null && i.Find("Replace with:") != null, "no Replace dialog", i);
+            // The Find field remembers "the"; Tab to the second field and type.
+            owl.Press(ConsoleKey.Tab);
+            owl.Type("a");
+            owl.Press(ConsoleKey.A, alt: true, ch: 'a'); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            var j = owl.GetFrame();
+            Check(j.Find("3 replaced") != null, "Replace all did not say how many", j);
+            owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check(owl.GetText(app.Editor).StartsWith("a cat sat\non a mat\na end"), $"replaced wrongly: {owl.GetText(app.Editor)}");
+            File.Delete(notesFile);
+        });
+
+        Case("Notes: a double click on the title bar zooms the window and back", () =>
+        {
+            File.Delete(notesFile);
+            using var owl = Owl();
+            _ = new NotesApp(owl, notesFile);
+            var f = owl.GetFrame();
+            var (tx, ty) = Locate(f, " OWLOSUI-TEST.TXT ");
+            owl.DoubleClick(tx + 2, ty);
+            var g = owl.GetFrame();
+            Check(IsCorner(g, 79, 24), "the double click did not zoom", g);
+            var (ux, uy) = Locate(g, " OWLOSUI-TEST.TXT ");
+            owl.DoubleClick(ux + 2, uy);
+            var h = owl.GetFrame();
+            Check(!IsCorner(h, 79, 24) && Locate(h, " OWLOSUI-TEST.TXT ") == (tx, ty), "the second double click did not put it back", h);
+        });
+
+        Case("Commander: Alt+F10 shows the drive as a tree the other panel follows; Alt+F1 picks a drive", () =>
+        {
+            var (l, r) = TempTree();
+            using var owl = Owl();
+            var app = new CommanderApp(owl, l, r);
+            owl.GetFrame();
+            // The left panel becomes a tree of its drive, filled as it opens.
+            owl.Press(ConsoleKey.F10, alt: true);
+            app.OnCommand(owl.Take().command);
+            app.Poll();
+            var f = owl.GetFrame();
+            var rootName = Path.GetPathRoot(l)!.TrimEnd('\\');
+            Check(app.Left.Tree != 0 && f.Find(rootName) != null, "no tree", f);
+            Check(f.Find("a.txt") == null, "the files are still there", f);
+            // The other panel follows the cursor: on the root now.
+            Check(app.Right.Dir == Path.GetPathRoot(l), $"the right panel did not follow: {app.Right.Dir}");
+            // Down: the first folder of the drive; the right panel goes there.
+            owl.Press(ConsoleKey.DownArrow); app.Poll();
+            var path = owl.TreePath(app.Left.Tree);
+            Check(path.Length == 2, $"Down did not land on a folder: {string.Join("\\", path)}");
+            Check(app.Right.Dir == Path.Combine(Path.GetPathRoot(l)!, path[1]), $"the right panel is at {app.Right.Dir}");
+            // Right opens it: the program is asked for its subfolders and answers.
+            owl.Press(ConsoleKey.RightArrow); app.Poll();
+            Check(owl.TreeExpand(app.Left.Tree) == null, "the expansion was not answered");
+            // Alt+F10 again: files, in the folder the cursor was on.
+            owl.Press(ConsoleKey.F10, alt: true);
+            app.OnCommand(owl.Take().command);
+            Check(app.Left.Tree == 0 && app.Left.Files != 0 && app.Left.Dir == app.Right.Dir, $"back to files at {app.Left.Dir}");
+
+            // Alt+F1: the drive dialog, modal, with this drive in it.
+            owl.Press(ConsoleKey.F1, alt: true);
+            app.OnCommand(owl.Take().command);
+            var g = owl.GetFrame();
+            Check(g.Find(" Drive [modal] ") != null && g.Find(rootName) != null, "no drive dialog", g);
+            owl.Press(ConsoleKey.Escape); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check(owl.GetFrame().Find("Drive [modal]") == null, "Cancel did not close the drive dialog", owl.GetFrame());
+        });
+
         Case("Commander: F3 views a file, F4 edits it, F7 makes a folder, F6 moves", () =>
         {
             var (l, r) = TempTree();
@@ -727,18 +845,227 @@ internal static class Tests
             owl.Type("12+34*2");
             owl.Press(ConsoleKey.Enter); owl.Tick();
             app.OnCommand(owl.Take().pressed);
-            Check(owl.GetFrame().Find("92") != null, "12+34*2 left to right is 92", owl.GetFrame());
-            Check(OwlosDemo.App.Calculate("10/0") == "Divide by zero" && OwlosDemo.App.Calculate("7-") == "Error", "the calculator's errors");
+            Check(app.Calc.Display == "80", $"12+34*2 with precedence is 80, not {app.Calc.Display}", owl.GetFrame());
+        });
 
-            // The keypad: click "C" then "7", "8", and the display says 78.
+        Case("Calculator: the keypad is buttons - C red and top left, a click keeps the caret in the display", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            app.OnCommand(OwlosDemo.App.CmCalc);
+            var f = owl.GetFrame();
+
+            // C is the first key of the first row, and it is white on red.
+            var (cx, cy) = Locate(f, "  C  ");
+            var (sevenX, sevenY) = Locate(f, "  7  ");
+            Check(cy < sevenY && cx <= sevenX, "C is not above the digits at the left", f);
+            Check(f.Attr(cx + 2, cy) == Owlosui.Attr(ConsoleColor.White, ConsoleColor.DarkRed), $"C is {f.Attr(cx + 2, cy):X2}, not white on red", f);
+            // A digit is green, an operator cyan: the eye tells them apart.
+            var (plusX, plusY) = Locate(f, "  +  ");
+            Check(f.Attr(sevenX + 2, sevenY) == Owlosui.Attr(ConsoleColor.Black, ConsoleColor.DarkGreen), "7 is not black on green", f);
+            Check(f.Attr(plusX + 2, plusY) == Owlosui.Attr(ConsoleColor.Black, ConsoleColor.DarkCyan), "+ is not black on cyan", f);
+            // Hex digits are disabled in decimal: grey.
+            var (ax, ay) = Locate(f, "  A  ");
+            Check(f.Attr(ax + 2, ay) == Owlosui.Attr(ConsoleColor.DarkGray, ConsoleColor.Gray), "A is not disabled in decimal", f);
+
+            // The palette's colours are the IBM sixteen: its Red is what
+            // ConsoleColor calls DarkRed, and so on down the list.
+            // Click 7, +, then type 8, click =, and it is 15: the click did
+            // not take the caret away from the display.
+            ushort Press(int x, int y) { owl.Click(x, y); var (p, _) = owl.Take(); return p; }
+            app.OnCommand(Press(sevenX + 2, sevenY));
+            app.OnCommand(Press(plusX + 2, plusY));
+            owl.Type("8");
+            var (eqX, eqY) = Locate(f, "  =  ");
+            app.OnCommand(Press(eqX + 2, eqY));
+            Check(app.Calc.Display == "15", $"7 + 8 = gave '{app.Calc.Display}'", owl.GetFrame());
+            // Typing after an answer starts over; C clears.
+            owl.Type("2");
+            Check(app.Calc.Display == "152", "typing appends to the answer", owl.GetFrame());
+            app.OnCommand(Press(cx + 2, cy));
+            Check(app.Calc.Display == "", "C did not clear", owl.GetFrame());
+            // Enter presses = from the display: the default is in a placed row.
+            owl.Type("2^10");
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(app.Calc.Display == "1024", $"Enter did not press =: '{app.Calc.Display}'", owl.GetFrame());
+            // Escape is C.
+            owl.Press(ConsoleKey.Escape); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check(app.Calc.Display == "", $"Escape did not clear: '{app.Calc.Display}'", owl.GetFrame());
+            // Tab does not wander into the keypad: one Tab lands on the
+            // modes, the next is back on the display, and the digit typed
+            // there lands in it.
+            owl.Press(ConsoleKey.Tab); owl.Press(ConsoleKey.Tab); owl.Press(ConsoleKey.Tab);
+            owl.Type("5");
+            Check(app.Calc.Display == "5", $"after Tab, Tab, Tab the 5 went astray: '{app.Calc.Display}'", owl.GetFrame());
+
+            // The operations make the right-hand column and the hex digits
+            // stand beside the decimal ones.
             var h = owl.GetFrame();
-            var (cx, cy) = Locate(h, " C ");
-            owl.Click(cx + 1, cy); app.Poll();
-            var (sx, sy) = Locate(h, " 7 ");
-            owl.Click(sx + 1, sy); app.Poll();
-            var (ex, ey) = Locate(h, " 8 ");
-            owl.Click(ex + 1, ey); app.Poll();
-            Check(owl.GetFrame().Find("78") != null, "the keypad did not type 78", owl.GetFrame());
+            var (slashX, slashY) = Locate(h, "  /  ");
+            var (bX, bY) = Locate(h, "  B  ");
+            var (nineX, _) = Locate(h, "  9  ");
+            Check(slashY == sevenY && slashX > bX && bX > nineX, "7 8 9 A B / is not the order of the row", h);
+            var (starX, _) = Locate(h, "  *  ");
+            var (minusX, _) = Locate(h, "  -  ");
+            Check(starX == slashX && minusX == slashX && plusX == slashX, "the four operations are not one column", h);
+            // A blank row between the title and the display.
+            var (_, titleY) = Locate(h, " Calculator ");
+            Check(h.Row(titleY + 1).Trim('\u2551', ' ', '\u2591').Length == 0, "the row under the title is not blank", h);
+        });
+
+        Case("Calculator: switching base converts the display and enables the digits of that base", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            app.OnCommand(OwlosDemo.App.CmCalc);
+            owl.Type("255");
+            // The Hex radio button.
+            var f = owl.GetFrame();
+            var (hx, hy) = Locate(f, "Hex");
+            owl.Click(hx - 3, hy);
+            app.Poll();
+            Check(app.Calc.Display == "FF", $"255 in hex is FF, not '{app.Calc.Display}'", owl.GetFrame());
+            // Choosing a mode hands the caret back: the next key typed is a digit of the number.
+            owl.Type("0");
+            Check(app.Calc.Display == "FF0", $"after choosing Hex, typing went astray: '{app.Calc.Display}'", owl.GetFrame());
+            app.OnCommand(100); owl.Type("FF");
+            var g = owl.GetFrame();
+            var (ax, ay) = Locate(g, "  A  ");
+            Check(g.Attr(ax + 2, ay) == Owlosui.Attr(ConsoleColor.Black, ConsoleColor.DarkGreen), "A is not enabled in hex", g);
+            var (dx, dy) = Locate(g, "  .  ");
+            Check(g.Attr(dx + 2, dy) == Owlosui.Attr(ConsoleColor.DarkGray, ConsoleColor.Gray), "the point is not disabled in hex", g);
+            // Click A, then =: FFA.
+            owl.Click(ax + 2, ay); app.OnCommand(owl.Take().pressed);
+            Check(app.Calc.Display == "FFA", $"A did not type: '{app.Calc.Display}'", owl.GetFrame());
+            // Back to binary: FFA is 111111111010.
+            var (bx, by) = Locate(g, "Bin");
+            owl.Click(bx - 3, by);
+            app.Poll();
+            Check(app.Calc.Display == "111111111010", $"FFA in binary: '{app.Calc.Display}'", owl.GetFrame());
+
+            // Arrows in radio buttons choose, as Turbo Vision's did: the
+            // click left the focus on Bin, and Down makes it Oct. The
+            // display follows the dot, not the cursor.
+            // The caret went back to the display when Bin was chosen, so
+            // Tab first: the one stop after the display is the modes.
+            owl.Press(ConsoleKey.Tab);
+            owl.Press(ConsoleKey.DownArrow); app.Poll();
+            Check(app.Calc.Display == "7772", $"Down did not choose Oct: '{app.Calc.Display}'", owl.GetFrame());
+            owl.Press(ConsoleKey.Tab);
+            owl.Press(ConsoleKey.UpArrow); app.Poll();
+            Check(app.Calc.Display == "111111111010", "Up did not choose Bin again", owl.GetFrame());
+
+            // Back to decimal, and the Radians box: sin(90) is 1 in degrees
+            // and 0.89 in radians.
+            var (decX, decY) = Locate(g, "Dec");
+            owl.Click(decX - 3, decY); app.Poll();
+            app.OnCommand(100); // C
+            // A click on a radio button focuses it, as it should; the hand
+            // then goes back to the display before typing.
+            var (_, titleY) = Locate(g, " Calculator ");
+            var displayAt = (x: g.Row(titleY).IndexOf('╔') + 2, y: titleY + 2);
+            owl.Click(displayAt.x, displayAt.y);
+            owl.Type("sin(90)");
+            owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check(app.Calc.Display == "1", $"sin(90) in degrees: '{app.Calc.Display}'", owl.GetFrame());
+            var (rx, ry) = Locate(g, "Radians");
+            owl.Click(rx - 3, ry); app.Poll();
+            app.OnCommand(100);
+            owl.Click(displayAt.x, displayAt.y);
+            owl.Type("sin(90)");
+            owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check(app.Calc.Display == "0.893996663600558", $"sin(90) in radians: '{app.Calc.Display}'", owl.GetFrame());
+        });
+
+        Case("Calculator engine: precedence, functions, bases, memory and errors, with no window", () =>
+        {
+            var c = new OwlosDemo.Calculator.CalcEngine();
+            void Is(string expr, string want)
+            {
+                var got = c.Evaluate(expr);
+                Check(got == want, $"{expr} = {got}, wanted {want}");
+            }
+            Is("1+2*3", "7");
+            Is("(1+2)*3", "9");
+            Is("10/4", "2.5");
+            Is("2^3^2", "512");
+            Is("-3^2", "-9");
+            Is("2^-1", "0.5");
+            Is("17 mod 5", "2");
+            Is("17%5", "2");
+            Is("5!", "120");
+            Is("sqrt(2)", "1.4142135623731");
+            Is("sqrt(16)+1", "5");
+            Is("abs(-4)", "4");
+            Is("pi", "3.14159265358979");
+            Is("e", "2.71828182845905");
+            Is("ln(e)", "1");
+            Is("log(1000)", "3");
+            Is("exp(0)", "1");
+            Is("1e", "Error");
+            Is("0.1+0.2", "0.3");
+            Is("1/3", "0.333333333333333");
+            Is("2^70", "1.18059162071741E+21");
+
+            // Degrees by default; radians when told.
+            Is("sin(30)", "0.5");
+            Is("cos(60)", "0.5");
+            Is("tan(45)", "1");
+            Is("sin(180)", "0");
+            Is("asin(1)", "90");
+            c.Degrees = false;
+            Is("sin(pi/2)", "1");
+            Is("cos(pi)", "-1");
+            Is("atan(1)*4", "3.14159265358979");
+            c.Degrees = true;
+
+            // Errors are words.
+            Is("1/0", "Divide by zero");
+            Is("5 mod 0", "Divide by zero");
+            Is("7-", "Error");
+            Is("(1+2", "Error");
+            Is("1 2", "Error");
+            Is("foo(1)", "Error");
+            Is("sqrt(-1)", "Invalid input");
+            Is("ln(0)", "Invalid input");
+            Is("(-1)!", "Invalid input");
+            Is("2.5!", "Invalid input");
+            Is("200!", "Overflow");
+            Is("10^400", "Overflow");
+            Is("", "");
+            Is("   ", "");
+
+            // Bases: read and written in the base, integers only.
+            c.Base = OwlosDemo.Calculator.NumberBase.Hex;
+            Is("FF+1", "100");
+            Is("ff", "FF");
+            Is("ace", "ACE");
+            Is("10/4", "4");
+            Is("-A", "-A");
+            Is("cos(0)", "1");
+            Is("1.5", "Invalid input");
+            Is("FFFFFFFFFFFFFFFFFF", "Overflow");
+            c.Base = OwlosDemo.Calculator.NumberBase.Bin;
+            Is("1010+1", "1011");
+            Is("2", "Error");
+            c.Base = OwlosDemo.Calculator.NumberBase.Oct;
+            Is("17+1", "20");
+            Is("8", "Error");
+            c.Base = OwlosDemo.Calculator.NumberBase.Dec;
+            Check(c.IsDigit('9') && !c.IsDigit('A'), "decimal digits");
+            c.Base = OwlosDemo.Calculator.NumberBase.Hex;
+            Check(c.IsDigit('a') && c.IsDigit('F') && !c.IsDigit('G'), "hex digits");
+            c.Base = OwlosDemo.Calculator.NumberBase.Dec;
+
+            // Memory: a number the expression can name.
+            c.Memory = 42;
+            Is("m+1", "43");
+            Is("M*2", "84");
+            Check(c.HasMemory, "memory set");
+            c.Memory = 0;
+            Check(!c.HasMemory, "memory cleared");
+            Is("m", "0");
         });
 
         Case("Demo: calendar, ASCII table and puzzle are canvases the mouse can use", () =>
@@ -748,28 +1075,321 @@ internal static class Tests
             app.OnCommand(OwlosDemo.App.CmCalendar);
             var f = owl.GetFrame();
             Check(f.Find(DateTime.Today.ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)) != null, "the calendar is not on this month", f);
-            Check(f.Find("Su Mo Tu We Th Fr Sa") != null, "no day header", f);
-            app.OnCommand(OwlosDemo.App.CmCalNext);
+            Check(f.Find("Su  Mo  Tu  We  Th  Fr  Sa") != null, "no day header", f);
+            app.OnCommand(OwlosDemo.Calendar.CalendarWindow.CmNext);
             var next = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(1);
             Check(owl.GetFrame().Find(next.ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)) != null, "> did not turn the page");
+            // A click on the 15th chooses it and names it in full.
+            var (sux, suy) = Locate(owl.GetFrame(), "Su  Mo");
+            var slot = (int)next.DayOfWeek + 14;
+            owl.Click(sux + (slot % 7) * 4 + 1, suy + 1 + (slot / 7) * 2); app.Poll();
+            var fifteenth = next.AddDays(14).ToString("dddd, d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+            Check(owl.GetFrame().Find(fifteenth) != null, $"the click did not choose the 15th ({fifteenth})", owl.GetFrame());
+            Check(app.Cal.Selected == next.AddDays(14), "Selected is not the 15th");
+            // Today brings the month back.
+            app.OnCommand(OwlosDemo.Calendar.CalendarWindow.CmToday);
+            Check(owl.GetFrame().Find(DateTime.Today.ToString("dddd, d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)) != null, "Today did not choose today", owl.GetFrame());
 
             app.OnCommand(OwlosDemo.App.CmAscii);
             var g = owl.GetFrame();
             Check(g.Find("Click a glyph.") != null, "no ASCII table", g);
-            // The grid's top-left cell is glyph 0; click the cell of 'A' (65): row 2, column 1.
-            var (gx, gy) = Locate(g, "Click a glyph.");
-            owl.Click(gx + 1, gy - 9 + 2); app.Poll();
-            Check(owl.GetFrame().Find("dec 65") != null, "the click did not name glyph 65", owl.GetFrame());
+            // Rows are headed 00, 10, ... ; 'A' is 0x41: the row headed 40, column 1.
+            var (rx, ry) = Locate(g, "40 ");
+            owl.Click(rx + 3 + 1 * 3 + 1, ry); app.Poll();
+            Check(owl.GetFrame().Find("dec 65 hex 41 oct 101 bin 01000001") != null, "the click did not name glyph 65", owl.GetFrame());
+            Check(app.Table.Picked == 65, "Picked is not 65");
 
             app.OnCommand(OwlosDemo.App.CmPuzzle);
             var h = owl.GetFrame();
             Check(h.Find("Moves: 0") != null, "no puzzle", h);
-            Check(!app.Solved, "a scrambled puzzle should not be solved");
-            // Slide a tile: the hole's neighbours are the only legal moves,
-            // so try every tile until one moves.
-            var moved = false;
-            for (var i = 0; i < 16 && !moved; i++) moved = app.Slide(i);
-            Check(moved, "no tile could slide");
+            var board = app.Game.Board;
+            Check(!board.Solved, "a scrambled puzzle should not be solved");
+            // Click the tile above the hole: it slides down and the count says so.
+            var hole = board.Hole;
+            var above = hole - 4;
+            if (above < 0) above = hole + 4;
+            var (px, py) = (above % 4, above / 4);
+            var (gx, gy) = Locate(h, " Puzzle ");
+            // The board sits five cells in and one row down inside the frame.
+            var left = h.Row(gy).IndexOf('\u2554') + 1 + 5;
+            owl.Click(left + px * 6 + 3, gy + 1 + 1 + py * 3 + 1); app.Poll();
+            Check(board.Moves == 1, $"the click did not slide a tile (moves {board.Moves})", owl.GetFrame());
+            Check(owl.GetFrame().Find("Moves: 1") != null, "the count did not follow", owl.GetFrame());
+        });
+
+        Case("Desktop: Window > Cascade and Tile arrange the windows, and a fixed dialog keeps its size", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            // One fixed dialog at the back, then three document windows.
+            app.OnCommand(OwlosDemo.App.CmCalc);
+            var before = Locate(owl.GetFrame(), " Calculator ");
+            var a = owl.Window("Alpha", 30, 8, 5, 3);
+            var b = owl.Window("Beta", 30, 8, 8, 5);
+            var g = owl.Window("Gamma", 30, 8, 11, 7);
+
+            app.OnCommand(OwlosDemo.App.CmTile);
+            var f = owl.GetFrame();
+            // Four windows: two columns of two. The calculator, fixed, stands
+            // in the top-left cell at its own size; the documents fill theirs.
+            Check(IsCorner(f, 39, 23) && IsCorner(f, 79, 11) && IsCorner(f, 79, 23), "the documents are not in their cells", f);
+            // Beta, in the cell to the right, overlaps the dialog's title's
+            // last space, so look for the word alone.
+            var calc = Locate(f, "Calculator");
+            Check(calc.y == 1 && calc.x < before.x, "Tile did not put the dialog in its cell", f);
+
+            app.OnCommand(OwlosDemo.App.CmCascade);
+            var h = owl.GetFrame();
+            var cy = Locate(h, "Calculator").y;
+            var ay = Locate(h, " Alpha ").y;
+            var by = Locate(h, " Beta ").y;
+            var gy = Locate(h, " Gamma ").y;
+            Check(cy == 1 && ay == 2 && by == 3 && gy == 4, $"cascade titles at {cy},{ay},{by},{gy}, not 1,2,3,4", h);
+            Check(IsCorner(h, 79, 23), "the front document reaches the work area's corner", h);
+            // The menu has the verbs: Alt+W opens Window, and the items are there.
+            owl.Press(ConsoleKey.W, alt: true, ch: 'w');
+            var m = owl.GetFrame();
+            Check(m.Find("Cascade") != null && m.Find("Tile") != null, "Window menu lacks Cascade / Tile", m);
+            owl.Press(ConsoleKey.Escape);
+            _ = (a, b, g);
+        });
+
+        Case("Demo: files open as viewers that carry F4 and F7 with them; F4 edits, F7 hex, closing asks", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            var dir = Path.GetTempPath();
+            var one = Path.Combine(dir, "owlosui-one-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+            var two = Path.Combine(dir, "owlosui-two-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+            File.WriteAllText(one, "Hello\nworld\n");
+            File.WriteAllText(two, "Second\n");
+            try
+            {
+                // No file open: the status line has no F4, and F4 does nothing.
+                Check(!owl.GetFrame().Row(24).Contains("F4"), "F4 on the status line with no file open", owl.GetFrame());
+                owl.Press(ConsoleKey.F4);
+                Check(owl.Take().command == 0, "F4 was bound with no file open");
+
+                Check(app.Open(one) && app.Open(two), "the files did not open");
+                Check(app.Docs.Count == 2, "two files, two windows");
+                var f = owl.GetFrame();
+                var n2 = Path.GetFileName(two);
+                Check(f.Find($" {n2} [view] ") != null, "the second file is not a viewer in front", f);
+                Check(f.Row(24).Contains("F4 Edit") && f.Row(24).Contains("F7 Hex"), "the file window did not bring its keys", f);
+                // The Options menu got Edit / view and Hex, after a line.
+                owl.Press(ConsoleKey.O, alt: true, ch: 'o');
+                var m = owl.GetFrame();
+                Check(m.Find("Edit / view") != null && m.Find("Hex") != null && m.Find("Mouse...") != null, "Options lacks the file's items", m);
+                owl.Press(ConsoleKey.Escape);
+
+                // F4 acts on the front file only: the second becomes an editor, the first stays a viewer.
+                owl.Press(ConsoleKey.F4); app.OnCommand(owl.Take().command);
+                var second = app.Docs[1];
+                var first = app.Docs[0];
+                Check(!second.ReadOnly && first.ReadOnly, "F4 did not edit the front file alone");
+                owl.Type("X");
+                Check(second.Changed && !first.Changed, "typing did not land in the front file");
+                Check(owl.GetFrame().Find($" {n2} ") != null && owl.GetFrame().Find($" {n2} [view] ") == null, "the tag did not go", owl.GetFrame());
+
+                // F7: the bytes in a window of their own, [hex]; its own key says F7 Text.
+                owl.Press(ConsoleKey.F7); app.OnCommand(owl.Take().command);
+                var g = owl.GetFrame();
+                Check(second.HexId != 0 && g.Find($" {n2} [hex] ") != null, "no hex window", g);
+                Check(g.Find("53 65 63 6F 6E 64") != null, "the bytes of Second are not shown", g);
+                Check(g.Row(24).Contains("F7 Text") && !g.Row(24).Contains("F4 Edit"), "the hex window's keys are not its own", g);
+                owl.Press(ConsoleKey.F7); app.OnCommand(owl.Take().command);
+                Check(owl.Active() == second.Id, "F7 in the hex window did not go back to the text");
+
+                // Behind another tool the keys are gone.
+                app.OnCommand(OwlosDemo.App.CmCalc);
+                Check(!owl.GetFrame().Row(24).Contains("F4"), "the calculator in front still shows F4", owl.GetFrame());
+                app.OnCommand(OwlosDemo.App.CmClose);
+
+                // Closing the edited file asks; No drops the change and the hex window.
+                owl.Activate(second.Id);
+                app.OnCommand(OwlosDemo.App.CmClose);
+                var h = owl.GetFrame();
+                Check(h.Find("Save changes to") != null && h.Find("[modal]") != null, "closing an edited file did not ask", h);
+                owl.Press(ConsoleKey.N, alt: true, ch: 'n'); owl.Tick(); app.OnCommand(owl.Take().pressed);
+                Check(app.Docs.Count == 1 && second.Gone, "No did not close the file");
+                Check(File.ReadAllText(two) == "Second\n", "No must not write");
+                // The first file is in front now, with its keys back; Yes writes.
+                Check(owl.GetFrame().Row(24).Contains("F4 Edit"), "the other file's keys did not come back", owl.GetFrame());
+                app.OnCommand(OwlosDemo.Editor.FileWindow.CmEditView);
+                owl.Type("Z");
+                app.OnCommand(OwlosDemo.App.CmClose);
+                app.OnCommand(OwlosDemo.Editor.FileWindow.CmSaveYes);
+                Check(app.Docs.Count == 0 && File.ReadAllText(one).StartsWith("ZHello"), $"Yes did not write: {File.ReadAllText(one)}");
+            }
+            finally { File.Delete(one); File.Delete(two); }
+        });
+
+        Case("Desktop: numbered windows, Alt+digit, Alt+0 list, Shift+F6 and Ctrl+F5 in the demo", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            app.OnCommand(OwlosDemo.App.CmCalc);
+            app.OnCommand(OwlosDemo.App.CmCalendar);
+            var f = owl.GetFrame();
+            var (_, cy) = Locate(f, " Calendar ");
+            Check(f.Row(cy).Contains('2'), "the calendar is not numbered 2", f);
+            Check(owl.Active() == app.Calendar, "the calendar is in front");
+            // Alt+1: the calculator, whose frame says 1.
+            owl.Press(ConsoleKey.D1, alt: true, ch: '1');
+            Check(owl.Active() == app.Calculator, "Alt+1 did not bring the calculator to the front");
+            var g1 = owl.GetFrame();
+            var (_, ky) = Locate(g1, " Calculator ");
+            Check(g1.Row(ky).Contains('1'), "the calculator is not numbered 1", g1);
+            // Shift+F6: back to the calendar.
+            owl.Press(ConsoleKey.F6, shift: true);
+            Check(owl.Active() == app.Calendar, "Shift+F6 did not bring the previous window");
+            // Alt+0: the list, Down, Enter -> the calculator.
+            owl.Press(ConsoleKey.D0, alt: true, ch: '0');
+            var g = owl.GetFrame();
+            Check(g.Find(" Windows [modal] ") != null && g.Find("1  Calculator") != null && g.Find("2  Calendar") != null, "no window list", g);
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            var (pressed, cmd) = owl.Take();
+            Check(pressed == 0 && cmd == 0, "the list's OK reached the program");
+            Check(owl.Active() == app.Calculator && owl.GetFrame().Find("Windows [modal]") == null, "the list did not pick the calculator", owl.GetFrame());
+            // Ctrl+F5, Right, Right, Enter: the calculator moved two cells.
+            var before = Locate(owl.GetFrame(), " Calculator ");
+            owl.Press(ConsoleKey.F5, ctrl: true);
+            owl.Press(ConsoleKey.RightArrow); owl.Press(ConsoleKey.RightArrow);
+            owl.Press(ConsoleKey.Enter);
+            var after = Locate(owl.GetFrame(), " Calculator ");
+            Check(after == (before.x + 2, before.y), $"Ctrl+F5 did not move it: {before} -> {after}", owl.GetFrame());
+            // And the menu has the verbs.
+            owl.Press(ConsoleKey.W, alt: true, ch: 'w');
+            var m = owl.GetFrame();
+            Check(m.Find("Size/Move") != null && m.Find("Previous") != null && m.Find("List...") != null, "Window menu lacks the verbs", m);
+            owl.Press(ConsoleKey.Escape);
+        });
+
+        Case("Demo: a menu item's hint takes the status line while the cursor is on it", () =>
+        {
+            using var owl = Owl();
+            _ = new OwlosDemo.App(owl);
+            owl.Press(ConsoleKey.F, alt: true, ch: 'f');
+            var f = owl.GetFrame();
+            Check(f.Row(24).Contains("Open a file in a window of its own") && !f.Row(24).Contains("F1 Help"), "no hint for Open", f);
+            // Down skips the line and lands on Exit.
+            owl.Press(ConsoleKey.DownArrow);
+            Check(owl.GetFrame().Row(24).Contains("Leave the program"), "no hint for Exit", owl.GetFrame());
+            owl.Press(ConsoleKey.Escape);
+            Check(owl.GetFrame().Row(24).Contains("F1 Help"), "the keys did not come back", owl.GetFrame());
+        });
+
+        Case("Calculator: the display remembers what was evaluated, and Down lists it", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            app.OnCommand(OwlosDemo.App.CmCalc);
+            owl.Type("2+2"); owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            app.OnCommand(100); // C
+            owl.Type("7*6"); owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check(app.Calc.Display == "42", $"7*6: '{app.Calc.Display}'");
+            var h = owl.GetHistory(app.Calc.DisplayId);
+            Check(h.Length == 2 && h[0] == "7*6" && h[1] == "2+2", $"history: {string.Join("|", h)}");
+            // Down lists them; Down, Enter puts 2+2 back on the display.
+            owl.Press(ConsoleKey.DownArrow);
+            Check(owl.GetFrame().Find("7*6") != null && owl.GetFrame().Find("2+2") != null, "no history panel", owl.GetFrame());
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.Enter); owl.Tick(); owl.Take();
+            Check(app.Calc.Display == "2+2", $"the pick did not fill the display: '{app.Calc.Display}'", owl.GetFrame());
+        });
+
+        Case("Demo: the Colors dialog changes a role live, and Cancel puts it back", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            var before = owl.GetFrame().Attr(2, 2); // a desktop cell
+            app.OnCommand(OwlosDemo.App.CmColors);
+            var f = owl.GetFrame();
+            Check(f.Find(" Colors [modal] ") != null && f.Find("Desktop: desktop") != null && f.Find("Foreground") != null, "no colour dialog", f);
+            // The first entry is the desktop; click the second background
+            // cell of the grid (colour 1, blue) and the desktop turns blue.
+            var (bx, by) = Locate(f, "Background");
+            app.Poll();
+            owl.Click(bx + 3 + 1, by + 1); app.Poll();
+            var g = owl.GetFrame();
+            Check((g.Attr(2, 2) >> 4) == 1, $"the desktop did not turn blue: {g.Attr(2, 2):X2}", g);
+            Check(g.Find("Sample text") != null, "no sample", g);
+            // Cancel: back as it was.
+            owl.Press(ConsoleKey.Escape); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            var h = owl.GetFrame();
+            Check(h.Attr(2, 2) == before && h.Find("Colors") == null, "Cancel did not put the colour back", h);
+            // Again, and OK keeps it.
+            app.OnCommand(OwlosDemo.App.CmColors);
+            var i = owl.GetFrame();
+            var (cx, cy) = Locate(i, "Background");
+            app.Poll();
+            owl.Click(cx + 3 + 1, cy + 1); app.Poll();
+            owl.Press(ConsoleKey.Enter); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check((owl.GetFrame().Attr(2, 2) >> 4) == 1 && app.Palette.Id == 0, "OK did not keep the colour", owl.GetFrame());
+        });
+
+        Case("Demo: the Open dialog's Tree and Drive buttons", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            app.OnCommand(OwlosDemo.App.CmOpen);
+            var f = owl.GetFrame();
+            Check(f.Find(" Tree ") != null && f.Find(" Drive ") != null, "the Open dialog lacks Tree and Drive", f);
+            // Alt+T: the panel becomes the tree of its drive.
+            owl.Press(ConsoleKey.T, alt: true, ch: 't'); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            app.Poll();
+            var root = Path.GetPathRoot(Directory.GetCurrentDirectory())!.TrimEnd('\\');
+            var g = owl.GetFrame();
+            Check(g.Find(root) != null && g.Find("Path:") == null, "no tree in the Open dialog", g);
+            // Alt+D: the drive dialog over it; Escape.
+            owl.Press(ConsoleKey.D, alt: true, ch: 'd'); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            var h = owl.GetFrame();
+            Check(h.Find(" Drive [modal] ") != null && h.Find(root) != null, "no drive dialog", h);
+            owl.Press(ConsoleKey.Escape); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            Check(owl.GetFrame().Find("Drive [modal]") == null, "Escape did not close the drive dialog", owl.GetFrame());
+            // Alt+T again: files, at the root the cursor stood on.
+            owl.Press(ConsoleKey.T, alt: true, ch: 't'); owl.Tick(); app.OnCommand(owl.Take().pressed);
+            var i = owl.GetFrame();
+            Check(i.Find("Path:") != null && i.Find(root + "\\*.*") != null, "Tree again did not go back to files at the root", i);
+        });
+
+        Case("Puzzle board: only a neighbour of the hole slides, and a scramble is solvable", () =>
+        {
+            var b = new OwlosDemo.Puzzle.Board();
+            Check(b.Solved && b.Hole == 15 && b.Moves == 0, "a new board is solved with the hole last");
+            Check(!b.Slide(0), "a far tile must not slide");
+            Check(b.Slide(14), "the tile beside the hole slides");
+            Check(b.Tiles[15] == 15 && b.Tiles[14] == 0 && b.Moves == 1, "it moved into the hole");
+            Check(!b.Solved, "and the board is no longer solved");
+            Check(b.Slide(15), "and back");
+            Check(b.Solved && b.Moves == 2, "solved again, two moves");
+            Check(!b.Slide(-1) && !b.Slide(16) && !b.Slide(b.Hole), "off the board and the hole itself do nothing");
+            b.Scramble(seed: 1);
+            Check(!b.Solved && b.Moves == 0, "scrambled, with the count at zero");
+            var sum = b.Tiles.Sum();
+            Check(sum == 120 && b.Tiles.Distinct().Count() == 16, "every tile is still there once");
+            // Solvable: the same seed scrambles the same way, and the
+            // slides can be undone in reverse order - so replay them.
+            var c = new OwlosDemo.Puzzle.Board();
+            var rnd = new Random(1);
+            var path = new List<int>();
+            for (var n = 0; n < 200; n++)
+            {
+                var hole = c.Hole;
+                var (r, col) = (hole / 4, hole % 4);
+                var moves = new List<int>();
+                if (r > 0) moves.Add(hole - 4);
+                if (r < 3) moves.Add(hole + 4);
+                if (col > 0) moves.Add(hole - 1);
+                if (col < 3) moves.Add(hole + 1);
+                var at = moves[rnd.Next(moves.Count)];
+                path.Add(c.Hole);
+                c.Slide(at);
+            }
+            Check(c.Tiles.SequenceEqual(b.Tiles), "the seed did not scramble the same way");
+            for (var i = path.Count - 1; i >= 0; i--) b.Slide(path[i]);
+            Check(b.Solved, "undoing the scramble did not solve it");
         });
 
         Case("Demo: the Mouse dialog reads its boxes back, and Window > Next / Zoom work", () =>
@@ -923,6 +1543,7 @@ internal static class Tests
         x < f.W && y < f.H && f.Glyph(x, y) is 0xBC or 0xD9;
 
     internal static int Failed => failed;
+    internal static (string l, string r) MakeTree() => TempTree();
     internal static void RunCase(string name, Action body) => Case(name, body);
     internal static void Require(bool ok, string what, Owlosui.Frame? frame = null) => Check(ok, what, frame);
 }
@@ -939,6 +1560,8 @@ internal static class Tests
 internal static class ConsoleCases
 {
     private static readonly string NotesExe = Path.Combine(AppContext.BaseDirectory, "Notes.exe");
+    private static readonly string DemoExe = Path.Combine(AppContext.BaseDirectory, "OwlosDemo.exe");
+    private static readonly string CommanderExe = Path.Combine(AppContext.BaseDirectory, "Commander.exe");
 
     public static int Run(string notesFile)
     {
@@ -1015,6 +1638,34 @@ internal static class ConsoleCases
                 Tests.Require(g.Find("Exit") != null, $"the buttons are off screen after {w}x{h}\n" + a.Trace(), g);
                 Tests.Require(Tests.IsCorner(g, w - 3, h - 2), $"the window does not fill {w}x{h}\n" + a.Trace(), g);
                 Tests.Require(g.Find("kept") != null, "the text was lost in the resize", g);
+            }
+        });
+
+        Tests.RunCase("Console: F10 opens the demo's menu bar, and Alt+F10 shows the Commander's tree", () =>
+        {
+            using (var a = ConsoleAgent.Start(DemoExe, "", workDir))
+            {
+                a.WaitFor(s => s.Find("F1 Help") != null);
+                a.Key(ConsoleKey.F10);
+                var f = a.WaitFor(s => s.Find("Open...") != null);
+                Tests.Require(f.Find("Open...") != null, "F10 did not open the File menu\n" + a.Trace(), f);
+                a.Key(ConsoleKey.Escape);
+                a.Key(ConsoleKey.X, alt: true);
+                Tests.Require(a.WaitForExit(), "Alt+X did not end the demo\n" + a.Trace());
+            }
+            var (l, r) = Tests.MakeTree();
+            using (var a = ConsoleAgent.Start(CommanderExe, $"\"{l}\" \"{r}\"", workDir))
+            {
+                a.WaitFor(s => s.Find("F10 Quit") != null);
+                var root = Path.GetPathRoot(l)!.TrimEnd('\\');
+                a.Key(ConsoleKey.F10, alt: true);
+                var f = a.WaitFor(s => s.Find("a.txt") == null && s.Find(root) != null);
+                Tests.Require(f.Find("a.txt") == null, "Alt+F10 did not turn the panel into a tree\n" + a.Trace(), f);
+                a.Key(ConsoleKey.F10, alt: true);
+                var g = a.WaitFor(s => s.Find("F10 Quit") != null && s.Find("a.txt") == null);
+                Tests.Require(g.Find("Quit") != null, "Alt+F10 again did not come back\n" + a.Trace(), g);
+                a.Key(ConsoleKey.F10);
+                Tests.Require(a.WaitForExit(), "F10 did not quit the Commander\n" + a.Trace());
             }
         });
 

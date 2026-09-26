@@ -33,7 +33,9 @@ lib/PROTOCOL.md the wire. Same numbers for a pipe, a WebSocket, an interrupt.
 Examples/Rust   01-Demo — every control the toolkit has, in one program.
 Examples/CSharp 01-HelloWorld, 02-Notes, 03-Commander, 04-Basez-Sokoban,
                 05-OwlosDemo — programs that use the library; the last is
-                every part of the kit in one program, with a menu bar.
+                every part of the kit in one program, with a menu bar, and
+                each of its tools (Calculator/, Calendar/, AsciiTable/,
+                Puzzle/) is a class that lifts out on its own.
 Examples/C      (empty) — DOS clients, through the resident, when it exists.
 ```
 
@@ -76,7 +78,7 @@ cd Examples/CSharp/01-HelloWorld
 dotnet run
 ```
 
-`OWLOSUI.sln` at the root holds the client library, the three examples
+`OWLOSUI.sln` at the root holds the client library, the five examples
 and their tests, for Visual Studio or `dotnet build OWLOSUI.sln`. The
 server is not in it — it is Rust, and `cargo build` is its build; while an
 example is running, the server binary is in use and cannot be rebuilt.
@@ -258,15 +260,23 @@ z-order, modal, following the desktop when it resizes), scrolling text
 views with working scrollbars, editing with undo, selection and a
 clipboard, two keymaps, a help viewer, menu bar with panels, submenus and
 ticked items, a status line that shows its keys and binds them, a file-open
-dialog with a path/mask line, a hex viewer, buttons, labels with hotkeys,
+dialog with a path/mask line, a hex viewer, buttons (docked rows and
+placed ones, so a keypad is buttons too; normal, accent and danger
+colours), labels with hotkeys,
 input lines, check boxes and radio buttons, lists with Insert-marks, trees,
 static text, a progress bar, a message box, a canvas of cells the program
 draws itself (a game board, a chart); the terminal backend; the pipe
 server and its C# client; comparison against real Turbo Vision.
 
-Not yet on the wire: menus, hex, trees, clusters.
-Not yet at all: a grid, tabs, a drop-down list and input history, a masked
-field, an ANSI viewer; the DOS, browser and native backends; the resident.
+Also there, as Turbo Vision had them: numbered windows and Alt+1..9,
+the window list on Alt+0, Shift+F6, Ctrl+F5 to move or resize from the
+keyboard, cascade and tile, double clicks, a hint per menu item on the
+status line, input-line history, a colour dialog over the palette, a tree
+filled as it opens (a drive as folders, with a drive chooser, in the
+Commander), and find/replace in the editor.
+
+Not yet at all: a grid, tabs, a drop-down list, a masked field, an ANSI
+viewer; the DOS, browser and native backends; the resident.
 
 ## Licence
 

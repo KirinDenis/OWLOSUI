@@ -18,9 +18,10 @@ use std::io::{Read, Write};
 
 use owlosui_console::codepage::Font;
 use owlosui_core::{
-    Button, ButtonRow, Canvas, Cell, Choice, Cluster, Dock, Event, FileEntry, FileList, InputLine,
-    Key, KeyCode, Kind, Label, ListBox, MenuBar, MenuItem, Mods, Mouse, MouseKind, Progress,
-    PushButton, Rect, StaticText, StatusItem, StatusLine, TextView, Ui, ViewId, WinPalette, Window,
+    Align, Button, ButtonRow, ButtonStyle, Canvas, Cell, Choice, Cluster, Dock, Event, FileEntry,
+    FileList, InputLine, Key, KeyCode, Kind, Label, ListBox, MenuBar, MenuItem, Mods, Mouse,
+    MouseKind, Progress, PushButton, Rect, StaticText, StatusItem, StatusLine, TextView, Ui, ViewId,
+    WinPalette, Window,
 };
 
 mod op {
@@ -42,6 +43,8 @@ mod op {
     pub const CANVAS: u8 = 0x1B;
     pub const MENU_BAR: u8 = 0x1C;
     pub const CLUSTER: u8 = 0x1D;
+    pub const BUTTON_ROW: u8 = 0x1E;
+    pub const HEX: u8 = 0x1F;
     pub const CLOSE: u8 = 0x20;
     pub const GET_TEXT: u8 = 0x21;
     pub const SET_PROGRESS: u8 = 0x22;
@@ -66,6 +69,27 @@ mod op {
     pub const GET_GLYPHS: u8 = 0x42;
     pub const CYCLE: u8 = 0x43;
     pub const ZOOM: u8 = 0x44;
+    pub const SET_BUTTON: u8 = 0x45;
+    pub const FOCUS: u8 = 0x46;
+    pub const CASCADE: u8 = 0x47;
+    pub const TILE: u8 = 0x48;
+    pub const SET_READONLY: u8 = 0x49;
+    pub const WINDOW_STATUS: u8 = 0x4A;
+    pub const WINDOW_MENU: u8 = 0x4B;
+    pub const WINDOW_LIST: u8 = 0x4C;
+    pub const CYCLE_BACK: u8 = 0x4D;
+    pub const SIZE_MOVE: u8 = 0x4E;
+    pub const SET_HISTORY: u8 = 0x4F;
+    pub const GET_HISTORY: u8 = 0x50;
+    pub const PALETTE: u8 = 0x51;
+    pub const SET_COLOR: u8 = 0x52;
+    pub const TREE: u8 = 0x53;
+    pub const TREE_CHILDREN: u8 = 0x54;
+    pub const TREE_EXPAND: u8 = 0x55;
+    pub const TREE_PATH: u8 = 0x56;
+    pub const FIND: u8 = 0x57;
+    pub const REPLACE: u8 = 0x58;
+    pub const REPLACE_ALL: u8 = 0x59;
 }
 
 type Res<T> = Result<T, String>;
@@ -126,6 +150,12 @@ impl<'a> In<'a> {
             self.i16("rect.h")?,
         ))
     }
+    /// Whatever is left of the payload.
+    fn rest(&mut self) -> &[u8] {
+        let r = &self.b[self.p..];
+        self.p = self.b.len();
+        r
+    }
     fn str(&mut self, what: &str) -> Res<String> {
         let n = self.u16(what)? as usize;
         let s = self.take(n, what)?;
@@ -159,6 +189,51 @@ impl<'a> In<'a> {
     /// `n:u8` then `n ×` (`flags:u8 cmd:u16 text:str shortcut:str` then the
     /// item's own submenu, the same shape): a menu, as deep as it goes.
     /// `flags`: bit 0 separator, bit 1 disabled, bit 2 ticked.
+    /// `n:u8` then `n ×` (`cmd:u16 key label:str`): status items.
+    fn status_items(&mut self, cp: &mut Font) -> Res<Vec<StatusItem>> {
+        let n = self.u8("item count")?;
+        let mut items = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            let cmd = self.u16("status.cmd")?;
+            let key = self.key()?;
+            let text = cp.to_core(&self.str("status.text")?);
+            items.push(StatusItem::new(&text, key, cmd));
+        }
+        Ok(items)
+    }
+
+    /// `n:u8` then `n ×` (`flags:u8 text:str` then its children the same
+    /// way): tree nodes. Flags: bit 0 open, bit 1 lazy - children exist
+    /// but are given only when the node is opened.
+    fn tree_nodes(&mut self, cp: &mut Font, depth: u8) -> Res<Vec<owlosui_core::TreeNode>> {
+        if depth > 32 {
+            return Err("a tree deeper than anyone can follow".into());
+        }
+        let n = self.u8("node count")?;
+        let mut v = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            let flags = self.u8("node.flags")?;
+            let text = cp.to_core(&self.str("node.text")?);
+            let children = self.tree_nodes(cp, depth + 1)?;
+            let mut node = owlosui_core::TreeNode::leaf(&text);
+            node.children = children;
+            node.open = flags & 1 != 0;
+            node.lazy = flags & 2 != 0;
+            v.push(node);
+        }
+        Ok(v)
+    }
+
+    /// `depth:u8` then `depth × u16`: a path down a tree.
+    fn tree_path(&mut self) -> Res<Vec<usize>> {
+        let d = self.u8("path depth")?;
+        let mut p = Vec::with_capacity(d as usize);
+        for _ in 0..d {
+            p.push(self.u16("path index")? as usize);
+        }
+        Ok(p)
+    }
+
     fn menu_items(&mut self, cp: &mut Font, depth: u8) -> Res<Vec<MenuItem>> {
         if depth > 8 {
             return Err("a menu nested deeper than anyone can follow".into());
@@ -170,6 +245,7 @@ impl<'a> In<'a> {
             let cmd = self.u16("item.cmd")?;
             let text = cp.to_core(&self.str("item.text")?);
             let shortcut = cp.to_core(&self.str("item.shortcut")?);
+            let hint = cp.to_core(&self.str("item.hint")?);
             let sub = self.menu_items(cp, depth + 1)?;
             let mut it = if flags & 1 != 0 {
                 MenuItem::line()
@@ -178,6 +254,7 @@ impl<'a> In<'a> {
             } else {
                 MenuItem::new(&text, &shortcut, cmd)
             };
+            it = it.hint(&hint);
             if flags & 2 != 0 {
                 it = it.disabled();
             }
@@ -204,6 +281,18 @@ impl<'a> In<'a> {
             let mut b = PushButton::new(&label, cmd);
             if flags & 1 != 0 {
                 b = b.default();
+            }
+            // Bits 1-2: 0 normal, 1 accent, 2 danger. Bit 3: disabled.
+            b = b.style(match (flags >> 1) & 3 {
+                1 => ButtonStyle::Accent,
+                2 => ButtonStyle::Danger,
+                _ => ButtonStyle::Normal,
+            });
+            if flags & 8 != 0 {
+                b = b.disabled();
+            }
+            if flags & 16 != 0 {
+                b = b.cancel();
             }
             v.push(b);
         }
@@ -387,6 +476,133 @@ impl Server {
                 out.id(id);
             }
 
+            op::TREE => {
+                // A tree filling its window. A node marked lazy is drawn as
+                // a branch and, when opened, asks the program for its
+                // children through TREE_EXPAND: a disk is not read whole.
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let nodes = r.tree_nodes(&mut self.cp, 0)?;
+                let parent = self.alive(parent)?;
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::Tree(owlosui_core::TreeView::new(nodes)));
+                ui.set_dock(id, Dock::Fill);
+                self.settle_focus()?;
+                out.id(id);
+            }
+
+            op::TREE_CHILDREN => {
+                let id = r.id("id")?;
+                let path = r.tree_path()?;
+                let nodes = r.tree_nodes(&mut self.cp, 0)?;
+                let id = self.alive(id)?;
+                if !self.ui()?.tree_set_children(id, &path, nodes) {
+                    return Err(format!("view {} has no node at that path", id.raw()));
+                }
+            }
+
+            op::TREE_EXPAND => {
+                // The node waiting for children, if one is: its path as
+                // indices, each with the node's text, so the program can
+                // tell which folder it is without a copy of the tree.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                match ui.tree_take_expand(id) {
+                    Some(path) => {
+                        let texts = ui.tree_texts(id, &path);
+                        out.u8(path.len() as u8);
+                        for (i, ix) in path.iter().enumerate() {
+                            out.u16(*ix as u16);
+                            out.str(&self.cp.from_core(texts.get(i).map(|s| s.as_str()).unwrap_or("")));
+                        }
+                    }
+                    None => out.u8(0),
+                }
+            }
+
+            op::TREE_PATH => {
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let texts = self.ui()?.tree_path(id);
+                out.u8(texts.len() as u8);
+                for t in &texts {
+                    out.str(&self.cp.from_core(t));
+                }
+            }
+
+            op::FIND => {
+                // Flags: bit 0 case-sensitive, bit 1 whole words. The next
+                // match after the caret is selected; the reply says whether
+                // there was one. No wrapping: that is a question for a
+                // dialog to ask.
+                let id = r.id("id")?;
+                let flags = r.u8("flags")?;
+                let pat = owlosui_core::glyphs(&self.cp.to_core(&r.str("pattern")?));
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                if !matches!(ui.kind(id), Kind::Text(_)) {
+                    return Err(format!("view {} is not a text", id.raw()));
+                }
+                let found = ui.find_text(id, &pat, flags & 1 != 0, flags & 2 != 0);
+                out.u8(found as u8);
+            }
+
+            op::REPLACE => {
+                let id = r.id("id")?;
+                let flags = r.u8("flags")?;
+                let pat = owlosui_core::glyphs(&self.cp.to_core(&r.str("pattern")?));
+                let with = owlosui_core::glyphs(&self.cp.to_core(&r.str("replacement")?));
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                if !matches!(ui.kind(id), Kind::Text(_)) {
+                    return Err(format!("view {} is not a text", id.raw()));
+                }
+                let (replaced, found) = ui.replace_text(id, &pat, &with, flags & 1 != 0, flags & 2 != 0);
+                out.u8(replaced as u8);
+                out.u8(found as u8);
+            }
+
+            op::REPLACE_ALL => {
+                let id = r.id("id")?;
+                let flags = r.u8("flags")?;
+                let pat = owlosui_core::glyphs(&self.cp.to_core(&r.str("pattern")?));
+                let with = owlosui_core::glyphs(&self.cp.to_core(&r.str("replacement")?));
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                if !matches!(ui.kind(id), Kind::Text(_)) {
+                    return Err(format!("view {} is not a text", id.raw()));
+                }
+                let n = ui.replace_all_text(id, &pat, &with, flags & 1 != 0, flags & 2 != 0);
+                out.u16(n);
+            }
+
+            op::HEX => {
+                // A hex dump of the bytes that follow, filling its window.
+                // The wire's payload is at most 64K, so that is the most a
+                // dump can hold; a program with a bigger file sends the
+                // part it wants seen.
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let bytes = r.rest().to_vec();
+                let parent = self.alive(parent)?;
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::Hex(owlosui_core::HexView::new(bytes)));
+                ui.set_dock(id, Dock::Fill);
+                self.settle_focus()?;
+                out.id(id);
+            }
+
+            op::SET_READONLY => {
+                let id = r.id("id")?;
+                let on = r.u8("readonly")? != 0;
+                let id = self.alive(id)?;
+                if !self.ui()?.set_readonly(id, on) {
+                    return Err(format!("view {} is not a text", id.raw()));
+                }
+                self.settle_focus()?;
+            }
+
             op::STATIC => {
                 let parent = r.id("parent")?;
                 let rect = r.rect()?;
@@ -479,14 +695,7 @@ impl Server {
             }
 
             op::STATUS => {
-                let n = r.u8("item count")?;
-                let mut items = Vec::with_capacity(n as usize);
-                for _ in 0..n {
-                    let cmd = r.u16("status.cmd")?;
-                    let key = r.key()?;
-                    let text = self.cp.to_core(&r.str("status.text")?);
-                    items.push(StatusItem::new(&text, key, cmd));
-                }
+                let items = r.status_items(&mut self.cp)?;
                 let old = self.status.take();
                 let ui = self.ui()?;
                 if let Some(old) = old {
@@ -590,8 +799,12 @@ impl Server {
                 }
                 f.focus = owlosui_core::files::Focus::List;
                 let ui = self.ui()?;
+                // The panel fills the window; `rect.y` is how many rows to
+                // leave free above it, for the line of air an Open dialog
+                // wants under its title.
+                let top = rect.y.max(0);
                 let id = ui.insert(parent, rect, Kind::Files(f));
-                ui.set_dock(id, Dock::Fill);
+                ui.set_dock(id, if top > 0 { Dock::FillFrom(top) } else { Dock::Fill });
                 out.id(id);
             }
 
@@ -698,6 +911,30 @@ impl Server {
                 out.id(id);
             }
 
+            op::WINDOW_STATUS => {
+                // The keys a window carries: shown on the status line and
+                // bound while the window is the active one, gone when it
+                // is not. Same items as STATUS.
+                let id = r.id("id")?;
+                let items = r.status_items(&mut self.cp)?;
+                let id = self.alive(id)?;
+                if !self.ui()?.set_window_status(id, items) {
+                    return Err(format!("view {} is not a window", id.raw()));
+                }
+            }
+
+            op::WINDOW_MENU => {
+                // The menus a window carries, merged into the bar while it
+                // is active: a submenu named like one on the bar goes into
+                // that one, after a line; any other goes on the end.
+                let id = r.id("id")?;
+                let items = r.menu_items(&mut self.cp, 0)?;
+                let id = self.alive(id)?;
+                if !self.ui()?.set_window_menu(id, items) {
+                    return Err(format!("view {} is not a window", id.raw()));
+                }
+            }
+
             op::MENU_CHECK => {
                 let cmd = r.u16("cmd")?;
                 let on = r.u8("on")? != 0;
@@ -772,6 +1009,74 @@ impl Server {
                 self.ui()?.cycle_windows();
             }
 
+            op::CASCADE => {
+                self.ui()?.cascade();
+            }
+
+            op::WINDOW_LIST => {
+                self.ui()?.window_list();
+            }
+
+            op::CYCLE_BACK => {
+                self.ui()?.cycle_windows_back();
+            }
+
+            op::SIZE_MOVE => {
+                self.ui()?.begin_size_move();
+            }
+
+            op::SET_HISTORY => {
+                // What an input line has been given before, newest first;
+                // Down or the ▼ at its end lists them.
+                let id = r.id("id")?;
+                let n = r.u8("count")?;
+                let mut items = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    items.push(self.cp.to_core(&r.str("history.item")?));
+                }
+                let id = self.alive(id)?;
+                if !self.ui()?.set_history(id, items) {
+                    return Err(format!("view {} is not an input line", id.raw()));
+                }
+            }
+
+            op::PALETTE => {
+                // Every colour by group and name, in the order SET_COLOR
+                // indexes: what a colour dialog lists.
+                let ui = self.ui()?;
+                let names = owlosui_core::Palette::NAMES;
+                out.u8(names.len() as u8);
+                for (ix, (group, name)) in names.iter().enumerate() {
+                    out.str(group);
+                    out.str(name);
+                    out.u8(ui.palette.get(ix).unwrap_or(0));
+                }
+            }
+
+            op::SET_COLOR => {
+                // One colour changed, and the next frame wears it: the
+                // palette is looked up at every draw, never copied.
+                let ix = r.u8("index")? as usize;
+                let attr = r.u8("attr")?;
+                if !self.ui()?.palette.set(ix, attr) {
+                    return Err(format!("no palette entry {ix}"));
+                }
+            }
+
+            op::GET_HISTORY => {
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let items = self.ui()?.history(id);
+                out.u8(items.len().min(255) as u8);
+                for it in items.iter().take(255) {
+                    out.str(&self.cp.from_core(it));
+                }
+            }
+
+            op::TILE => {
+                self.ui()?.tile();
+            }
+
             op::ZOOM => {
                 let id = r.id("id")?;
                 let id = self.alive(id)?;
@@ -780,6 +1085,52 @@ impl Server {
                     return Err(format!("view {} is not a window", id.raw()));
                 }
                 ui.toggle_zoom(id);
+            }
+
+            op::BUTTON_ROW => {
+                // A row of buttons placed by hand, from the left: one row
+                // of a keypad. Enter still finds a default button in it,
+                // and a click presses without taking the focus.
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                // Bit 0: not a Tab stop - a keypad is for the mouse and
+                // for Enter, and typing goes on past it.
+                let flags = r.u8("row.flags")?;
+                let mut row = r.buttons(&mut self.cp)?;
+                row.align = Align::Left;
+                row.selectable = flags & 1 == 0;
+                let parent = self.alive(parent)?;
+                let width = row.width();
+                let ui = self.ui()?;
+                // One column more than the buttons need, for the shadow of
+                // the last one; the row's own clip would cut it off.
+                let rect = Rect::new(rect.x, rect.y, if rect.w > 0 { rect.w } else { width + 1 }, 2);
+                let id = ui.insert(parent, rect, Kind::Buttons(row));
+                ui.set_dock(id, Dock::Manual);
+                self.settle_focus()?;
+                out.id(id);
+            }
+
+            op::FOCUS => {
+                // Put the focus on one control: a calculator hands the
+                // caret back to its display once a mode has been chosen.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                let Some(win) = ui.window_of(id) else {
+                    return Err(format!("view {} is not in a window", id.raw()));
+                };
+                ui.focus_on(win, id);
+            }
+
+            op::SET_BUTTON => {
+                let id = r.id("id")?;
+                let ix = r.u8("index")? as usize;
+                let on = r.u8("enabled")? != 0;
+                let id = self.alive(id)?;
+                if !self.ui()?.set_button_enabled(id, ix, on) {
+                    return Err(format!("view {} has no button {ix}", id.raw()));
+                }
             }
 
             op::CANVAS => {
@@ -880,6 +1231,7 @@ impl Server {
                     3 => MouseKind::Move,
                     4 => MouseKind::ScrollUp,
                     5 => MouseKind::ScrollDown,
+                    6 => MouseKind::Double(button),
                     _ => return Err(format!("no mouse kind {kind}")),
                 };
                 self.ui()?.handle(Event::Mouse(Mouse { x, y, kind }));

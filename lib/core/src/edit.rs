@@ -266,6 +266,110 @@ impl TextView {
 
     // ---------------------------------------------------------------- commands
 
+    // ------------------------------------------------------------ searching
+
+    /// Find `pat` after the caret (after the selection, when the selection
+    /// is a match already, so "find next" moves on) and select it. False
+    /// when there is no next one: the search does not wrap, and a dialog
+    /// that wants to ask "from the top?" can move the caret and ask again.
+    pub fn find(&mut self, pat: &[Glyph], case_sensitive: bool, whole_word: bool) -> bool {
+        if pat.is_empty() {
+            return false;
+        }
+        let start = match self.selection() {
+            Some((a, b)) if self.matches_at(a, pat, case_sensitive, whole_word) => {
+                let _ = b;
+                Point::new(a.x + 1, a.y)
+            }
+            _ => self.cur,
+        };
+        let Some(at) = self.find_from(start, pat, case_sensitive, whole_word) else {
+            return false;
+        };
+        let end = Point::new(at.x + pat.len() as i16, at.y);
+        self.anchor = Some(at);
+        self.cur = end;
+        self.follow_caret(1);
+        true
+    }
+
+    /// Replace the selection, if it is a match, and find the next. Returns
+    /// (replaced, found next).
+    pub fn replace(&mut self, pat: &[Glyph], with: &[Glyph], case_sensitive: bool, whole_word: bool) -> (bool, bool) {
+        let replaced = match self.selection() {
+            Some((a, b)) if self.matches_at(a, pat, case_sensitive, whole_word) => {
+                self.change(a, b, vec![with.to_vec()]);
+                true
+            }
+            _ => false,
+        };
+        let found = self.find(pat, case_sensitive, whole_word);
+        (replaced, found)
+    }
+
+    /// Replace every match from the top down; how many.
+    pub fn replace_all(&mut self, pat: &[Glyph], with: &[Glyph], case_sensitive: bool, whole_word: bool) -> u16 {
+        if pat.is_empty() || self.readonly {
+            return 0;
+        }
+        let mut n: u16 = 0;
+        let mut from = Point::new(0, 0);
+        while let Some(at) = self.find_from(from, pat, case_sensitive, whole_word) {
+            let end = Point::new(at.x + pat.len() as i16, at.y);
+            self.change(at, end, vec![with.to_vec()]);
+            from = Point::new(at.x + with.len() as i16, at.y);
+            n = n.saturating_add(1);
+            if n == u16::MAX {
+                break;
+            }
+        }
+        n
+    }
+
+    fn glyph_eq(a: Glyph, b: Glyph, case_sensitive: bool) -> bool {
+        if case_sensitive || a >= 128 || b >= 128 {
+            a == b
+        } else {
+            (a as u8).eq_ignore_ascii_case(&(b as u8))
+        }
+    }
+
+    fn matches_at(&self, at: Point, pat: &[Glyph], case_sensitive: bool, whole_word: bool) -> bool {
+        let Some(line) = self.lines.get(at.y as usize) else { return false };
+        let x = at.x as usize;
+        if x + pat.len() > line.len() {
+            return false;
+        }
+        if !line[x..x + pat.len()].iter().zip(pat).all(|(&a, &b)| Self::glyph_eq(a, b, case_sensitive)) {
+            return false;
+        }
+        if whole_word {
+            let before = x > 0 && is_word(line[x - 1]);
+            let after = x + pat.len() < line.len() && is_word(line[x + pat.len()]);
+            if before || after {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn find_from(&self, from: Point, pat: &[Glyph], case_sensitive: bool, whole_word: bool) -> Option<Point> {
+        for y in from.y.max(0)..self.lines.len() as i16 {
+            let line = &self.lines[y as usize];
+            let start = if y == from.y { from.x.max(0) as usize } else { 0 };
+            if pat.len() > line.len() {
+                continue;
+            }
+            for x in start..=line.len() - pat.len() {
+                let at = Point::new(x as i16, y);
+                if self.matches_at(at, pat, case_sensitive, whole_word) {
+                    return Some(at);
+                }
+            }
+        }
+        None
+    }
+
     /// Run one command. `page` is the height of the view, needed by PageUp and
     /// PageDown and by nothing else; `extend` is Shift being held.
     pub fn exec(&mut self, cmd: Cmd, extend: bool, page: i16, clip: &mut Vec<Vec<Glyph>>) {

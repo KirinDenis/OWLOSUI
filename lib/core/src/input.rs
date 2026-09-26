@@ -24,6 +24,10 @@ pub struct InputLine {
     pub max: usize,
     /// Set when Enter was pressed. What that means is the owner's business.
     pub entered: bool,
+    /// What has been entered here before, newest first. Down opens it as
+    /// a list under the field, and so does the `▼` at the field's end.
+    /// Turbo Vision's `THistory`, without the separate view.
+    pub history: Vec<String>,
 }
 
 impl InputLine {
@@ -35,7 +39,21 @@ impl InputLine {
             focused: false,
             max: 255,
             entered: false,
+            history: Vec::new(),
         }
+    }
+
+    /// Put the current text at the top of the history: once, and only
+    /// if it says something.
+    pub fn remember(&mut self) {
+        let t = self.text.trim();
+        if t.is_empty() {
+            return;
+        }
+        let t = t.to_string();
+        self.history.retain(|h| *h != t);
+        self.history.insert(0, t);
+        self.history.truncate(20);
     }
 
     pub fn set_text(&mut self, text: &str) {

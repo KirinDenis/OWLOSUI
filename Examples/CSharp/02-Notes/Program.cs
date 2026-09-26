@@ -33,6 +33,9 @@ public sealed class App
     public const ushort CmExit = 2;
     public const ushort CmLeave = 3;
     public const ushort CmStay = 4;
+    // Find and Replace: the dialogs, their buttons, and F3 for the next match.
+    public const ushort CmFind = 5, CmReplace = 6, CmFindNext = 7;
+    public const ushort CmFindOk = 8, CmReplaceOne = 9, CmReplaceAll = 10, CmSearchCancel = 11;
 
     private readonly Owlosui owl;
     private readonly string fileName;
@@ -44,6 +47,13 @@ public sealed class App
 
     // The question box, while it is up. Needed to close it on Stay.
     private ushort box;
+
+    // The search dialog, while it is up, and its fields; what was last
+    // searched for, so F3 finds the next one without asking again.
+    private ushort search, findField, withField, options;
+    private string lastPattern = "", lastWith = "";
+    private bool lastCase, lastWhole;
+    public string LastPattern => lastPattern;
 
     // Handles, for the tests: the window and the editor inside it.
     public ushort Window { get; }
@@ -96,7 +106,61 @@ public sealed class App
         // Escape is not a thing an editor wants, so it does go to the last
         // button, Exit, and Exit asks. The hotkeys work from anywhere:
         // Alt+S, Alt+X.
-        owl.Buttons(Window, ("~S~ave", CmSave), ("E~x~it", CmExit));
+        // Find and Replace are buttons too, so Alt+F and Alt+R reach them
+        // from the text; the dialog remembers the last search, and OK on
+        // it again is "find next".
+        owl.Buttons(Window, ("~S~ave", CmSave), ("~F~ind", CmFind), ("~R~eplace", CmReplace), ("E~x~it", CmExit));
+    }
+
+    /// <summary>
+    /// The Find or the Replace dialog: a field (two for Replace), the two
+    /// options every search has, and the buttons. Modal, so the editor
+    /// behind it waits; the answer comes back as a command.
+    /// </summary>
+    private void ShowSearch(bool replace)
+    {
+        CloseSearch();
+        var h = replace ? 12 : 10;
+        search = owl.Window(replace ? "Replace" : "Find", 50, h, style: Owlosui.Style.ModalDialog, closeCmd: CmSearchCancel);
+        findField = owl.Input(search, 2, 1, 44, "Find:", lastPattern);
+        owl.SetHistory(findField, lastPattern.Length > 0 ? new[] { lastPattern } : Array.Empty<string>());
+        var y = 2;
+        if (replace)
+        {
+            withField = owl.Input(search, 2, 3, 44, "Replace with:", lastWith);
+            y = 4;
+        }
+        options = owl.Cluster(search, 2, y + 1, 30, new[] { "~C~ase sensitive", "~W~hole words only" });
+        if (replace)
+            owl.Buttons(search, new Owlosui.Button("~R~eplace", CmReplaceOne, Default: true), ("Replace ~a~ll", CmReplaceAll),
+                        new Owlosui.Button("~C~ancel", CmSearchCancel, Cancel: true));
+        else
+            owl.Buttons(search, new Owlosui.Button("~O~K", CmFindOk, Default: true), new Owlosui.Button("~C~ancel", CmSearchCancel, Cancel: true));
+    }
+
+    /// <summary>Read the dialog's fields into what F3 will use, and close it.</summary>
+    private void TakeSearch()
+    {
+        lastPattern = owl.GetText(findField);
+        if (withField != 0) lastWith = owl.GetText(withField);
+        var (on, _) = owl.ClusterState(options);
+        lastCase = on.Length > 0 && on[0];
+        lastWhole = on.Length > 1 && on[1];
+        CloseSearch();
+    }
+
+    private void CloseSearch()
+    {
+        if (search != 0) owl.Close(search);
+        search = 0;
+        withField = 0;
+    }
+
+    private void FindNext()
+    {
+        if (lastPattern.Length == 0) { ShowSearch(false); return; }
+        if (!owl.Find(Editor, lastPattern, lastCase, lastWhole))
+            box = owl.MessageBox("Find", $"\"{lastPattern}\" not found.", ("~O~K", CmStay));
     }
 
     public bool Modified => owl.GetText(Editor) != saved;
@@ -145,6 +209,37 @@ public sealed class App
 
             case CmLeave:
                 return false;
+
+            case CmFind: ShowSearch(false); return true;
+            case CmReplace: ShowSearch(true); return true;
+            case CmFindNext: FindNext(); return true;
+            case CmFindOk:
+                TakeSearch();
+                FindNext();
+                return true;
+            case CmReplaceOne:
+            {
+                // The dialog stays up, as it did in the editors people
+                // learned on: each Replace does one and finds the next.
+                lastPattern = owl.GetText(findField);
+                lastWith = owl.GetText(withField);
+                var (on, _) = owl.ClusterState(options);
+                lastCase = on.Length > 0 && on[0];
+                lastWhole = on.Length > 1 && on[1];
+                var (_, found) = owl.Replace(Editor, lastPattern, lastWith, lastCase, lastWhole);
+                if (!found) CloseSearch();
+                return true;
+            }
+            case CmReplaceAll:
+            {
+                TakeSearch();
+                var n = owl.ReplaceAll(Editor, lastPattern, lastWith, lastCase, lastWhole);
+                box = owl.MessageBox("Replace", $"{n} replaced.", ("~O~K", CmStay));
+                return true;
+            }
+            case CmSearchCancel:
+                CloseSearch();
+                return true;
 
             case CmStay:
                 // Closing the box is enough. The editor behind it still has

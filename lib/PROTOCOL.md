@@ -84,10 +84,19 @@ that size.
 | 0x17 | LABEL       | `parent:id rect target:id text:str` | `id` |
 | 0x18 | PROGRESS    | `parent:id rect max:u32 flags:u8` | `id` |
 | 0x19 | LIST        | `parent:id rect flags:u8 n:u16` then `n × str` | `id` |
-| 0x1A | FILES       | `parent:id rect flags:u8 mask:str path:str entries` | `id` |
+| 0x1A | FILES       | `parent:id rect flags:u8 mask:str path:str entries` | `id` | The panel fills its window; `rect.y` is the number of rows left free above it.
 | 0x1B | CANVAS      | `parent:id rect` | `id` |
-| 0x1C | MENU_BAR    | `items` | `id` |
+| 0x1C | MENU_BAR    | `items` | `id` | — each item is `flags:u8 cmd:u16 text:str shortcut:str hint:str` then its sub-items; the hint shows on the status line while the item is under the cursor
 | 0x1D | CLUSTER     | `parent:id rect kind:u8 n:u8` then `n × str` | `id` |
+| 0x57 | FIND        | `id flags:u8 pattern:str` | `found:u8` — the next match after the caret is selected; flags bit 0 case-sensitive, bit 1 whole words; no wrapping |
+| 0x58 | REPLACE     | `id flags:u8 pattern:str replacement:str` | `replaced:u8 found:u8` — the selected match replaced, and the next one found |
+| 0x59 | REPLACE_ALL | `id flags:u8 pattern:str replacement:str` | `count:u16` |
+| 0x53 | TREE        | `parent:id rect nodes` | `id` — a tree filling its window; `nodes` is `n:u8` then `n × (flags:u8 text:str nodes)`, flags bit 0 open, bit 1 lazy (children exist but are asked for when it is opened) |
+| 0x54 | TREE_CHILDREN | `id depth:u8 depth×index:u16 nodes` | OK — the children of the node at that path, usually in answer to TREE_EXPAND; the node opens |
+| 0x55 | TREE_EXPAND | `id` | `depth:u8` then `depth × (index:u16 text:str)` — the lazy node somebody opened, once, or depth `0` |
+| 0x56 | TREE_PATH   | `id` | `n:u8` then `n × str` — the texts from the root down to the current row |
+| 0x1F | HEX         | `parent:id rect bytes…` | `id` — a hex dump of the bytes (the rest of the payload), filling its window |
+| 0x1E | BUTTON_ROW  | `parent:id rect flags:u8 n:u8` then `n ×` (`cmd:u16 flags:u8 label:str`) | `id` — a row placed by hand, from the left; `rect.w` of `0` means as wide as its buttons; row `flags` bit 0 takes it out of the Tab ring |
 
 A `rect` with `x` or `y` of `-1` means *centre it* - now, and again after
 every `RESIZE`, until it is dragged somewhere. The defaults are already
@@ -113,10 +122,23 @@ ask "save changes?" first.
 `TEXT.dock`: `0` fill the parent, `1` stay where the `rect` put it.
 `TEXT.flags`: bit 0 read-only, bit 1 drawn as a box of its own.
 
+Windows on the desktop are numbered 1 to 9 as they open, the number
+shown in the frame, and Alt+that number brings one to the front; Alt+0
+lists them, Shift+F6 is the previous window and Ctrl+F5 moves or resizes
+the active one from the keyboard (arrows move, Shift+arrows resize, Enter
+keeps, Escape puts back). The core binds those four itself. Commands from
+`0xFF00` up belong to the toolkit's own dialogs and never reach `TAKE`.
+
 `BUTTONS` are docked bottom-right, as buttons are. A button's `flags` bit 0
-marks it as the default — the one Enter presses. Its label carries the
-hotkey between tildes: `~O~pen`. Escape presses the last button in the
-row, so put Cancel last.
+marks it as the default — the one Enter presses; bits 1–2 are its style,
+`0` normal (green), `1` accent (cyan, for an operator or a mode), `2`
+danger (red, for what throws something away); bit 3 disables it; bit 4
+marks it as the one Escape presses, wherever its row is. Its label
+carries the hotkey between tildes: `~O~pen`. Escape presses the last button
+in the docked row, so put Cancel last. `BUTTON_ROW` is the same row placed
+anywhere - several of them make a keypad - and `SET_BUTTON` turns one
+button on or off. A mouse click presses a button without moving the focus,
+as in the original: a keypad clicked leaves the caret in the display.
 
 `MESSAGE_BOX` is a grey modal window sized to its words, built from the
 parts above. It is here rather than in every client because every client
@@ -201,7 +223,7 @@ where you are.
 | op   | name  | payload | reply |
 |------|-------|---------|-------|
 | 0x30 | KEY   | `kind:u8 value:u16 mods:u8` | OK |
-| 0x31 | MOUSE | `kind:u8 button:u8 x:i16 y:i16` | OK |
+| 0x31 | MOUSE | `kind:u8 button:u8 x:i16 y:i16` | OK — kind `0` down, `1` up, `2` drag, `3` move, `4` wheel up, `5` wheel down, `6` the second press of a double click (sent in place of its down; the client decides what "double" is) |
 | 0x32 | TICK  | —       | OK |
 
 `KEY.kind`: `0` a character (`value` is its Unicode scalar), `1` a function
@@ -228,6 +250,20 @@ is the client's, and about 90 ms is long enough to be seen.
 | 0x42 | GET_GLYPHS | —  | `growing:u8 n:u16` then `n × u16` — the Unicode code point of each glyph index in the session's font |
 | 0x43 | CYCLE | —       | OK — the front window goes to the back (Turbo Vision's F6) |
 | 0x44 | ZOOM  | `id`    | OK — a window fills the work area, or goes back to its size (F5) |
+| 0x45 | SET_BUTTON | `id index:u8 enabled:u8` | OK — enable or disable one button of a row |
+| 0x46 | FOCUS | `id`    | OK — put the focus on that control, in its window |
+| 0x47 | CASCADE | —     | OK — the windows along the diagonal, every title showing; a fixed-size window only moves |
+| 0x51 | PALETTE | — | `n:u8` then `n × (group:str name:str attr:u8)` — every colour of the palette, by role, in a fixed order |
+| 0x52 | SET_COLOR | `index:u8 attr:u8` | OK — one colour changed; the next frame wears it |
+| 0x4F | SET_HISTORY | `id n:u8` then `n × str` | OK — what an input line has been given before, newest first; Down, or the `▼` at its end, lists them and a pick fills the field. Enter in the field adds to it |
+| 0x50 | GET_HISTORY | `id` | `n:u8` then `n × str` — the history, newest first, to keep for next time |
+| 0x4C | WINDOW_LIST | — | OK — the list of windows, a modal dialog; Enter brings the chosen one to the front (Alt+0) |
+| 0x4D | CYCLE_BACK | — | OK — the window at the back comes to the front (Shift+F6) |
+| 0x4E | SIZE_MOVE | — | OK — the active window is moved or resized from the keyboard until Enter or Escape (Ctrl+F5) |
+| 0x4A | WINDOW_STATUS | `id` then the items of STATUS | OK — the keys the window carries: on the status line, and bound, only while it is the active window |
+| 0x4B | WINDOW_MENU | `id` then the items of MENU_BAR | OK — the window's menus, merged into the bar while it is active: a submenu named like one on the bar goes into it after a line, any other goes on the end |
+| 0x49 | SET_READONLY | `id on:u8` | OK — a text view becomes a viewer (`[view]` in its title) or an editor again |
+| 0x48 | TILE  | —       | OK — the windows share the work area with no overlap; a fixed-size one stands in its cell at its own size |
 
 `FRAME` is the whole screen, every time. At 80×25 that is 6000 bytes, and
 a client that wants to redraw only what changed keeps the previous frame

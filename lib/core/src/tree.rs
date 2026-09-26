@@ -16,6 +16,10 @@ pub struct TreeNode {
     /// Whether the children are showing. A node with none is never open,
     /// because there would be nothing to see.
     pub open: bool,
+    /// Children exist but have not been given yet: a folder on a disk
+    /// nobody has looked into. Drawn as a branch; opening it asks the
+    /// program for the children (`TreeView::pending`) instead of opening.
+    pub lazy: bool,
 }
 
 impl TreeNode {
@@ -24,6 +28,7 @@ impl TreeNode {
             text: text.into(),
             children: Vec::new(),
             open: false,
+            lazy: false,
         }
     }
 
@@ -32,6 +37,17 @@ impl TreeNode {
             text: text.into(),
             children,
             open: true,
+            lazy: false,
+        }
+    }
+
+    /// A branch whose children will be asked for when it is opened.
+    pub fn lazy(text: &str) -> Self {
+        TreeNode {
+            text: text.into(),
+            children: Vec::new(),
+            open: false,
+            lazy: true,
         }
     }
 }
@@ -56,6 +72,9 @@ pub struct TreeView {
     pub top: i16,
     pub focused: bool,
     rows: i16,
+    /// A lazy node somebody tried to open: its path, until the program
+    /// gives its children with `set_children`.
+    pub pending: Option<Vec<usize>>,
 }
 
 impl TreeView {
@@ -66,7 +85,49 @@ impl TreeView {
             top: 0,
             focused: false,
             rows: 1,
+            pending: None,
         }
+    }
+
+    /// The children of a node, given by the program - usually in answer to
+    /// `pending`. The node opens; with nothing given it becomes a leaf.
+    pub fn set_children(&mut self, path: &[usize], children: Vec<TreeNode>) -> bool {
+        match self.node_mut(path) {
+            Some(n) => {
+                n.open = !children.is_empty();
+                n.children = children;
+                n.lazy = false;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The path of the current row, as child indices.
+    pub fn current_path(&self) -> Vec<usize> {
+        self.flatten().get(self.current).map(|r| r.path.clone()).unwrap_or_default()
+    }
+
+    /// The texts along a path, root first.
+    pub fn texts(&self, path: &[usize]) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut nodes = &self.roots;
+        for &i in path {
+            let Some(n) = nodes.get(i) else { break };
+            out.push(n.text.clone());
+            nodes = &n.children;
+        }
+        out
+    }
+
+    /// Opening a node that has yet to be filled: remember it for the
+    /// program and do not open. True if that is what happened.
+    fn ask_for(&mut self, path: &[usize]) -> bool {
+        let unfilled = matches!(self.node_mut(path), Some(n) if n.lazy && n.children.is_empty());
+        if unfilled {
+            self.pending = Some(path.to_vec());
+        }
+        unfilled
     }
 
     pub fn set_rows(&mut self, rows: i16) {
@@ -87,7 +148,7 @@ impl TreeView {
                     path: path.clone(),
                     depth,
                     text: n.text.clone(),
-                    has_children: !n.children.is_empty(),
+                    has_children: !n.children.is_empty() || n.lazy,
                     open: n.open && !n.children.is_empty(),
                     last: i + 1 == nodes.len(),
                 });
@@ -142,6 +203,9 @@ impl TreeView {
             return;
         }
         let path = row.path.clone();
+        if self.ask_for(&path) {
+            return;
+        }
         if let Some(n) = self.node_mut(&path) {
             n.open = true;
         }
@@ -184,6 +248,9 @@ impl TreeView {
             return;
         }
         let (path, open) = (row.path.clone(), row.open);
+        if !open && self.ask_for(&path) {
+            return;
+        }
         if let Some(n) = self.node_mut(&path) {
             n.open = !open;
         }
