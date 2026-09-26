@@ -44,7 +44,10 @@ public sealed class App
     ushort menu;
     ushort menuList;
     ushort window;
-    ushort[] slots = Array.Empty<ushort>();
+    // The board is a canvas: cells with colours, put there in one Blit per
+    // move. The line above it is a static, given new words with SetText.
+    ushort board;
+    ushort caption;
     ushort box;
     bool locked;
     bool finished;
@@ -191,7 +194,8 @@ public sealed class App
         if (ox < 0) ox = 0;
         if (oy < 1) oy = 1;
 
-        slots = new ushort[contentRows + 1];
+        caption = owl.Static(window, 1, Math.Max(0, oy - 1), "", clientW - 2);
+        board = owl.Canvas(window, ox, oy, cols * Warehouse.CellW, contentRows);
         Redraw();
     }
 
@@ -200,24 +204,32 @@ public sealed class App
         if (window == 0) return;
         owl.Close(window);
         window = 0;
-        slots = Array.Empty<ushort>();
+        board = 0;
+        caption = 0;
         undo.Clear();
     }
 
     void Redraw()
     {
-        Put(0, 1, Math.Max(0, oy - 1),
-            $"Level {level + 1}  moves {play.Moves}  {play.OnGoals}/{play.Goals}");
+        owl.SetText(caption, $"Level {level + 1}  moves {play.Moves}  {play.OnGoals}/{play.Goals}");
+        // The whole board in one block: every cell is two glyphs wide, and
+        // each kind of cell has its colour. A wall is grey stone, the floor
+        // is dark, a mark is yellow, a box brown until it sits on a mark and
+        // turns green, and the keeper is white.
+        var w = cols * Warehouse.CellW;
+        var chars = new char[w * contentRows];
+        var attrs = new byte[w * contentRows];
         for (var y = 0; y < contentRows; y++)
-            Put(y + 1, ox, oy + y, play.Row(y, cols));
-    }
-
-    void Put(int slot, int x, int y, string text)
-    {
-        if (slots[slot] != 0) owl.Close(slots[slot]);
-        // Width is the text itself. Padding with spaces is what let the
-        // row be reflowed, so it is not done.
-        slots[slot] = owl.Static(window, x, y, text, text.Length);
+            for (var x = 0; x < cols; x++)
+            {
+                var (glyphs, attr) = play.Cell(y * Warehouse.W + x);
+                var at = y * w + x * Warehouse.CellW;
+                chars[at] = glyphs[0];
+                chars[at + 1] = glyphs[1];
+                attrs[at] = attr;
+                attrs[at + 1] = attr;
+            }
+        owl.Blit(board, 0, 0, w, contentRows, chars, attrs);
     }
 
     void MenuKeys() => owl.StatusLine(
@@ -261,7 +273,7 @@ public sealed class App
     }
 }
 
-sealed class Warehouse
+public sealed class Warehouse
 {
     public const int W = 30;
     public const int H = 20;
@@ -389,6 +401,68 @@ sealed class Warehouse
 
     string Glyph(int i) => Glyph(Cur[i], Orig[i] == '.');
 
+    // The colours of the original Rust game, in the sixteen we have and in
+    // their darker halves: the bright ones read as acid on a text screen,
+    // and the originals are pastel. A wall is blue textured over dark
+    // blue, the floor dark green, a mark an orange square on it, a box
+    // brown, the keeper dark red. Outside the warehouse: nothing - clear
+    // cells, so the window's own colour shows through, whatever it is.
+    public static readonly byte WallAttr = Owlosui.Attr(ConsoleColor.Blue, ConsoleColor.DarkBlue);
+    public static readonly byte FloorAttr = Owlosui.Attr(ConsoleColor.DarkGreen, ConsoleColor.DarkGreen);
+    public static readonly byte MarkAttr = Owlosui.Attr(ConsoleColor.DarkYellow, ConsoleColor.DarkGreen);
+    public static readonly byte BoxAttr = Owlosui.Attr(ConsoleColor.DarkYellow, ConsoleColor.DarkYellow);
+    public static readonly byte PlacedAttr = Owlosui.Attr(ConsoleColor.DarkYellow, ConsoleColor.DarkGreen);
+    public static readonly byte KeeperAttr = Owlosui.Attr(ConsoleColor.DarkRed, ConsoleColor.DarkGreen);
+    public static readonly byte OutsideAttr = Owlosui.ClearAttr;
+
+    /// <summary>
+    /// Which cells are inside the warehouse. The map says ' ' for the floor
+    /// and for the nothing around the walls alike; what tells them apart is
+    /// that the keeper can reach the one and not the other. A flood from
+    /// where he starts, stopped by walls.
+    /// </summary>
+    bool[]? inside;
+
+    bool[] Inside()
+    {
+        if (inside != null) return inside;
+        var seen = new bool[W * H];
+        var todo = new Stack<int>();
+        todo.Push(Hero);
+        seen[Hero] = true;
+        while (todo.Count > 0)
+        {
+            var i = todo.Pop();
+            var (r, c) = (i / W, i % W);
+            foreach (var (dr, dc) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) })
+            {
+                var (nr, nc) = (r + dr, c + dc);
+                if (nr < 0 || nc < 0 || nr >= H || nc >= W) continue;
+                var j = nr * W + nc;
+                if (seen[j] || Orig[j] == '#') continue;
+                seen[j] = true;
+                todo.Push(j);
+            }
+        }
+        inside = seen;
+        return seen;
+    }
+
+    /// <summary>The two glyphs and the colour of a cell, for the canvas.</summary>
+    public (string glyphs, byte attr) Cell(int i)
+    {
+        var c = Cur[i];
+        var goal = Orig[i] == '.';
+        return c switch
+        {
+            '#' => ("\u2593\u2593", WallAttr),        // ▓▓  blue over dark blue: stone, not paint
+            '$' => goal ? ("\u2592\u2592", PlacedAttr) : ("  ", BoxAttr),
+            '@' => ("\u2590\u258c", KeeperAttr),      // ▐▌  a figure, narrower than its cell
+            '.' => ("\u25a0\u25a0", MarkAttr),        // ■■  the orange square on the floor
+            _ => Inside()[i] ? ("  ", FloorAttr) : (new string(Owlosui.ClearChar, 2), OutsideAttr),
+        };
+    }
+
     /// <summary>
     /// model.rs can_step, then do_step. Row delta first, the way do_step is
     /// called. A wall returns false and the grid is left alone.
@@ -432,4 +506,4 @@ sealed class Warehouse
     }
 }
 
-readonly record struct Shot(char[] Cur, int Hero, int Moves);
+public readonly record struct Shot(char[] Cur, int Hero, int Moves);

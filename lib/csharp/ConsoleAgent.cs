@@ -128,14 +128,14 @@ public sealed class ConsoleAgent : IDisposable
     public static string Glyphs { get; set; } = Owlosui.Cp437;
 
     private static string mappedFor = "";
-    private static Dictionary<char, byte> glyphOf = new();
+    private static Dictionary<char, ushort> glyphOf = new();
 
-    private static Dictionary<char, byte> GlyphMap()
+    private static Dictionary<char, ushort> GlyphMap()
     {
         if (!ReferenceEquals(mappedFor, Glyphs))
         {
-            var m = new Dictionary<char, byte>();
-            for (var i = 255; i >= 0; i--) m[Glyphs[i]] = (byte)i;
+            var m = new Dictionary<char, ushort>();
+            for (var i = Glyphs.Length - 1; i >= 0; i--) m[Glyphs[i]] = (ushort)i;
             glyphOf = m;
             mappedFor = Glyphs;
         }
@@ -155,11 +155,13 @@ public sealed class ConsoleAgent : IDisposable
             throw new OwlosuiException($"ReadConsoleOutput failed: {Marshal.GetLastWin32Error()}");
 
         var map = GlyphMap();
-        var cells = new byte[w * h * 2];
+        var cells = new byte[w * h * 3];
         for (var i = 0; i < w * h; i++)
         {
-            cells[i * 2] = map.TryGetValue((char)buf[i].UnicodeChar, out var g) ? g : (byte)'?';
-            cells[i * 2 + 1] = (byte)(buf[i].Attributes & 0xFF);
+            var g = map.TryGetValue((char)buf[i].UnicodeChar, out var idx) ? idx : (ushort)'?';
+            cells[i * 3] = (byte)(g & 0xFF);
+            cells[i * 3 + 1] = (byte)(g >> 8);
+            cells[i * 3 + 2] = (byte)(buf[i].Attributes & 0xFF);
         }
         var cx = info.dwCursorPosition.X - win.Left;
         var cy = info.dwCursorPosition.Y - win.Top;

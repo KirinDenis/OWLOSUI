@@ -16,11 +16,11 @@
 
 use std::io::{Read, Write};
 
-use owlosui_console::codepage::CodePage;
+use owlosui_console::codepage::Font;
 use owlosui_core::{
-    Button, ButtonRow, Dock, Event, FileEntry, FileList, InputLine, Key, KeyCode, Kind, Label,
-    ListBox, Mods, Mouse, MouseKind, Progress, PushButton, Rect, StaticText, StatusItem, StatusLine,
-    TextView, Ui, ViewId, WinPalette, Window,
+    Button, ButtonRow, Canvas, Cell, Choice, Cluster, Dock, Event, FileEntry, FileList, InputLine,
+    Key, KeyCode, Kind, Label, ListBox, MenuBar, MenuItem, Mods, Mouse, MouseKind, Progress,
+    PushButton, Rect, StaticText, StatusItem, StatusLine, TextView, Ui, ViewId, WinPalette, Window,
 };
 
 mod op {
@@ -39,6 +39,9 @@ mod op {
     pub const PROGRESS: u8 = 0x18;
     pub const LIST: u8 = 0x19;
     pub const FILES: u8 = 0x1A;
+    pub const CANVAS: u8 = 0x1B;
+    pub const MENU_BAR: u8 = 0x1C;
+    pub const CLUSTER: u8 = 0x1D;
     pub const CLOSE: u8 = 0x20;
     pub const GET_TEXT: u8 = 0x21;
     pub const SET_PROGRESS: u8 = 0x22;
@@ -50,12 +53,19 @@ mod op {
     pub const MARKED_NAMES: u8 = 0x28;
     pub const SET_FILES_ERROR: u8 = 0x29;
     pub const ACTIVE: u8 = 0x2A;
+    pub const SET_TEXT: u8 = 0x2B;
+    pub const BLIT: u8 = 0x2C;
+    pub const MENU_CHECK: u8 = 0x2D;
+    pub const GET_CLUSTER: u8 = 0x2E;
+    pub const GET_CLICK: u8 = 0x2F;
     pub const KEY: u8 = 0x30;
     pub const MOUSE: u8 = 0x31;
     pub const TICK: u8 = 0x32;
     pub const FRAME: u8 = 0x40;
     pub const TAKE: u8 = 0x41;
     pub const GET_GLYPHS: u8 = 0x42;
+    pub const CYCLE: u8 = 0x43;
+    pub const ZOOM: u8 = 0x44;
 }
 
 type Res<T> = Result<T, String>;
@@ -124,7 +134,7 @@ impl<'a> In<'a> {
     /// `n:u16` then `n ×` (`name:str size:u32 year:u16 month:u8 day:u8
     /// hour:u8 minute:u8 attrs:u8`): a directory listing, read by the
     /// client, because the server reads no files and no directories.
-    fn entries(&mut self, cp: &CodePage) -> Res<Vec<FileEntry>> {
+    fn entries(&mut self, cp: &mut Font) -> Res<Vec<FileEntry>> {
         let n = self.u16("entry count")?;
         let mut v = Vec::with_capacity(n as usize);
         for _ in 0..n {
@@ -146,9 +156,42 @@ impl<'a> In<'a> {
         Ok(v)
     }
 
+    /// `n:u8` then `n ×` (`flags:u8 cmd:u16 text:str shortcut:str` then the
+    /// item's own submenu, the same shape): a menu, as deep as it goes.
+    /// `flags`: bit 0 separator, bit 1 disabled, bit 2 ticked.
+    fn menu_items(&mut self, cp: &mut Font, depth: u8) -> Res<Vec<MenuItem>> {
+        if depth > 8 {
+            return Err("a menu nested deeper than anyone can follow".into());
+        }
+        let n = self.u8("item count")?;
+        let mut v = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            let flags = self.u8("item.flags")?;
+            let cmd = self.u16("item.cmd")?;
+            let text = cp.to_core(&self.str("item.text")?);
+            let shortcut = cp.to_core(&self.str("item.shortcut")?);
+            let sub = self.menu_items(cp, depth + 1)?;
+            let mut it = if flags & 1 != 0 {
+                MenuItem::line()
+            } else if !sub.is_empty() {
+                MenuItem::sub(&text, sub)
+            } else {
+                MenuItem::new(&text, &shortcut, cmd)
+            };
+            if flags & 2 != 0 {
+                it = it.disabled();
+            }
+            if flags & 4 != 0 {
+                it = it.checked(true);
+            }
+            v.push(it);
+        }
+        Ok(v)
+    }
+
     /// `n ×` (`cmd:u16 flags:u8 label:str`) — the shape both BUTTONS and
     /// MESSAGE_BOX carry.
-    fn buttons(&mut self, cp: &CodePage) -> Res<ButtonRow> {
+    fn buttons(&mut self, cp: &mut Font) -> Res<ButtonRow> {
         let n = self.u8("button count")?;
         let mut v = Vec::with_capacity(n as usize);
         for i in 0..n {
@@ -201,9 +244,14 @@ struct Server {
     ui: Option<Ui>,
     /// The status line, if one has been made. A second one replaces it.
     status: Option<ViewId>,
-    /// The code page every string is turned into on the way in and back
-    /// on the way out. One per session, like the font in a video card.
-    cp: CodePage,
+    /// The menu bar, likewise.
+    menu: Option<ViewId>,
+    /// The font every string is turned into on the way in and back on the
+    /// way out. One per session, like the font in a video card - except
+    /// that this one grows: a character it has never seen gets the next
+    /// index, and the client fetches the table again when a frame refers
+    /// past what it has.
+    cp: Font,
 }
 
 impl Server {
@@ -257,22 +305,25 @@ impl Server {
                 if r.remaining() >= 2 {
                     let n = r.u16("codepage")?;
                     if n != 0 {
-                        self.cp = CodePage::by_number(n).ok_or_else(|| format!("no code page {n}"))?;
+                        self.cp = Font::growing(n).ok_or_else(|| format!("no code page {n}"))?;
                     }
                 }
                 self.ui = Some(Ui::new(w, h));
                 self.status = None;
+                self.menu = None;
             }
 
             op::CODEPAGE => {
                 let n = r.u16("codepage")?;
-                self.cp = CodePage::by_number(n).ok_or_else(|| format!("no code page {n}"))?;
+                self.cp = Font::growing(n).ok_or_else(|| format!("no code page {n}"))?;
             }
 
             op::GET_GLYPHS => {
-                // What each of the 256 glyph indices looks like, as Unicode,
-                // so a client draws with the server's table and never keeps
-                // one of its own.
+                // What each glyph index looks like, as Unicode, so a client
+                // draws with the server's table and never keeps one of its
+                // own. The table grows; a FRAME says how long it is now.
+                out.u8(self.cp.growing as u8);
+                out.u16(self.cp.len() as u16);
                 for &c in self.cp.table.iter() {
                     let u = c as u32;
                     out.u16(if u <= 0xFFFF { u as u16 } else { b'?' as u16 });
@@ -300,6 +351,10 @@ impl Server {
                 w.resizable = flags & 0x02 == 0;
                 w.zoomable = flags & 0x04 == 0;
                 w.closable = flags & 0x08 == 0;
+                // No shadow: two panels side by side would each cast one
+                // on the other, and a shadow on a window that is really
+                // half the screen says nothing about depth.
+                w.shadow = flags & 0x40 == 0;
                 w.palette = match (flags >> 4) & 3 {
                     1 => WinPalette::Cyan,
                     2 => WinPalette::Gray,
@@ -322,7 +377,7 @@ impl Server {
                 let flags = r.u8("flags")?;
                 let text = r.str("text")?;
                 let parent = self.alive(parent)?;
-                let mut t = TextView::new(lines_of(&self.cp, &text));
+                let mut t = TextView::new(lines_of(&mut self.cp, &text));
                 t.readonly = flags & 1 != 0;
                 t.boxed = flags & 2 != 0;
                 let ui = self.ui()?;
@@ -363,7 +418,7 @@ impl Server {
 
             op::BUTTONS => {
                 let parent = r.id("parent")?;
-                let row = r.buttons(&self.cp)?;
+                let row = r.buttons(&mut self.cp)?;
                 let parent = self.alive(parent)?;
                 // Bottom right, with room for the last button's shadow. The
                 // row is two rows tall for the same reason.
@@ -378,7 +433,7 @@ impl Server {
             op::MESSAGE_BOX => {
                 let title = self.cp.to_core(&r.str("title")?);
                 let text = self.cp.to_core(&r.str("text")?);
-                let row = r.buttons(&self.cp)?;
+                let row = r.buttons(&mut self.cp)?;
                 let id = self.ui()?.message_box(&title, &text, row);
                 out.id(id);
             }
@@ -416,7 +471,8 @@ impl Server {
                 // typed as `?`, which is what the screen would show anyway.
                 if let KeyCode::Char(c) = key.code {
                     if (c as u32) >= 128 {
-                        key.code = KeyCode::Char(self.cp.from_char(c) as char);
+                        let g = self.cp.from_char(c);
+                        key.code = KeyCode::Char(char::from_u32(g as u32).unwrap_or('?'));
                     }
                 }
                 self.ui()?.handle(Event::Key(key));
@@ -516,7 +572,7 @@ impl Server {
                 let flags = r.u8("flags")?;
                 let mask = self.cp.to_core(&r.str("mask")?);
                 let path = self.cp.to_core(&r.str("path")?);
-                let entries = r.entries(&self.cp)?;
+                let entries = r.entries(&mut self.cp)?;
                 let parent = self.alive(parent)?;
                 let mut f = FileList::new(entries, &mask);
                 f.set_path(&path);
@@ -543,7 +599,7 @@ impl Server {
                 let id = r.id("id")?;
                 let path = self.cp.to_core(&r.str("path")?);
                 let mask = self.cp.to_core(&r.str("mask")?);
-                let entries = r.entries(&self.cp)?;
+                let entries = r.entries(&mut self.cp)?;
                 let id = self.alive(id)?;
                 match self.ui()?.kind_mut(id) {
                     Kind::Files(f) => {
@@ -624,6 +680,166 @@ impl Server {
                 out.u16(self.ui()?.active_window().map_or(0, |w| w.raw() as u16));
             }
 
+            op::MENU_BAR => {
+                // The bar across the top, one per desktop; a second replaces
+                // the first. Its items send commands through TAKE.
+                let items = r.menu_items(&mut self.cp, 0)?;
+                let old = self.menu.take();
+                let ui = self.ui()?;
+                if let Some(old) = old {
+                    if ui.is_alive(old) {
+                        ui.close(old);
+                    }
+                }
+                let root = ui.root();
+                let screen = ui.rect(root);
+                let id = ui.insert(root, Rect::new(0, 0, screen.w, 1), Kind::MenuBar(MenuBar::new(items)));
+                self.menu = Some(id);
+                out.id(id);
+            }
+
+            op::MENU_CHECK => {
+                let cmd = r.u16("cmd")?;
+                let on = r.u8("on")? != 0;
+                if !self.ui()?.set_menu_checked(cmd, on) {
+                    return Err(format!("no menu item sends {cmd}"));
+                }
+            }
+
+            op::CLUSTER => {
+                // Check boxes (any number on) or radio buttons (exactly one).
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let single = r.u8("kind")? != 0;
+                let n = r.u8("item count")?;
+                let mut labels = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    labels.push(self.cp.to_core(&r.str("label")?));
+                }
+                let parent = self.alive(parent)?;
+                let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+                let mut c = Cluster::checks(&refs);
+                if single {
+                    c.mode = Choice::One;
+                    for (i, on) in c.on.iter_mut().enumerate() {
+                        *on = i == 0;
+                    }
+                }
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::Cluster(c));
+                ui.set_dock(id, Dock::Manual);
+                self.settle_focus()?;
+                out.id(id);
+            }
+
+            op::GET_CLUSTER => {
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                match self.ui()?.kind(id) {
+                    Kind::Cluster(c) => {
+                        out.u8(c.on.len() as u8);
+                        for &on in &c.on {
+                            out.u8(on as u8);
+                        }
+                        out.u8(c.current as u8);
+                    }
+                    _ => return Err(format!("view {} is not a cluster", id.raw())),
+                }
+            }
+
+            op::GET_CLICK => {
+                // Where the mouse last went down on a canvas, once.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Canvas(c) => match c.clicked.take() {
+                        Some((x, y)) => {
+                            out.u8(1);
+                            out.i16(x);
+                            out.i16(y);
+                        }
+                        None => {
+                            out.u8(0);
+                            out.i16(0);
+                            out.i16(0);
+                        }
+                    },
+                    _ => return Err(format!("view {} is not a canvas", id.raw())),
+                }
+            }
+
+            op::CYCLE => {
+                self.ui()?.cycle_windows();
+            }
+
+            op::ZOOM => {
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                if !matches!(ui.kind(id), Kind::Window(_)) {
+                    return Err(format!("view {} is not a window", id.raw()));
+                }
+                ui.toggle_zoom(id);
+            }
+
+            op::CANVAS => {
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let parent = self.alive(parent)?;
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::Canvas(Canvas::new(rect.w, rect.h)));
+                ui.set_dock(id, Dock::Manual);
+                out.id(id);
+            }
+
+            op::BLIT => {
+                // Cells as characters with attributes; the font turns each
+                // character into a glyph, growing if it has to.
+                let id = r.id("id")?;
+                let (x, y, w, h) = (r.i16("x")?, r.i16("y")?, r.i16("w")?, r.i16("h")?);
+                if w < 0 || h < 0 {
+                    return Err("a block with a negative size".into());
+                }
+                let n = (w as usize) * (h as usize);
+                let mut cells = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let ch = r.u16("cell.ch")?;
+                    let attr = r.u8("cell.attr")?;
+                    let c = char::from_u32(ch as u32).unwrap_or('?');
+                    cells.push(Cell::new(self.cp.from_char(c), attr));
+                }
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Canvas(c) => c.blit(x, y, w, h, &cells),
+                    _ => return Err(format!("view {} is not a canvas", id.raw())),
+                }
+            }
+
+            op::SET_TEXT => {
+                // New words for something that already has some. A static
+                // keeps its place and width; an input keeps its label; an
+                // editor starts over with the new lines.
+                let id = r.id("id")?;
+                let text = r.str("text")?;
+                let core = self.cp.to_core(&text);
+                let lines = lines_of(&mut self.cp, &text);
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Static(t) => t.text = core,
+                    Kind::Input(i) => i.set_text(&core),
+                    Kind::Text(t) => {
+                        *t = {
+                            let mut n = TextView::new(lines);
+                            n.readonly = t.readonly;
+                            n.boxed = t.boxed;
+                            n.focused = t.focused;
+                            n
+                        };
+                    }
+                    _ => return Err(format!("view {} has no text to set", id.raw())),
+                }
+            }
+
             op::GET_MARKED => {
                 let id = r.id("id")?;
                 let id = self.alive(id)?;
@@ -674,6 +890,7 @@ impl Server {
             }
 
             op::FRAME => {
+                let font_len = self.cp.len() as u16;
                 let ui = self.ui()?;
                 let root = ui.root();
                 let r = ui.rect(root);
@@ -687,10 +904,15 @@ impl Server {
                 // "Show this one for a moment, then send TICK": a button
                 // that a key just put down, a menu item just chosen.
                 out.u8(ui.pick_pending() as u8);
+                // How long the font is now: a client whose table is shorter
+                // fetches it again before it draws.
+                out.u16(font_len);
+                // A cell on the wire is `glyph:u16 attr:u8`: three bytes,
+                // because the font can be longer than 256.
                 for y in 0..r.h {
                     for x in 0..r.w {
-                        let (ch, attr) = buf.get(x, y).map_or((b' ', 0), |c| (c.ch, c.attr));
-                        out.u8(ch);
+                        let (ch, attr) = buf.get(x, y).map_or((b' ' as u16, 0), |c| (c.ch as u16, c.attr));
+                        out.u16(ch);
                         out.u8(attr);
                     }
                 }
@@ -708,8 +930,8 @@ impl Server {
     }
 }
 
-fn lines_of(cp: &CodePage, text: &str) -> Vec<Vec<u8>> {
-    let mut v: Vec<Vec<u8>> = text.split('\n').map(|l| cp.encode(l)).collect();
+fn lines_of(cp: &mut Font, text: &str) -> Vec<Vec<owlosui_core::Glyph>> {
+    let mut v: Vec<Vec<owlosui_core::Glyph>> = text.split('\n').map(|l| cp.encode(l)).collect();
     if v.is_empty() {
         v.push(Vec::new());
     }
@@ -760,7 +982,8 @@ fn main() -> std::io::Result<()> {
     let mut server = Server {
         ui: None,
         status: None,
-        cp: CodePage::by_number(437).expect("437 is built in"),
+        menu: None,
+        cp: Font::growing(437).expect("437 is built in"),
     };
 
     loop {

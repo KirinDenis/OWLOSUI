@@ -360,6 +360,36 @@ fn a_panel_without_a_path_line_starts_with_the_names() {
     assert_eq!(fl.focus, Focus::List, "Tab reached a path line that is not there");
 }
 
+// ------------------------------------------------------------------ canvas
+
+#[test]
+fn a_canvas_is_clear_until_drawn_on_and_words_take_the_window_colour() {
+    use owlosui_core::{Canvas, Cell, StaticText};
+    let mut ui = Ui::new(40, 10);
+    let root = ui.root();
+    // A blue document window: body 0x1F, text 0x1E.
+    let w = ui.insert(root, Rect::new(0, 0, 40, 10), Kind::Window(Window::new("W")));
+    let canvas = ui.insert(w, Rect::new(1, 1, 10, 3), Kind::Canvas(Canvas::new(10, 3)));
+    ui.set_dock(canvas, Dock::Manual);
+    let words = ui.insert(w, Rect::new(1, 5, 20, 1), Kind::Static(StaticText::new("moves 0")));
+    ui.set_dock(words, Dock::Manual);
+
+    let buf = draw(&mut ui);
+    let body = Palette::classic().blue.body;
+    let r = ui.abs_rect(canvas);
+    assert_eq!(buf.get(r.x, r.y).unwrap().attr, body, "a new canvas should show the window through");
+    let wr = ui.abs_rect(words);
+    assert_eq!(buf.get(wr.x, wr.y).unwrap().attr, Palette::classic().blue.text, "words on a blue window are yellow on blue, not a grey bar");
+
+    // Draw two cells, one of them clear again: the clear one stays window.
+    if let Kind::Canvas(c) = ui.kind_mut(canvas) {
+        c.blit(2, 1, 2, 1, &[Cell::new(b'#' as owlosui_core::Glyph, 0x4E), Canvas::CLEAR]);
+    }
+    let buf = draw(&mut ui);
+    assert_eq!(buf.get(r.x + 2, r.y + 1).unwrap().attr, 0x4E);
+    assert_eq!(buf.get(r.x + 3, r.y + 1).unwrap().attr, body);
+}
+
 // ---------------------------------------------------------------- progress
 
 #[test]

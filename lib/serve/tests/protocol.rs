@@ -89,6 +89,9 @@ struct Frame {
     cursor: (i16, i16),
     /// "Show this, wait, then TICK": something chosen is being shown.
     hold: bool,
+    /// How long the session's font is now.
+    font_len: u16,
+    /// Three bytes a cell: `glyph:u16 attr:u8`.
     cells: Vec<u8>,
 }
 
@@ -103,18 +106,28 @@ fn frame(c: &mut Client) -> Frame {
         h,
         cursor: (cx, cy),
         hold: b[8] != 0,
-        cells: b[9..].to_vec(),
+        font_len: u16::from_le_bytes([b[9], b[10]]),
+        cells: b[11..].to_vec(),
     }
 }
 
 impl Frame {
+    /// The glyph index of a cell.
+    fn glyph(&self, x: i16, y: i16) -> u16 {
+        let i = ((y * self.w + x) * 3) as usize;
+        u16::from_le_bytes([self.cells[i], self.cells[i + 1]])
+    }
+
+    /// A row as characters: a glyph index below 256 as the Latin-1 char of
+    /// that number (so `find` works on ASCII and frame bytes alike), and
+    /// anything past the code page as U+FFFD.
     fn row(&self, y: i16) -> String {
-        let mut out = String::new();
-        for x in 0..self.w {
-            let i = ((y * self.w + x) * 2) as usize;
-            out.push(self.cells[i] as char);
-        }
-        out
+        (0..self.w)
+            .map(|x| {
+                let g = self.glyph(x, y);
+                if g < 256 { g as u8 as char } else { '\u{FFFD}' }
+            })
+            .collect()
     }
 }
 
@@ -147,7 +160,7 @@ fn a_window_with_words_and_a_button() {
 
     let f = frame(&mut c);
     assert_eq!((f.w, f.h), (40, 12));
-    assert_eq!(f.cells.len(), 40 * 12 * 2);
+    assert_eq!(f.cells.len(), 40 * 12 * 3);
 
     // Centred: (40 - 30) / 2 = 5, and the words are inside.
     let title_row = (0..12).find(|&y| f.row(y).contains("Hello")).expect("title");
@@ -245,8 +258,7 @@ fn find(f: &Frame, text: &str) -> Option<(i16, i16)> {
 }
 
 fn corner(f: &Frame, x: i16, y: i16) -> bool {
-    let i = ((y * f.w + x) * 2) as usize;
-    matches!(f.cells.get(i), Some(0xBC) | Some(0xD9))
+    matches!(f.glyph(x, y), 0xBC | 0xD9)
 }
 
 fn mouse(c: &mut Client, kind: u8, x: i16, y: i16) {
@@ -438,7 +450,7 @@ fn any_resize_is_survivable() {
         c.ok(0x02, &[i16(w), i16(h)].concat());
         let f = frame(&mut c);
         assert_eq!((f.w, f.h), (w, h), "frame after resize to {w}x{h}");
-        assert_eq!(f.cells.len(), (w as usize) * (h as usize) * 2);
+        assert_eq!(f.cells.len(), (w as usize) * (h as usize) * 3);
         // And it still takes input afterwards.
         c.ok(0x30, &[2, 12, 0, 0]); // Down
         c.ok(0x31, &[0, 0, 0, 0, 0, 0]); // click at 0,0
@@ -632,8 +644,9 @@ fn code_page_866_carries_cyrillic_both_ways() {
     ));
     let f = frame(&mut c);
     // The bytes on the screen are 866's: П р и в е т.
-    let row: Vec<u8> = (1..7).map(|x| f.cells[((1 * f.w + x) * 2) as usize]).collect();
+    let row: Vec<u16> = (1..7).map(|x| f.glyph(x, 1)).collect();
     assert_eq!(row, vec![0x8F, 0xE0, 0xA8, 0xA2, 0xA5, 0xE2], "{}", picture(&f));
+    assert_eq!(f.font_len, 256, "every letter was on the page; nothing grew");
 
     // Typed in, read back out: the same letters.
     c.ok(0x30, &[2, 8, 0, 0]); // End
@@ -643,28 +656,47 @@ fn code_page_866_carries_cyrillic_both_ways() {
 
     // And the table a client draws with says so.
     let g = c.ok(0x42, &[]);
-    assert_eq!(g.len(), 512);
-    assert_eq!(u16::from_le_bytes([g[0x80 * 2], g[0x80 * 2 + 1]]), 0x0410, "0x80 is А");
-    assert_eq!(u16::from_le_bytes([g[0xC4 * 2], g[0xC4 * 2 + 1]]), 0x2500, "0xC4 is still ─");
+    assert_eq!(g[0], 1, "the font grows");
+    assert_eq!(u16::from_le_bytes([g[1], g[2]]), 256);
+    let at = |i: usize| u16::from_le_bytes([g[3 + i * 2], g[4 + i * 2]]);
+    assert_eq!(at(0x80), 0x0410, "0x80 is А");
+    assert_eq!(at(0xC4), 0x2500, "0xC4 is still ─");
 }
 
 #[test]
-fn code_page_437_turns_cyrillic_into_question_marks_and_nothing_worse() {
+fn the_font_grows_past_its_code_page_and_every_frame_says_how_long_it_is() {
     let mut c = Client::start();
     c.ok(0x01, &[i16(60), i16(12)].concat());
+    let f0 = frame(&mut c);
+    assert_eq!(f0.font_len, 256, "437 to begin with");
     let win = id_of(&c.ok(
         0x10,
         &[u16(0).to_vec(), rect(0, 0, 60, 12), vec![0], s("Notes")].concat(),
     ));
+    // Russian and Slovak in one text, on a 437 session: neither is on the
+    // page, both get glyphs.
+    let mixed = "\u{41f}\u{440}\u{438} \u{13e}\u{161}\u{10d} ok";
     let text = id_of(&c.ok(
         0x11,
-        &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s("\u{41f}\u{440}\u{438} ok")].concat(),
+        &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s(mixed)].concat(),
     ));
     let f = frame(&mut c);
-    assert!(f.row(1).contains("??? ok"), "{}", picture(&f));
+    assert_eq!(f.font_len, 256 + 6, "six new glyphs");
+    assert_eq!(f.glyph(1, 1), 256, "the first new character got the first new index");
+    assert_eq!(f.glyph(5, 1), 259);
+    assert!(f.row(1).contains(" ok"), "{}", picture(&f));
     let b = c.ok(0x21, &u16(text));
-    assert_eq!(String::from_utf8_lossy(&b[2..]), "??? ok");
-    // Switching the page is a request like any other.
+    assert_eq!(String::from_utf8_lossy(&b[2..]), mixed, "the text came back changed");
+
+    // The table has them, in order of arrival.
+    let g = c.ok(0x42, &[]);
+    assert_eq!(u16::from_le_bytes([g[1], g[2]]), 262);
+    let at = |i: usize| u16::from_le_bytes([g[3 + i * 2], g[4 + i * 2]]);
+    assert_eq!(at(256), 0x41f);
+    assert_eq!(at(261), 0x10d);
+
+    // Switching the page is a request like any other, and a page that is
+    // not there is refused.
     c.ok(0x03, &u16(866));
     assert!(c.err(0x03, &u16(1251)).contains("no code page"));
 }
@@ -693,6 +725,185 @@ fn a_cyrillic_file_name_survives_the_panel() {
     let m = c.ok(0x28, &u16(files));
     assert_eq!(u16::from_le_bytes([m[0], m[1]]), 1);
     assert_eq!(String::from_utf8_lossy(&m[4..]), name, "the name came back changed");
+}
+
+#[test]
+fn a_window_may_be_asked_to_cast_no_shadow() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(20)].concat());
+    // Two windows at the same place, one after the other: with a shadow
+    // the cells just past the right edge are darkened; without, they are
+    // the desktop as it was.
+    let desktop_attr = frame(&mut c).cells[2];
+    let shadowed = id_of(&c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(2, 2, 20, 6), vec![0], s("A")].concat(),
+    ));
+    let f = frame(&mut c);
+    let attr = |f: &Frame, x: i16, y: i16| f.cells[((y * f.w + x) * 3 + 2) as usize];
+    assert_ne!(attr(&f, 22, 3), desktop_attr, "no shadow to the right of an ordinary window");
+    c.ok(0x20, &u16(shadowed));
+
+    c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(2, 2, 20, 6), vec![0x40], s("B")].concat(),
+    );
+    let g = frame(&mut c);
+    assert_eq!(attr(&g, 22, 3), desktop_attr, "flag 0x40 should leave the desktop beside it alone");
+    assert_eq!(attr(&g, 3, 8), desktop_attr, "and below it");
+}
+
+#[test]
+fn a_canvas_shows_the_cells_it_was_given_and_a_static_takes_new_words() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(40), i16(12)].concat());
+    let win = id_of(&c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(0, 0, 40, 12), vec![0], s("Board")].concat(),
+    ));
+    let canvas = id_of(&c.ok(0x1B, &[u16(win).to_vec(), rect(1, 1, 10, 3)].concat()));
+    let label = id_of(&c.ok(
+        0x12,
+        &[u16(win).to_vec(), rect(1, 5, 20, 1), s("moves 0")].concat(),
+    ));
+
+    // A 3x2 block at (2,1): wall, box, keeper / floor, floor, floor.
+    let mut cells = Vec::new();
+    for (ch, attr) in [('\u{2593}', 0x07u8), ('\u{2592}', 0x0E), ('@', 0x0F), ('\u{2591}', 0x08), ('\u{2591}', 0x08), ('.', 0x0E)] {
+        cells.extend_from_slice(&u16(ch as u16));
+        cells.push(attr);
+    }
+    c.ok(0x2C, &[u16(canvas).to_vec(), i16(2).to_vec(), i16(1).to_vec(), i16(3).to_vec(), i16(2).to_vec(), cells].concat());
+    let f = frame(&mut c);
+    // The canvas sits at the window's (1,1) -> screen (2,2); the block at
+    // (2,1) inside it -> screen (4,3).
+    assert_eq!(f.glyph(4, 3), 0xB2, "the wall glyph\n{}", picture(&f));
+    assert_eq!(f.glyph(5, 3), 0xB1);
+    assert_eq!(f.glyph(6, 3), b'@' as u16);
+    let attr = |f: &Frame, x: i16, y: i16| f.cells[((y * f.w + x) * 3 + 2) as usize];
+    assert_eq!(attr(&f, 5, 3), 0x0E, "the box is yellow");
+    assert_eq!(attr(&f, 4, 4), 0x08, "the floor is dark grey");
+    // Outside the block the canvas is its blank self, not the window.
+    assert_eq!(f.glyph(2, 2), b' ' as u16);
+
+    // New words in the same static, same place.
+    c.ok(0x2B, &[u16(label).to_vec(), s("moves 1")].concat());
+    let g = frame(&mut c);
+    assert!(find(&g, "moves 1").is_some(), "{}", picture(&g));
+    assert!(find(&g, "moves 0").is_none());
+
+    // A block half off the canvas is trimmed, not refused.
+    let mut two = Vec::new();
+    for _ in 0..2 {
+        two.extend_from_slice(&u16(b'#' as u16));
+        two.push(0x07);
+    }
+    c.ok(0x2C, &[u16(canvas).to_vec(), i16(9).to_vec(), i16(0).to_vec(), i16(2).to_vec(), i16(1).to_vec(), two].concat());
+    let h = frame(&mut c);
+    assert_eq!(h.glyph(2 + 9, 2), b'#' as u16);
+    assert!(c.err(0x2C, &[u16(label).to_vec(), i16(0).to_vec(), i16(0).to_vec(), i16(0).to_vec(), i16(0).to_vec()].concat()).contains("not a canvas"));
+}
+
+/// `flags cmd text shortcut sub...` for one plain item.
+fn item(flags: u8, cmd: u16, text: &str, shortcut: &str, sub: Vec<u8>) -> Vec<u8> {
+    [vec![flags], u16(cmd).to_vec(), s(text), s(shortcut), sub].concat()
+}
+
+#[test]
+fn a_menu_bar_over_the_wire_opens_chooses_and_ticks() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(20)].concat());
+    // File: Open, ---, Exit.  Options: Clock (ticked), More > Deep(9).
+    let file = [vec![3], item(0, 1, "~O~pen", "F3", vec![0]), item(1, 0, "", "", vec![0]), item(0, 2, "E~x~it", "Alt+X", vec![0])].concat();
+    let more = [vec![1], item(0, 9, "~D~eep", "", vec![0])].concat();
+    let options = [vec![2], item(4, 5, "~C~lock", "", vec![0]), item(0, 0, "~M~ore", "", more)].concat();
+    let bar = [vec![2], item(0, 0, "~F~ile", "", file), item(0, 0, "~O~ptions", "", options)].concat();
+    c.ok(0x1C, &bar);
+    let f = frame(&mut c);
+    assert!(f.row(0).contains("File") && f.row(0).contains("Options"), "{}", picture(&f));
+
+    // F10 opens File; Down, Down (over the line) lands on Exit; Enter.
+    c.ok(0x30, &[1, 10, 0, 0]);
+    let g = frame(&mut c);
+    assert!(find(&g, "Open").is_some() && find(&g, "Exit").is_some(), "{}", picture(&g));
+    c.ok(0x30, &[2, 12, 0, 0]);
+    c.ok(0x30, &[2, 0, 0, 0]);
+    let t = c.ok(0x41, &[]);
+    assert_eq!(u16::from_le_bytes([t[2], t[3]]), 2, "Exit was not chosen");
+
+    // Alt+O opens Options; the tick is there; Right on More opens Deep.
+    c.ok(0x30, &[0, b'o' as u16 as u8, 0, 4]);
+    let g = frame(&mut c);
+    let (cx, cy) = find(&g, "Clock").unwrap();
+    assert_eq!(g.glyph(cx - 1, cy), 0xFB, "no tick before Clock\n{}", picture(&g));
+    c.ok(0x30, &[2, 12, 0, 0]);
+    c.ok(0x30, &[2, 14, 0, 0]);
+    let h = frame(&mut c);
+    assert!(find(&h, "Deep").is_some(), "the submenu did not open\n{}", picture(&h));
+    c.ok(0x30, &[2, 0, 0, 0]);
+    let t = c.ok(0x41, &[]);
+    assert_eq!(u16::from_le_bytes([t[2], t[3]]), 9);
+
+    // Untick the clock and look again.
+    c.ok(0x2D, &[u16(5).to_vec(), vec![0]].concat());
+    c.ok(0x30, &[0, b'o' as u16 as u8, 0, 4]);
+    let g = frame(&mut c);
+    let (cx, cy) = find(&g, "Clock").unwrap();
+    assert_ne!(g.glyph(cx - 1, cy), 0xFB, "the tick did not come off");
+    assert!(c.err(0x2D, &[u16(77).to_vec(), vec![1]].concat()).contains("no menu item"));
+}
+
+#[test]
+fn clusters_canvas_clicks_next_and_zoom_over_the_wire() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(20)].concat());
+    let a = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 30, 10), vec![0], s("A")].concat()));
+    let b = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(20, 5, 30, 10), vec![0x20], s("B")].concat()));
+
+    // Check boxes in B: Space toggles the first, Down + Space the second.
+    let checks = id_of(&c.ok(
+        0x1D,
+        &[u16(b).to_vec(), rect(1, 1, 20, 2), vec![0, 2], s("~R~everse"), s("~S~how")].concat(),
+    ));
+    frame(&mut c);
+    c.ok(0x30, &[0, b' ' as u16 as u8, 0, 0]);
+    c.ok(0x30, &[2, 12, 0, 0]);
+    c.ok(0x30, &[0, b' ' as u16 as u8, 0, 0]);
+    let st = c.ok(0x2E, &u16(checks));
+    assert_eq!(&st[..], &[2, 1, 1, 1], "on, on, cursor on the second: {st:?}");
+
+    // Radio buttons: exactly one, the first to begin with.
+    let radio = id_of(&c.ok(
+        0x1D,
+        &[u16(b).to_vec(), rect(1, 4, 20, 2), vec![1, 2], s("~L~ow"), s("~H~igh")].concat(),
+    ));
+    let st = c.ok(0x2E, &u16(radio));
+    assert_eq!(&st[..2], &[2, 1]);
+
+    // A canvas in A remembers a click, once, in its own cells.
+    let cv = id_of(&c.ok(0x1B, &[u16(a).to_vec(), rect(2, 2, 10, 4)].concat()));
+    frame(&mut c);
+    mouse(&mut c, 0, 1 + 2 + 3, 1 + 2 + 1);
+    mouse(&mut c, 1, 1 + 2 + 3, 1 + 2 + 1);
+    let k = c.ok(0x2F, &u16(cv));
+    assert_eq!(&k[..], &[1, 3, 0, 1, 0], "{k:?}");
+    let k = c.ok(0x2F, &u16(cv));
+    assert_eq!(k[0], 0, "a click is reported once");
+
+    // The click also brought A to the front; CYCLE sends it back.
+    let act = c.ok(0x2A, &[]);
+    assert_eq!(u16::from_le_bytes([act[0], act[1]]), a);
+    c.ok(0x43, &[]);
+    let act = c.ok(0x2A, &[]);
+    assert_eq!(u16::from_le_bytes([act[0], act[1]]), b);
+
+    // ZOOM fills the work area and back.
+    c.ok(0x44, &u16(b));
+    let f = frame(&mut c);
+    assert!(corner(&f, 59, 19), "not zoomed\n{}", picture(&f));
+    c.ok(0x44, &u16(b));
+    let f = frame(&mut c);
+    assert!(corner(&f, 49, 14), "not back\n{}", picture(&f));
 }
 
 #[test]

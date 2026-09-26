@@ -57,6 +57,22 @@ impl MenuItem {
         self
     }
 
+    /// Set or clear the tick on the item - here or in any submenu - that
+    /// sends `cmd`. Returns whether one was found.
+    pub fn set_checked(items: &mut [MenuItem], cmd: Cmd, on: bool) -> bool {
+        let mut found = false;
+        for it in items {
+            if it.cmd == cmd && cmd != 0 {
+                it.checked = on;
+                found = true;
+            }
+            if MenuItem::set_checked(&mut it.items, cmd, on) {
+                found = true;
+            }
+        }
+        found
+    }
+
     pub fn sub(text: &str, items: Vec<MenuItem>) -> Self {
         MenuItem {
             text: text.into(),

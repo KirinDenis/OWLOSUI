@@ -273,7 +273,7 @@ fn dump(what: Option<&str>) -> std::io::Result<()> {
     let mut out = String::new();
     for y in 0..buf.height() {
         for x in 0..buf.width() {
-            out.push(codepage::current().to_char(buf.get(x, y).map(|c| c.ch).unwrap_or(b' ')));
+            out.push(codepage::current().to_char(buf.get(x, y).map(|c| c.ch).unwrap_or(b' ' as owlosui_core::Glyph)));
         }
         out.push('\n');
     }
@@ -304,9 +304,9 @@ fn open_file(ui: &mut Ui, parent: owlosui_core::ViewId, rect: Rect, path: &str) 
     // Encode once, here at the edge. Tabs are expanded to spaces for now;
     // whether the editor keeps them as characters is a decision we have not
     // taken yet, and guessing it in the loader would prejudge it.
-    let lines: Vec<Vec<u8>> = text
+    let lines: Vec<Vec<owlosui_core::Glyph>> = text
         .lines()
-        .map(|l| codepage::current().encode(&l.replace('\t', "    ")))
+        .map(|l| codepage::current().encode_known(&l.replace('\t', "    ")))
         .collect();
 
     // The size given here does not matter: the measure pass makes a window's
@@ -438,9 +438,9 @@ fn open_controls(ui: &mut Ui) {
     // The memo: the editor in a box. `boxed` is what makes it look like
     // something to type into rather than like part of the dialog.
     let mut memo = TextView::new(vec![
-        b"A memo is the editor in a box.".to_vec(),
-        b"Type here: undo, selection and".to_vec(),
-        b"the clipboard all work.".to_vec(),
+        owlosui_core::glyphs("A memo is the editor in a box."),
+        owlosui_core::glyphs("Type here: undo, selection and"),
+        owlosui_core::glyphs("the clipboard all work."),
     ]);
     memo.boxed = true;
     at(ui, 40, 9, 18, 6, Kind::Text(memo));
@@ -498,9 +498,9 @@ fn open_document(ui: &mut Ui, path: &std::path::Path) {
         );
     } else {
         let text = String::from_utf8_lossy(&bytes);
-        let lines: Vec<Vec<u8>> = text
+        let lines: Vec<Vec<owlosui_core::Glyph>> = text
             .lines()
-            .map(|l| codepage::current().encode(&l.replace('\t', "    ")))
+            .map(|l| codepage::current().encode_known(&l.replace('\t', "    ")))
             .collect();
         ui.insert(wid, Rect::default(), Kind::Text(TextView::new(lines)));
     }

@@ -21,6 +21,8 @@
     <ProjectReference Include="..\01-HelloWorld\HelloWorld.csproj" />
     <ProjectReference Include="..\02-Notes\Notes.csproj" />
     <ProjectReference Include="..\03-Commander\Commander.csproj" />
+    <ProjectReference Include="..\04-Basez-Sokoban\BaseZ47.csproj" />
+    <ProjectReference Include="..\05-OwlosDemo\OwlosDemo.csproj" />
   </ItemGroup>
 
 </Project>

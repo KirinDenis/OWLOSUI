@@ -100,11 +100,16 @@ public sealed class Owlosui : IDisposable
 
     private HashSet<char> glyphSet = new();
 
+    /// <summary>Whether the session's font takes new characters as they come, or is the 256 it was born with.</summary>
+    public bool FontGrows { get; private set; }
+
     private string FetchGlyphs()
     {
         var r = Call(Op.GetGlyphs);
-        var sb = new StringBuilder(256);
-        for (var i = 0; i < 256; i++) sb.Append((char)R.U16(r, i * 2));
+        FontGrows = r[0] != 0;
+        var n = R.U16(r, 1);
+        var sb = new StringBuilder(n);
+        for (var i = 0; i < n; i++) sb.Append((char)R.U16(r, 3 + i * 2));
         var g = sb.ToString();
         // Positions 0x20 up: the pictures below are not text.
         glyphSet = new HashSet<char>(g.Skip(0x20));
@@ -117,7 +122,7 @@ public sealed class Owlosui : IDisposable
     /// as `?`. An editor that cannot show a file must not save it.
     /// </summary>
     public bool Fits(string text) =>
-        text.All(c => c < 128 || c == '\n' || c == '\r' || c == '\t' || glyphSet.Contains(c));
+        FontGrows || text.All(c => c < 128 || c == '\n' || c == '\r' || c == '\t' || glyphSet.Contains(c));
 
     /// <summary>Switch the session to another code page: 437 or 866.</summary>
     public void SetCodePage(int codePage)
@@ -143,12 +148,15 @@ public sealed class Owlosui : IDisposable
     /// A window. (-1, -1) — the default — means centred, now and after every
     /// resize until it is dragged. <paramref name="closeCmd"/>, if given, is
     /// what the close box sends instead of closing: the program then decides,
-    /// which is how "save changes?" gets asked first.
+    /// which is how "save changes?" gets asked first. Every window casts a
+    /// <paramref name="shadow"/> unless told not to - a panel that tiles the
+    /// screen with another has nothing to float above.
     /// </summary>
     public ushort Window(string title, int w, int h, int x = -1, int y = -1,
-                         Style style = Style.Document, ushort parent = 0, ushort closeCmd = 0)
+                         Style style = Style.Document, ushort parent = 0, ushort closeCmd = 0, bool shadow = true)
     {
-        var r = Call(Op.Window, W.U16(parent), W.Rect(x, y, w, h), new[] { (byte)style }, W.Str(title), W.U16(closeCmd));
+        var flags = (byte)((byte)style | (shadow ? 0 : 0x40));
+        var r = Call(Op.Window, W.U16(parent), W.Rect(x, y, w, h), new[] { flags }, W.Str(title), W.U16(closeCmd));
         return R.U16(r);
     }
 
@@ -399,6 +407,137 @@ public sealed class Owlosui : IDisposable
     /// <summary>The window in front, or 0.</summary>
     public ushort Active() => R.U16(Call(Op.Active));
 
+    // ---------------------------------------------------------------- menus
+
+    /// <summary>
+    /// One entry of a menu: words with the hotkey between tildes, the
+    /// command it sends (or a submenu instead), a shortcut shown at the
+    /// right as a reminder - the key itself is bound elsewhere. A plain
+    /// tuple <c>("~O~pen", 1)</c> is an entry; <see cref="Line"/> is a
+    /// separator; <see cref="Sub"/> nests.
+    /// </summary>
+    public sealed record MenuItem(string Label, ushort Cmd, string Shortcut = "", bool Checked = false,
+                                  bool Enabled = true, bool Separator = false, MenuItem[]? Items = null)
+    {
+        public static implicit operator MenuItem((string label, ushort cmd) t) => new(t.label, t.cmd);
+        public static implicit operator MenuItem((string label, ushort cmd, string shortcut) t) => new(t.label, t.cmd, t.shortcut);
+        public static MenuItem Line() => new("", 0, Separator: true);
+        public static MenuItem Sub(string label, params MenuItem[] items) => new(label, 0, Items: items);
+    }
+
+    /// <summary>
+    /// The menu bar across the top: each argument is a menu, made with
+    /// <see cref="MenuItem.Sub"/>. Chosen items come back through
+    /// <see cref="Run"/> as commands. Calling this again replaces the bar.
+    /// </summary>
+    public ushort MenuBar(params MenuItem[] menus) => R.U16(Call(Op.MenuBar, W.Menu(menus)));
+
+    /// <summary>Tick or untick the menu item that sends a command - an option that is on.</summary>
+    public void MenuCheck(ushort cmd, bool on) => Call(Op.MenuCheck, W.U16(cmd), new[] { (byte)(on ? 1 : 0) });
+
+    /// <summary>The front window goes to the back: Turbo Vision's F6.</summary>
+    public void NextWindow() => Call(Op.Cycle);
+
+    /// <summary>A window fills the work area, or goes back to its size: F5.</summary>
+    public void Zoom(ushort window) => Call(Op.Zoom, W.U16(window));
+
+    // ------------------------------------------------------------- clusters
+
+    /// <summary>
+    /// Check boxes (any number on) or, with <paramref name="single"/>,
+    /// radio buttons (exactly one, the first to begin with). One row per
+    /// label; Space toggles, the hotkey letters jump.
+    /// </summary>
+    public ushort Cluster(ushort parent, int x, int y, int w, IEnumerable<string> labels, bool single = false)
+    {
+        var list = labels.ToList();
+        var v = new List<byte> { (byte)(single ? 1 : 0), (byte)list.Count };
+        foreach (var l in list) v.AddRange(W.Str(l));
+        return R.U16(Call(Op.Cluster, W.U16(parent), W.Rect(x, y, w, list.Count), v.ToArray()));
+    }
+
+    /// <summary>Which boxes are on, and where the cursor is.</summary>
+    public (bool[] on, int current) ClusterState(ushort id)
+    {
+        var r = Call(Op.GetCluster, W.U16(id));
+        var n = r[0];
+        var on = new bool[n];
+        for (var i = 0; i < n; i++) on[i] = r[1 + i] != 0;
+        return (on, r[1 + n]);
+    }
+
+    // -------------------------------------------------------------- canvas
+
+    /// <summary>
+    /// Where the mouse last went down on a canvas, in its cells, or null.
+    /// Read once: the canvas does not know what its cells mean, so the
+    /// program looks up what was hit.
+    /// </summary>
+    public (int x, int y)? CanvasClick(ushort id)
+    {
+        var r = Call(Op.GetClick, W.U16(id));
+        return r[0] != 0 ? (R.I16(r, 1), R.I16(r, 3)) : null;
+    }
+
+    /// <summary>
+    /// A rectangle of cells the program draws itself - a game board, a
+    /// chart, a piece of ANSI art. Fill it with <see cref="Blit"/>; it is
+    /// shown as it is, never wrapped or collapsed.
+    /// </summary>
+    public ushort Canvas(ushort parent, int x, int y, int w, int h) =>
+        R.U16(Call(Op.Canvas, W.U16(parent), W.Rect(x, y, w, h)));
+
+    /// <summary>
+    /// Put a block of cells into a canvas: <paramref name="chars"/> and
+    /// <paramref name="attrs"/> row by row, <c>w*h</c> of each. An
+    /// attribute is <see cref="Attr"/> of two console colours.
+    /// </summary>
+    public void Blit(ushort id, int x, int y, int w, int h, ReadOnlySpan<char> chars, ReadOnlySpan<byte> attrs)
+    {
+        if (chars.Length < w * h || attrs.Length < w * h)
+            throw new ArgumentException($"a {w}x{h} block needs {w * h} cells");
+        var v = new byte[10 + w * h * 3];
+        var at = 0;
+        foreach (var part in new[] { W.U16(id), W.I16(x), W.I16(y), W.I16(w), W.I16(h) })
+        {
+            part.CopyTo(v, at);
+            at += 2;
+        }
+        for (var i = 0; i < w * h; i++)
+        {
+            v[at++] = (byte)(chars[i] & 0xFF);
+            v[at++] = (byte)(chars[i] >> 8);
+            v[at++] = attrs[i];
+        }
+        Call(Op.Blit, v);
+    }
+
+    /// <summary>One row of text into a canvas, in one colour.</summary>
+    public void Blit(ushort id, int x, int y, string text, byte attr)
+    {
+        var attrs = new byte[text.Length];
+        Array.Fill(attrs, attr);
+        Blit(id, x, y, text.Length, 1, text, attrs);
+    }
+
+    /// <summary>The IBM attribute byte for a foreground and a background: the same order <see cref="ConsoleColor"/> uses.</summary>
+    public static byte Attr(ConsoleColor fg, ConsoleColor bg) => (byte)(((int)bg << 4) | (int)fg);
+
+    /// <summary>
+    /// A canvas cell that is not drawn: the window shows through it. Send
+    /// <see cref="ClearChar"/> with <see cref="ClearAttr"/>. A new canvas
+    /// is all clear.
+    /// </summary>
+    public const char ClearChar = '\0';
+    public const byte ClearAttr = 0xFF;
+
+    /// <summary>
+    /// New words for a Static (keeps its place and width), an Input (keeps
+    /// its label) or a Text (starts over). Cheaper than closing and making
+    /// another, and the view keeps its handle.
+    /// </summary>
+    public void SetText(ushort id, string text) => Call(Op.SetText, W.U16(id), W.Str(text));
+
     public void Close(ushort id) => Call(Op.Close, W.U16(id));
 
     /// <summary>What a Text, Memo or Input holds right now.</summary>
@@ -514,7 +653,12 @@ public sealed class Owlosui : IDisposable
     public Frame GetFrame()
     {
         var r = Call(Op.Frame);
-        return new Frame(R.I16(r, 0), R.I16(r, 2), R.I16(r, 4), R.I16(r, 6), r[8] != 0, r[9..], Glyphs);
+        // The font may have grown since the table was fetched: a frame
+        // says how long it is now, and a shorter table is fetched again
+        // before any cell is looked up in it.
+        var fontLen = R.U16(r, 9);
+        if (fontLen > Glyphs.Length) Glyphs = FetchGlyphs();
+        return new Frame(R.I16(r, 0), R.I16(r, 2), R.I16(r, 4), R.I16(r, 6), r[8] != 0, r[11..], Glyphs);
     }
 
     /// <summary>
@@ -530,12 +674,21 @@ public sealed class Owlosui : IDisposable
     /// attribute. <see cref="Hold"/> means "show this one for a moment, then
     /// <see cref="Tick"/>": something chosen is being shown before it happens.
     /// </summary>
+    /// <summary>
+    /// The screen as the core drew it: three bytes per cell, a 16-bit
+    /// glyph index then the attribute. <see cref="Hold"/> means "show this
+    /// one for a moment, then <see cref="Tick"/>".
+    /// </summary>
     public readonly record struct Frame(int W, int H, int CursorX, int CursorY, bool Hold, byte[] Cells, string Glyphs)
     {
-        public byte Glyph(int x, int y) => Cells[(y * W + x) * 2];
-        public byte Attr(int x, int y) => Cells[(y * W + x) * 2 + 1];
-        /// <summary>The cell as a character, through the table the server gave for its code page.</summary>
-        public char Char(int x, int y) => Glyphs[Glyph(x, y)];
+        public ushort Glyph(int x, int y) => BitConverter.ToUInt16(Cells, (y * W + x) * 3);
+        public byte Attr(int x, int y) => Cells[(y * W + x) * 3 + 2];
+        /// <summary>The cell as a character, through the table the server gave for its font.</summary>
+        public char Char(int x, int y)
+        {
+            var g = Glyph(x, y);
+            return g < Glyphs.Length ? Glyphs[g] : '?';
+        }
 
         /// <summary>One row as text, for looking at and for searching.</summary>
         public string Row(int y)
@@ -732,19 +885,19 @@ public sealed class Owlosui : IDisposable
                 if (y == f.H - 1 && x == f.W - 1) break;
                 if (y == bh - 1 && x == bw - 1) break;
 
-                var i = (y * f.W + x) * 2;
-                var changed = full || prev![i] != f.Cells[i] || prev[i + 1] != f.Cells[i + 1];
+                var i = (y * f.W + x) * 3;
+                var changed = full || prev![i] != f.Cells[i] || prev[i + 1] != f.Cells[i + 1] || prev[i + 2] != f.Cells[i + 2];
                 if (!changed) { x++; continue; }
 
                 // A run of changed cells with one attribute, written in one go.
-                var attr = f.Cells[i + 1];
+                var attr = f.Cells[i + 2];
                 sb.Clear();
                 var start = x;
                 while (x < Math.Min(f.W, bw) && !(y == f.H - 1 && x == f.W - 1) && !(y == bh - 1 && x == bw - 1))
                 {
-                    var j = (y * f.W + x) * 2;
-                    if (f.Cells[j + 1] != attr) break;
-                    sb.Append(f.Glyphs[f.Cells[j]]);
+                    var j = (y * f.W + x) * 3;
+                    if (f.Cells[j + 2] != attr) break;
+                    sb.Append(f.Char(x, y));
                     x++;
                 }
                 Console.SetCursorPosition(start, y);
@@ -951,9 +1104,11 @@ public sealed class Owlosui : IDisposable
     {
         public const byte Quit = 0x00, Init = 0x01, Resize = 0x02, CodePage = 0x03;
         public const byte Window = 0x10, Text = 0x11, Static = 0x12, Input = 0x13, Buttons = 0x14, MessageBox = 0x15;
-        public const byte Status = 0x16, Label = 0x17, Progress = 0x18, List = 0x19, Files = 0x1A;
+        public const byte Status = 0x16, Label = 0x17, Progress = 0x18, List = 0x19, Files = 0x1A, Canvas = 0x1B, MenuBar = 0x1C, Cluster = 0x1D;
         public const byte Close = 0x20, GetText = 0x21, SetProgress = 0x22, GetMarked = 0x23, GetCurrent = 0x24;
         public const byte SetFiles = 0x25, TakeFiles = 0x26, Activate = 0x27, MarkedNames = 0x28, SetFilesError = 0x29, Active = 0x2A;
+        public const byte SetText = 0x2B, Blit = 0x2C, MenuCheck = 0x2D, GetCluster = 0x2E, GetClick = 0x2F;
+        public const byte Cycle = 0x43, Zoom = 0x44;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;
     }
@@ -1038,6 +1193,21 @@ public sealed class Owlosui : IDisposable
     {
         public static byte[] U16(ushort v) => BitConverter.GetBytes(v);
         public static byte[] U32(uint v) => BitConverter.GetBytes(v);
+        public static byte[] Menu(MenuItem[] items)
+        {
+            var v = new List<byte> { (byte)items.Length };
+            foreach (var it in items)
+            {
+                var flags = (byte)((it.Separator ? 1 : 0) | (it.Enabled ? 0 : 2) | (it.Checked ? 4 : 0));
+                v.Add(flags);
+                v.AddRange(U16(it.Cmd));
+                v.AddRange(Str(it.Label));
+                v.AddRange(Str(it.Shortcut));
+                v.AddRange(Menu(it.Items ?? Array.Empty<MenuItem>()));
+            }
+            return v.ToArray();
+        }
+
         public static byte[] Entries(IEnumerable<FileEntry> entries)
         {
             var list = entries.ToList();

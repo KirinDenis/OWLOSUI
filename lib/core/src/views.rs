@@ -236,6 +236,8 @@ pub enum Kind {
     Status(crate::status::StatusLine),
     Label(crate::controls::Label),
     Progress(crate::controls::Progress),
+    /// Cells the program drew itself; shown as they are.
+    Canvas(crate::controls::Canvas),
 }
 
 /// Where a child sits inside its parent.

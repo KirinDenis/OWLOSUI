@@ -32,12 +32,12 @@ pub mod views;
 
 pub use buffer::Buffer;
 pub use button::{Align, Button as PushButton, ButtonRow};
-pub use cell::{attr, glyph_of, glyphs, Cell, Color, Glyph};
+pub use cell::{attr, glyph_of, glyphs, Cell, Color, Glyph, GLYPH_MAX};
 pub use event::{Button, Event, Key, KeyCode, Mods, Mouse, MouseKind};
 pub use files::{FileEntry, FileKind, FileList};
 pub use geom::{Point, Rect};
 pub use palette::{Palette, WinColors, WinPalette};
-pub use controls::{Choice, Cluster, Label, ListBox, Progress, StaticText};
+pub use controls::{Canvas, Choice, Cluster, Label, ListBox, Progress, StaticText};
 pub use status::{StatusItem, StatusLine};
 pub use edit::Cmd;
 pub use hex::HexView;

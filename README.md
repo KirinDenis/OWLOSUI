@@ -31,7 +31,9 @@ lib/csharp      Owlosui.cs: the C# client of that pipe. One file, no packages.
 lib/PROTOCOL.md the wire. Same numbers for a pipe, a WebSocket, an interrupt.
 
 Examples/Rust   01-Demo — every control the toolkit has, in one program.
-Examples/CSharp 01-HelloWorld, 02-Notes, 03-Commander — programs that use the library.
+Examples/CSharp 01-HelloWorld, 02-Notes, 03-Commander, 04-Basez-Sokoban,
+                05-OwlosDemo — programs that use the library; the last is
+                every part of the kit in one program, with a menu bar.
 Examples/C      (empty) — DOS clients, through the resident, when it exists.
 ```
 
@@ -73,6 +75,11 @@ cargo build -p owlosui-serve
 cd Examples/CSharp/01-HelloWorld
 dotnet run
 ```
+
+`OWLOSUI.sln` at the root holds the client library, the three examples
+and their tests, for Visual Studio or `dotnet build OWLOSUI.sln`. The
+server is not in it — it is Rust, and `cargo build` is its build; while an
+example is running, the server binary is in use and cannot be rebuilt.
 
 The whole of HelloWorld:
 
@@ -131,23 +138,40 @@ wire and the console, the one that broke first, tested without anybody at the
 keyboard. The agent is not specific to OWLOSUI; it will drive any program that
 reads a Windows console.
 
-## Code pages
+## Glyphs, code pages and Unicode
 
 The core never sees Unicode. A cell is a glyph index; a title is a string
-of glyph indices; an editor line is bytes — the screen of a DOS machine,
-where a byte in video memory *is* the picture. Which picture is the
-**code page**, and it lives in one place: `lib/console/src/codepage.rs`,
-437 (the IBM PC's) and 866 (Cyrillic, with the same frames at the same
-places). Text crosses the wire as UTF-8 and becomes bytes there on the way
-in and text again on the way out; a client asks `GET_GLYPHS` once and draws
-with the server's table, keeping none of its own.
+of glyph indices; an editor line is a `Vec<Glyph>` — the screen of a DOS
+machine, where a number in video memory *is* the picture. One type alias
+decides how big that number is:
 
-A character the page has no glyph for becomes `?`. That is a fact about
-256 glyphs, not a bug, and the answer to it is to know first:
-`Owlosui.Fits(text)` says whether a text can be shown, and Notes opens a
-file it cannot show read-only rather than save `?`s back into it. Pick the
-page with `new Owlosui(codePage: 866)` or `OWLOSUI_CODEPAGE=866` in the
-environment; the terminal demo reads the same variable.
+```
+cargo build -p owlosui-core --features dos    # Glyph = u8:  the byte in B800
+cargo build -p owlosui-core                    # Glyph = u16: a font that grows
+```
+
+Nothing else in the core changes between the two, and the tests pass in
+both. The frames, shades and arrows live below 256 in either, so they are
+drawn by the same numbers on a DOS card and on a Windows console.
+
+What a glyph *looks like* is the **font**, in one place:
+`lib/console/src/codepage.rs`. It starts as a code page — 437 (the IBM
+PC's) or 866 (Cyrillic, same frames at the same places) — and is either
+*fixed* at those 256 (the DOS build, and the terminal backend, which draws
+for one console) or *growing*: every character it has never seen gets the
+next index, so a Windows or browser client shows Russian and Slovak on one
+screen, as Far does, while the same program on DOS shows what its page
+has and `?` for the rest. The server's font grows. Text crosses the wire as
+UTF-8, becomes glyph indices there and text again on the way out;
+`GET_GLYPHS` gives a client the table and every `FRAME` says how long it
+is now, so the client fetches it again only when a frame reaches past what
+it holds. `Owlosui.Fits(text)` still answers the DOS question — on a fixed
+font, "will this show or turn to `?`" — and Notes opens a file it cannot
+show read-only rather than save `?`s back into it.
+
+The page to start from: `new Owlosui(codePage: 866)`, or
+`OWLOSUI_CODEPAGE=866` in the environment, or the system's own OEM page
+when it is one we have; the terminal demo reads the same variable.
 
 ## Checking against the real thing
 
@@ -236,10 +260,11 @@ clipboard, two keymaps, a help viewer, menu bar with panels, submenus and
 ticked items, a status line that shows its keys and binds them, a file-open
 dialog with a path/mask line, a hex viewer, buttons, labels with hotkeys,
 input lines, check boxes and radio buttons, lists with Insert-marks, trees,
-static text, a progress bar, a message box; the terminal backend; the pipe
+static text, a progress bar, a message box, a canvas of cells the program
+draws itself (a game board, a chart); the terminal backend; the pipe
 server and its C# client; comparison against real Turbo Vision.
 
-Not yet on the wire: menus, the file dialog, hex, trees, clusters.
+Not yet on the wire: menus, hex, trees, clusters.
 Not yet at all: a grid, tabs, a drop-down list and input history, a masked
 field, an ANSI viewer; the DOS, browser and native backends; the resident.
 

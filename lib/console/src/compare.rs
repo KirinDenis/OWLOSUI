@@ -53,12 +53,12 @@ pub fn run(scene: &str, path: &str, opt: Options) -> std::io::Result<i32> {
             let want = (bytes[i], bytes[i + 1]);
             let got = buf.get(x, y).unwrap();
             checked += 1;
-            if got.ch == want.0 && got.attr == want.1 {
+            if got.ch == want.0 as owlosui_core::Glyph && got.attr == want.1 {
                 continue;
             }
             total += 1;
-            if got.ch != want.0 {
-                let e = glyph_diff.entry((want.0, got.ch)).or_insert((0, (x, y)));
+            if got.ch != want.0 as owlosui_core::Glyph {
+                let e = glyph_diff.entry((want.0, got.ch as u8)).or_insert((0, (x, y)));
                 e.0 += 1;
             }
             if got.attr != want.1 {
@@ -113,7 +113,7 @@ fn colour_name(a: u8) -> String {
 }
 
 fn glyph_name(b: u8) -> String {
-    let c = crate::codepage::current().to_char(b);
+    let c = crate::codepage::current().to_char(b as owlosui_core::Glyph);
     if b == 0x20 {
         "space".into()
     } else {

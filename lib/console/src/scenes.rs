@@ -62,7 +62,7 @@ pub fn build(name: &str) -> Option<Ui> {
             let mut w = Window::new("Scrollbars");
             w.number = Some(3);
             let wid = ui.insert(root, Rect::new(8, 5, 58, 15), Kind::Window(w));
-            let long: Vec<Vec<u8>> = (0..100).map(|_| vec![b' '; 100]).collect();
+            let long: Vec<Vec<owlosui_core::Glyph>> = (0..100).map(|_| vec![b' ' as owlosui_core::Glyph; 100]).collect();
             let mut t = TextView::new(long);
             t.top = 30;
             t.left = 20;

@@ -384,22 +384,25 @@ internal static class Tests
                   $"the file holds '{File.ReadAllText(notesFile)}'");
         });
 
-        Case("Notes: a Cyrillic file under code page 437 opens read-only and is never written", () =>
+        Case("Notes: Russian and Slovak in one file, on a 437 session - the font grows", () =>
         {
-            const string original = "Привет";
+            // Neither alphabet is on code page 437. A DOS screen would show
+            // `?`; here the font takes each new letter as it comes, so the
+            // file is shown whole, edited, and saved exactly as it was.
+            const string original = "Привет, ľudía! čuž";
             File.WriteAllText(notesFile, original);
             using var owl = Owl();
             var app = new NotesApp(owl, notesFile);
-            Check(app.ReadOnly, "437 cannot hold these letters; the file should be read-only");
+            Check(owl.FontGrows, "the server's font should be the growing kind");
+            Check(!app.ReadOnly, "a growing font holds anything; the file should open for editing");
             var f = owl.GetFrame();
-            Check(f.Find("read-only") != null, "no word about it", f);
-            owl.Press(ConsoleKey.Enter); owl.Tick();
-            app.OnCommand(owl.Take().pressed); // OK on the message
-            owl.Type("x");
+            Check(f.Find(original) != null, "the mixed line is not on the screen whole", f);
+            Check(owl.Glyphs.Length > 256, $"the font did not grow: {owl.Glyphs.Length} glyphs");
+            owl.Press(ConsoleKey.End);
+            owl.Type(" Жť");
             owl.Press(ConsoleKey.S, alt: true, ch: 's'); owl.Tick();
             app.OnCommand(owl.Take().pressed);
-            Check(File.ReadAllText(notesFile) == original, "the file was written with ? in it");
-            Check(owl.GetFrame().Find("read-only") != null, "Save did not say why it refused");
+            Check(File.ReadAllText(notesFile) == original + " Жť", $"the file holds '{File.ReadAllText(notesFile)}'");
         });
 
         Case("Commander: a Cyrillic file name is shown and comes back intact under 866", () =>
@@ -647,6 +650,165 @@ internal static class Tests
             Check(!File.Exists(Path.Combine(l, "b.txt")) && File.Exists(Path.Combine(r, "b.txt")), "the file was not moved");
         });
 
+        // ------------------------------------------------------------- Sokoban
+
+        Case("Sokoban: the list of levels, Enter to play, an arrow to move", () =>
+        {
+            using var owl = Owl();
+            var app = new BaseZ47.App(owl);
+            var f = owl.GetFrame();
+            Check(f.Find("Level  1") != null && f.Find("BASE-Z 47") != null, "no level list", f);
+
+            // Enter presses Play, the default button.
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            var (play, _) = owl.Take();
+            Check(play != 0, "Enter did not press Play");
+            app.OnCommand(play);
+            var g = owl.GetFrame();
+            Check(g.Find("Level 1 moves 0") != null, "the first level did not open", g);
+            // The board is a canvas in the original game's colours: periwinkle
+            // walls, pale green floor, an orange square for a mark - and the
+            // nothing outside the walls is black, not floor.
+            int Count(byte attr) => Enumerable.Range(0, g.H).Sum(y => Enumerable.Range(0, g.W).Count(x => g.Attr(x, y) == attr));
+            Check(Count(BaseZ47.Warehouse.WallAttr) > 0, "no walls in the wall colour", g);
+            Check(Count(BaseZ47.Warehouse.FloorAttr) > 0, "no floor in the floor colour", g);
+            Check(Count(BaseZ47.Warehouse.MarkAttr) > 0, "no marks", g);
+            Check(Count(BaseZ47.Warehouse.KeeperAttr) == 2, "the keeper is not exactly one cell wide", g);
+            // Outside the walls the window shows through: no black block,
+            // and no grey bar from the caption either.
+            Check(Count(Owlosui.Attr(ConsoleColor.Black, ConsoleColor.Black)) == 0, "the space outside the walls is painted black", g);
+            var (cx, cy) = Locate(g, "moves 0");
+            Check(g.Attr(cx, cy) == 0x1E, $"the caption should be the window's text colour, not {g.Attr(cx, cy):X2}", g);
+            // The caption's row is blue from edge to edge - the only grey on
+            // the screen is the status line at the bottom.
+            Check(Enumerable.Range(1, g.W - 2).All(x => g.Attr(x, cy) != Owlosui.Attr(ConsoleColor.Black, ConsoleColor.Gray)), "a grey bar across a blue window", g);
+
+            // The arrows are bound by the status line; one of them is a
+            // move on any level, so try each until the count changes.
+            var moved = false;
+            foreach (var key in new[] { ConsoleKey.RightArrow, ConsoleKey.DownArrow, ConsoleKey.LeftArrow, ConsoleKey.UpArrow })
+            {
+                owl.Press(key);
+                var (_, cmd) = owl.Take();
+                Check(cmd != 0, $"{key} is not bound");
+                app.OnCommand(cmd);
+                if (owl.GetFrame().Find("moves 1") != null) { moved = true; break; }
+            }
+            Check(moved, "no arrow moved the keeper", owl.GetFrame());
+
+            // Esc goes back to the list.
+            owl.Press(ConsoleKey.Escape);
+            var (_, esc) = owl.Take();
+            app.OnCommand(esc);
+            Check(owl.GetFrame().Find("Level  1") != null, "Escape did not return to the list", owl.GetFrame());
+        });
+
+        // ---------------------------------------------------------------- Demo
+
+        Case("Demo: the menu bar opens, and Tools > Calculator opens a calculator that calculates", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            var f = owl.GetFrame();
+            Check(f.Row(0).Contains("File") && f.Row(0).Contains("Tools") && f.Row(0).Contains("Help"), "no menu bar", f);
+            Check(f.Row(24).Contains("F1 Help"), "no status line", f);
+
+            // Alt+T opens Tools; Enter chooses the first item, Calculator.
+            owl.Press(ConsoleKey.T, alt: true, ch: 't');
+            Check(owl.GetFrame().Find("Calculator") != null, "Alt+T did not open Tools", owl.GetFrame());
+            owl.Press(ConsoleKey.Enter);
+            var (_, cmd) = owl.Take();
+            Check(cmd == OwlosDemo.App.CmCalc, $"Enter chose {cmd}, not Calculator");
+            app.OnCommand(cmd);
+            var g = owl.GetFrame();
+            Check(g.Find(" Calculator ") != null, "no calculator window", g);
+
+            // Type an expression, Enter presses "=", the display shows the answer.
+            owl.Type("12+34*2");
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            Check(owl.GetFrame().Find("92") != null, "12+34*2 left to right is 92", owl.GetFrame());
+            Check(OwlosDemo.App.Calculate("10/0") == "Divide by zero" && OwlosDemo.App.Calculate("7-") == "Error", "the calculator's errors");
+
+            // The keypad: click "C" then "7", "8", and the display says 78.
+            var h = owl.GetFrame();
+            var (cx, cy) = Locate(h, " C ");
+            owl.Click(cx + 1, cy); app.Poll();
+            var (sx, sy) = Locate(h, " 7 ");
+            owl.Click(sx + 1, sy); app.Poll();
+            var (ex, ey) = Locate(h, " 8 ");
+            owl.Click(ex + 1, ey); app.Poll();
+            Check(owl.GetFrame().Find("78") != null, "the keypad did not type 78", owl.GetFrame());
+        });
+
+        Case("Demo: calendar, ASCII table and puzzle are canvases the mouse can use", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            app.OnCommand(OwlosDemo.App.CmCalendar);
+            var f = owl.GetFrame();
+            Check(f.Find(DateTime.Today.ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)) != null, "the calendar is not on this month", f);
+            Check(f.Find("Su Mo Tu We Th Fr Sa") != null, "no day header", f);
+            app.OnCommand(OwlosDemo.App.CmCalNext);
+            var next = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(1);
+            Check(owl.GetFrame().Find(next.ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)) != null, "> did not turn the page");
+
+            app.OnCommand(OwlosDemo.App.CmAscii);
+            var g = owl.GetFrame();
+            Check(g.Find("Click a glyph.") != null, "no ASCII table", g);
+            // The grid's top-left cell is glyph 0; click the cell of 'A' (65): row 2, column 1.
+            var (gx, gy) = Locate(g, "Click a glyph.");
+            owl.Click(gx + 1, gy - 9 + 2); app.Poll();
+            Check(owl.GetFrame().Find("dec 65") != null, "the click did not name glyph 65", owl.GetFrame());
+
+            app.OnCommand(OwlosDemo.App.CmPuzzle);
+            var h = owl.GetFrame();
+            Check(h.Find("Moves: 0") != null, "no puzzle", h);
+            Check(!app.Solved, "a scrambled puzzle should not be solved");
+            // Slide a tile: the hole's neighbours are the only legal moves,
+            // so try every tile until one moves.
+            var moved = false;
+            for (var i = 0; i < 16 && !moved; i++) moved = app.Slide(i);
+            Check(moved, "no tile could slide");
+        });
+
+        Case("Demo: the Mouse dialog reads its boxes back, and Window > Next / Zoom work", () =>
+        {
+            using var owl = Owl();
+            var app = new OwlosDemo.App(owl);
+            app.OnCommand(OwlosDemo.App.CmCalc);
+            app.OnCommand(OwlosDemo.App.CmOptions);
+            var f = owl.GetFrame();
+            Check(f.Find("Reverse buttons") != null && f.Find("Medium") != null, "no options dialog", f);
+            // Space turns the first box on; Tab, Down, Space picks Medium; Enter is OK.
+            owl.Press(ConsoleKey.Spacebar, ch: ' ');
+            owl.Press(ConsoleKey.Tab);
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.Spacebar, ch: ' ');
+            owl.Press(ConsoleKey.Enter); owl.Tick();
+            app.OnCommand(owl.Take().pressed);
+            var g = owl.GetFrame();
+            // The answer wraps in its box; look for its parts.
+            Check(g.Find("Reverse buttons: on") != null && g.Find("Show cursor: off") != null && g.Find("medium.") != null, "the dialog's answer is wrong", g);
+            app.OnCommand(OwlosDemo.App.CmDismiss);
+
+            // Next puts the calculator behind; Zoom fills the desktop.
+            app.OnCommand(OwlosDemo.App.CmCalendar);
+            Check(owl.Active() == app.Calendar, "the newest window should be in front");
+            app.OnCommand(OwlosDemo.App.CmNext);
+            Check(owl.Active() == app.Calculator, "Next did not bring the other window forward");
+            // The calculator is a dialog: fixed size, so Zoom leaves it alone
+            // - a window whose parts are placed by hand has nothing to gain
+            // from the whole screen. A document window would fill it.
+            var before = owl.GetFrame();
+            app.OnCommand(OwlosDemo.App.CmZoom);
+            var after = owl.GetFrame();
+            Check(Locate(before, " Calculator ") == Locate(after, " Calculator "), "Zoom moved a fixed dialog", after);
+            Check(!IsCorner(after, 79, 23), "a dialog should not zoom to the whole desktop", after);
+            app.OnCommand(OwlosDemo.App.CmClose);
+            Check(app.Calculator == 0, "Close did not close the front window");
+        });
+
         // ------------------------------------------------------------- desktop
 
         Case("The desktop follows the console size", () =>
@@ -742,6 +904,15 @@ internal static class Tests
         File.WriteAllText(Path.Combine(r, "notes.log"), "log");
         File.WriteAllText(Path.Combine(r, "other.txt"), "txt");
         return (l, r);
+    }
+
+    /// <summary>The first cell showing a character, if any.</summary>
+    private static (int x, int y)? Find(Owlosui.Frame f, char ch)
+    {
+        for (var y = 0; y < f.H; y++)
+            for (var x = 0; x < f.W; x++)
+                if (f.Char(x, y) == ch) return (x, y);
+        return null;
     }
 
     private static (int x, int y) Locate(Owlosui.Frame f, string text) =>

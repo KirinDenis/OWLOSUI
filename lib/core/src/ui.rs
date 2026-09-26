@@ -490,6 +490,16 @@ impl Ui {
         }
     }
 
+    /// Set or clear the tick on the menu item that sends `cmd`, wherever it
+    /// is in the bar. For an option that a program turns on and off.
+    pub fn set_menu_checked(&mut self, cmd: Cmd, on: bool) -> bool {
+        let Some(bar) = self.menu_bar_id() else { return false };
+        match &mut self.nodes[bar.ix()].kind {
+            Kind::MenuBar(m) => crate::menu::MenuItem::set_checked(&mut m.items, cmd, on),
+            _ => false,
+        }
+    }
+
     fn menu_bar_id(&self) -> Option<ViewId> {
         self.find_kind(|k| matches!(k, Kind::MenuBar(_)))
     }
@@ -899,11 +909,25 @@ impl Ui {
             Kind::Hex(h) => self.draw_hex(h, abs, buf, clip),
             Kind::Cluster(c) => self.draw_cluster(c, abs, buf, clip),
             Kind::List(l) => self.draw_list(l, abs, buf, clip),
-            Kind::Static(t) => self.draw_static(t, abs, buf, clip),
+            Kind::Static(t) => self.draw_static(t, abs, buf, clip, wc),
             Kind::Tree(t) => self.draw_tree(t, abs, buf, clip),
             Kind::Status(s) => self.draw_status(s, abs, buf, clip),
             Kind::Label(l) => self.draw_label(l, abs, buf, clip),
             Kind::Progress(pr) => self.draw_progress(pr, abs, buf, clip, wc),
+            Kind::Canvas(c) => {
+                // As it is: the cells are the picture. A clear cell is not
+                // drawn at all, so the window shows through it - which is
+                // what "outside the board" looks like.
+                for y in 0..abs.h.min(c.h) {
+                    for x in 0..abs.w.min(c.w) {
+                        if let Some(cell) = c.get(x, y) {
+                            if cell != crate::controls::Canvas::CLEAR {
+                                buf.put(abs.x + x, abs.y + y, cell.ch, cell.attr, clip);
+                            }
+                        }
+                    }
+                }
+            }
             Kind::MenuBar(m) => self.draw_menu_bar(m, abs, buf, clip),
             Kind::MenuBox(m) => self.draw_menu_box(m, abs, buf, clip, parent_clip),
         }
@@ -1620,14 +1644,17 @@ impl Ui {
         }
     }
 
-    fn draw_static(&self, t: &StaticText, abs: Rect, buf: &mut Buffer, clip: Rect) {
-        let p = &self.palette;
-        buf.fill(abs, b' ', p.ctl, clip);
+    fn draw_static(&self, t: &StaticText, abs: Rect, buf: &mut Buffer, clip: Rect, wc: &WinColors) {
+        // Words take the window's text colour: black on the grey of a
+        // dialog, yellow on the blue of a document. Drawn in the dialog's
+        // colour everywhere, a caption on a blue window was a grey bar.
+        let a = wc.text;
+        buf.fill(abs, b' ', a, clip);
         for (i, line) in t.lines(abs.w).iter().enumerate() {
             if i as i16 >= abs.h {
                 break;
             }
-            buf.text(abs.x, abs.y + i as i16, line, p.ctl, clip);
+            buf.text(abs.x, abs.y + i as i16, line, a, clip);
         }
     }
 
@@ -2098,6 +2125,20 @@ impl Ui {
                         }
                         return;
                     }
+                }
+
+                // A canvas: the click is remembered, in its own cells, for
+                // the program to ask about. The canvas itself does nothing
+                // with it - it does not know what its cells are.
+                let on_canvas = self.nodes[id.ix()].children.iter().copied().find(|c| {
+                    matches!(self.nodes[c.ix()].kind, Kind::Canvas(_)) && self.abs_rect(*c).contains(p)
+                });
+                if let Some(cv) = on_canvas {
+                    let r = self.abs_rect(cv);
+                    if let Kind::Canvas(c) = &mut self.nodes[cv.ix()].kind {
+                        c.clicked = Some((p.x - r.x, p.y - r.y));
+                    }
+                    return;
                 }
 
                 // A label: the click goes to the control it names.

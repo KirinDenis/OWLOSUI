@@ -1,109 +1,166 @@
-//! Code pages: the one place a byte becomes a character.
+//! The font: the one place a glyph index becomes a character.
 //!
 //! The core never sees Unicode. A cell holds a glyph index, a title is a
-//! string of glyph indices, an editor line is a `Vec<u8>` - the screen of a
-//! DOS machine, where a byte in video memory *is* the picture the card draws
-//! for it. Which picture depends on the code page the card was loaded with,
-//! and that is the whole of what this module knows: 437 (the IBM PC's own),
-//! 866 (Cyrillic, with the same box-drawing at the same places), and room
-//! for more.
+//! string of glyph indices, an editor line is a `Vec<Glyph>` - the screen of
+//! a DOS machine, where a byte in video memory *is* the picture the card
+//! draws for it. Which picture depends on the font the card was loaded
+//! with, and that is what this module knows.
 //!
-//! Text crosses the wire as UTF-8 and is turned into bytes here on the way
-//! in and back on the way out. A character the page has no glyph for becomes
-//! `?` - not a defect: 256 glyphs cannot hold Unicode, and pretending
-//! otherwise is how frames end up with holes in them. What *can* be done is
-//! to know beforehand (`fits`), which is how an editor refuses to save a
-//! file it would ruin.
+//! A `Font` starts as a code page - 437 (the IBM PC's own) or 866
+//! (Cyrillic, with the same box-drawing at the same places) - and is one of
+//! two kinds:
 //!
-//! Inside the core a `String` is a byte string: every `char` is in
-//! `0..=255` and is the glyph index itself. `Buffer::text` writes such a
-//! char as that byte. So a title in code page 866 is encoded here to bytes
-//! and carried in a `String` as chars `U+0000..U+00FF`; nothing in the core
-//! has to know, and `chars().count()` still counts cells.
+//!  * **fixed**, 256 glyphs and no more: a DOS card, or the terminal
+//!    backend, which draws for one console. A character with no glyph
+//!    becomes `?`, and `fits` says so beforehand;
+//!  * **growing**: the same 256 to begin with, and every new character that
+//!    arrives gets the next free index. That is how a Windows or browser
+//!    client shows Russian and Slovak on one screen: the core still holds
+//!    numbers, the client asks for the table (`GET_GLYPHS`) and draws.
+//!
+//! Text crosses the wire as UTF-8 and is turned into glyph indices here on
+//! the way in and back on the way out. Inside the core a `String` is a
+//! string of glyph indices: every `char` is in `0..=Glyph::MAX` and is the
+//! index itself. `Buffer::text` writes such a char as that glyph.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-pub struct CodePage {
+use owlosui_core::{Glyph, GLYPH_MAX};
+
+pub use owlosui_core::cell::GLYPH_MAX as MAX_INDEX;
+
+pub struct Font {
+    /// The code page it started from.
     pub number: u16,
-    pub table: [char; 256],
-    reverse: HashMap<char, u8>,
+    /// Glyph index to character. The first 256 are the code page.
+    pub table: Vec<char>,
+    reverse: HashMap<char, Glyph>,
+    /// Whether new characters may be added, or must become `?`.
+    pub growing: bool,
 }
 
-impl CodePage {
-    fn new(number: u16, table: [char; 256]) -> Self {
+impl Font {
+    fn new(number: u16, page: [char; 256], growing: bool) -> Self {
         let mut reverse = HashMap::with_capacity(256);
         // Skip 0x00..0x20: those positions hold pictures (☺, ♦, ↑), and
         // matching them would turn a stray arrow in a document into a
         // control code. Later entries win over earlier ones, so a glyph
         // that appears twice maps to the higher position - which for `■`
         // and the blanks is the one a program means.
-        for (i, &c) in table.iter().enumerate().skip(0x20) {
-            reverse.insert(c, i as u8);
+        for (i, &c) in page.iter().enumerate().skip(0x20) {
+            reverse.insert(c, i as Glyph);
         }
-        CodePage { number, table, reverse }
+        // A growing font can only grow if a glyph index has room past 255.
+        let growing = growing && GLYPH_MAX > 255;
+        Font { number, table: page.to_vec(), reverse, growing }
     }
 
-    /// The pages this build knows. `None` for a number it does not.
-    pub fn by_number(n: u16) -> Option<CodePage> {
-        match n {
-            437 => Some(CodePage::new(437, crate::cp437::TABLE)),
-            866 => Some(CodePage::new(866, cp866_table())),
-            _ => None,
-        }
+    /// A font that is exactly a code page, 256 glyphs, for a screen that
+    /// holds bytes. `None` for a page this build does not know.
+    pub fn fixed(number: u16) -> Option<Font> {
+        page(number).map(|p| Font::new(number, p, false))
     }
 
-    pub fn to_char(&self, b: u8) -> char {
-        self.table[b as usize]
+    /// A font seeded with a code page that grows as characters arrive.
+    pub fn growing(number: u16) -> Option<Font> {
+        page(number).map(|p| Font::new(number, p, true))
     }
 
-    /// Unicode to a glyph index, the direction that can fail.
-    pub fn from_char(&self, c: char) -> u8 {
+    pub fn len(&self) -> usize {
+        self.table.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.table.is_empty()
+    }
+
+    pub fn to_char(&self, g: Glyph) -> char {
+        self.table.get(g as usize).copied().unwrap_or('?')
+    }
+
+    /// A character's glyph index, if it has one.
+    pub fn lookup(&self, c: char) -> Option<Glyph> {
         if (c as u32) < 128 {
-            return c as u8;
+            return Some(c as u32 as Glyph);
         }
-        self.reverse.get(&c).copied().unwrap_or(b'?')
+        self.reverse.get(&c).copied()
     }
 
-    /// Whether every character of a text has a glyph on this page.
+    /// A character's glyph index: found, or - in a growing font - made.
+    /// `?` when there is none and none can be made.
+    pub fn from_char(&mut self, c: char) -> Glyph {
+        if let Some(g) = self.lookup(c) {
+            return g;
+        }
+        if self.growing && (self.table.len() as u32) <= GLYPH_MAX {
+            let g = self.table.len() as Glyph;
+            self.table.push(c);
+            self.reverse.insert(c, g);
+            return g;
+        }
+        b'?' as Glyph
+    }
+
+    /// Whether every character of a text has a glyph, or could be given
+    /// one. On a fixed font this is the question "will it show or turn to
+    /// `?`"; on a growing one it is almost always yes.
     pub fn fits(&self, s: &str) -> bool {
-        s.chars()
-            .all(|c| (c as u32) < 128 || c == '\n' || self.reverse.contains_key(&c))
+        s.chars().all(|c| {
+            c == '\n' || c == '\r' || c == '\t' || self.lookup(c).is_some() || self.growing
+        })
     }
 
-    pub fn encode(&self, s: &str) -> Vec<u8> {
+    pub fn encode(&mut self, s: &str) -> Vec<Glyph> {
         s.chars().map(|c| self.from_char(c)).collect()
     }
 
-    pub fn decode(&self, b: &[u8]) -> String {
-        b.iter().map(|&x| self.to_char(x)).collect()
+    /// `encode` for a font that may not grow - the terminal's, shared and
+    /// fixed: what has no glyph becomes `?`.
+    pub fn encode_known(&self, s: &str) -> Vec<Glyph> {
+        s.chars().map(|c| self.lookup(c).unwrap_or(b'?' as Glyph)).collect()
+    }
+
+    pub fn decode(&self, g: &[Glyph]) -> String {
+        g.iter().map(|&x| self.to_char(x)).collect()
     }
 
     /// A text as the core carries it: each character replaced by its glyph
-    /// index, held as a char `U+0000..U+00FF`. See the module note.
-    pub fn to_core(&self, s: &str) -> String {
-        s.chars().map(|c| self.from_char(c) as char).collect()
+    /// index, held as a char. See the module note.
+    pub fn to_core(&mut self, s: &str) -> String {
+        s.chars()
+            .map(|c| char::from_u32(self.from_char(c) as u32).unwrap_or('?'))
+            .collect()
     }
 
     /// The other way: a core string of glyph indices back to text.
     pub fn from_core(&self, s: &str) -> String {
         s.chars()
-            .map(|c| if (c as u32) < 256 { self.to_char(c as u8) } else { '?' })
+            .map(|c| if (c as u32) <= GLYPH_MAX { self.to_char(c as u32 as Glyph) } else { '?' })
             .collect()
     }
 }
 
-/// The code page this process shows, from `OWLOSUI_CODEPAGE`; 437 unless
-/// told otherwise. For the terminal backend, which draws for one console.
-pub fn current() -> &'static CodePage {
-    static CP: OnceLock<CodePage> = OnceLock::new();
+/// The font this process draws with, from `OWLOSUI_CODEPAGE`; 437 unless
+/// told otherwise. Fixed, because the terminal backend draws for one
+/// console with one code page - the DOS case, on a bigger machine.
+pub fn current() -> &'static Font {
+    static CP: OnceLock<Font> = OnceLock::new();
     CP.get_or_init(|| {
         std::env::var("OWLOSUI_CODEPAGE")
             .ok()
             .and_then(|s| s.trim().parse::<u16>().ok())
-            .and_then(CodePage::by_number)
-            .unwrap_or_else(|| CodePage::by_number(437).unwrap())
+            .and_then(Font::fixed)
+            .unwrap_or_else(|| Font::fixed(437).unwrap())
     })
+}
+
+fn page(number: u16) -> Option<[char; 256]> {
+    match number {
+        437 => Some(crate::cp437::TABLE),
+        866 => Some(cp866_table()),
+        _ => None,
+    }
 }
 
 /// CP866: the IBM PC's Cyrillic. The lower half and the box-drawing block

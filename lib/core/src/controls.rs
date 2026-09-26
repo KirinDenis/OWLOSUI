@@ -313,3 +313,65 @@ impl Progress {
         format!("{}%", (self.value as u64 * 100 / self.max as u64).min(100))
     }
 }
+
+/// A grid of cells the program draws itself.
+///
+/// Turbo Vision's answer to "my view is not one of yours" was a `TView`
+/// with its own `draw`. Over a wire there is no `draw` to call, so the
+/// program sends cells: characters with attributes, into a rectangle that
+/// is then drawn as it is - clipped, scrolled with its window, covered by
+/// what floats above, and never reflowed. A game board, a chart, a piece
+/// of ANSI art. What it is not is text: nothing here wraps or collapses.
+pub struct Canvas {
+    pub w: i16,
+    pub h: i16,
+    pub cells: Vec<crate::cell::Cell>,
+    /// Where the mouse last went down on it, in canvas cells, until
+    /// somebody asks. A canvas has no idea what its cells mean - a
+    /// calculator's keys, a puzzle's tiles - so the click is handed out
+    /// as a place and the program decides what was hit.
+    pub clicked: Option<(i16, i16)>,
+}
+
+impl Canvas {
+    /// A cell that is not drawn: whatever is behind the canvas shows
+    /// through. Glyph 0 with a white-on-white blinking attribute is a
+    /// picture nobody means, which is what makes it safe as a marker. A
+    /// new canvas is all clear - it is the window until something is put
+    /// on it.
+    pub const CLEAR: crate::cell::Cell = crate::cell::Cell { ch: 0, attr: 0xFF };
+
+    pub fn new(w: i16, h: i16) -> Self {
+        let (w, h) = (w.max(0), h.max(0));
+        Canvas {
+            w,
+            h,
+            cells: vec![Canvas::CLEAR; (w as usize) * (h as usize)],
+            clicked: None,
+        }
+    }
+
+    pub fn get(&self, x: i16, y: i16) -> Option<crate::cell::Cell> {
+        if x < 0 || y < 0 || x >= self.w || y >= self.h {
+            return None;
+        }
+        Some(self.cells[(y as usize) * (self.w as usize) + (x as usize)])
+    }
+
+    /// Put a block of cells at a place. What falls outside the canvas is
+    /// dropped, cell by cell, so a block half off the edge is not an error.
+    pub fn blit(&mut self, x: i16, y: i16, w: i16, h: i16, cells: &[crate::cell::Cell]) {
+        for j in 0..h.max(0) {
+            for i in 0..w.max(0) {
+                let (cx, cy) = (x + i, y + j);
+                if cx < 0 || cy < 0 || cx >= self.w || cy >= self.h {
+                    continue;
+                }
+                let Some(&c) = cells.get((j as usize) * (w as usize) + (i as usize)) else {
+                    return;
+                };
+                self.cells[(cy as usize) * (self.w as usize) + (cx as usize)] = c;
+            }
+        }
+    }
+}

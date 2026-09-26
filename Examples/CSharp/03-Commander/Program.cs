@@ -116,7 +116,9 @@ public sealed class App
     {
         dir = Path.GetFullPath(dir);
         var p = new Panel { Dir = dir };
-        p.Window = owl.Window(Fit(dir, w - 12), w, h, x, y, closeCmd: CmQuit);
+        // No shadow: the two panels tile the screen, and a shadow from the
+        // left one would fall onto the right one for no reason.
+        p.Window = owl.Window(Fit(dir, w - 12), w, h, x, y, closeCmd: CmQuit, shadow: false);
         // The panel fills the window and marks are allowed: that is what
         // makes it a file manager rather than an Open dialog. And no path
         // line above the names: people who grew up on Norton read a `*.*`

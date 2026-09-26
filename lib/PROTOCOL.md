@@ -35,13 +35,17 @@ Types used below:
 
 Text crosses as UTF-8 and is turned into glyph indices on the server side,
 because the core stores glyph indices and only the backend knows what a
-byte looks like. Which glyphs is the session's **code page**: 437 unless
-`INIT` or `CODEPAGE` says otherwise, 866 for Cyrillic (same box-drawing
-at the same places). A character the page has no glyph for becomes `?` -
-on the way in, so a client that wants to know first asks `GET_GLYPHS`
-and checks. What comes back out (`GET_TEXT`, `TAKE_FILES`,
-`MARKED_NAMES`) is decoded through the same page, so text that fitted
-goes round unchanged.
+glyph looks like. Which glyphs is the session's **font**. It starts as a
+code page - 437 unless `INIT` or `CODEPAGE` says otherwise, 866 for
+Cyrillic (same box-drawing at the same places) - and **grows**: a
+character it has never seen gets the next free index, up to 65535. So a
+Windows or browser client shows Russian and Slovak names on one screen,
+while a DOS build (whose glyph is a byte) shows the 256 it has and `?` for
+the rest. `GET_GLYPHS` gives the table, and every `FRAME` says how long
+the font is now, so a client fetches the table again only when a frame
+refers past what it holds. What comes back out (`GET_TEXT`, `TAKE_FILES`,
+`MARKED_NAMES`) is decoded through the same font, so text goes round
+unchanged.
 
 Command numbers (`cmd`) are the application's own `u16`s, as in Turbo
 Vision. **`0` means "no command"** and must not be used for a button.
@@ -81,6 +85,9 @@ that size.
 | 0x18 | PROGRESS    | `parent:id rect max:u32 flags:u8` | `id` |
 | 0x19 | LIST        | `parent:id rect flags:u8 n:u16` then `n × str` | `id` |
 | 0x1A | FILES       | `parent:id rect flags:u8 mask:str path:str entries` | `id` |
+| 0x1B | CANVAS      | `parent:id rect` | `id` |
+| 0x1C | MENU_BAR    | `items` | `id` |
+| 0x1D | CLUSTER     | `parent:id rect kind:u8 n:u8` then `n × str` | `id` |
 
 A `rect` with `x` or `y` of `-1` means *centre it* - now, and again after
 every `RESIZE`, until it is dragged somewhere. The defaults are already
@@ -101,6 +108,7 @@ ask "save changes?" first.
 | 2   | not zoomable |
 | 3   | not closable |
 | 4–5 | palette: `0` blue (documents), `1` cyan (help), `2` grey (dialogs) |
+| 6   | no shadow — for windows that tile the screen rather than float on it |
 
 `TEXT.dock`: `0` fill the parent, `1` stay where the `rect` put it.
 `TEXT.flags`: bit 0 read-only, bit 1 drawn as a box of its own.
@@ -133,6 +141,28 @@ multiple-choice, where Insert marks the item under the cursor and moves
 down, the way Norton Commander marked files. `GET_MARKED` and
 `GET_CURRENT` read it back.
 
+`CANVAS` is a rectangle of cells the program draws itself - Turbo
+Vision's "a view with its own `draw`", over a wire. `BLIT` puts a block
+of cells into it: `id x:i16 y:i16 w:i16 h:i16` then `w×h ×` (`ch:u16
+attr:u8`), `ch` a Unicode code point that the font turns into a glyph. The
+cells are shown as they are: clipped, moved with the window, covered by
+what floats above, never wrapped. A game board, a chart, a piece of ANSI
+art. A cell of `ch = 0, attr = 0xFF` is *clear*: not drawn, so the window
+shows through - and a new canvas is all clear.
+
+`MENU_BAR` is the bar across the top, one per desktop; a second replaces
+the first. `items` is `n:u8` then `n ×` (`flags:u8 cmd:u16 text:str
+shortcut:str` then that item's own `items`, the same shape, empty for a
+plain command) - a menu as deep as it goes. `flags`: bit 0 a separator
+line, bit 1 disabled, bit 2 ticked. A chosen item is reported by `TAKE`
+as its `command`; F10 opens the bar and Alt with a letter opens the menu
+whose letter it is, as in the original. `MENU_CHECK` sets or clears the
+tick on the item that sends a command.
+
+`CLUSTER` is check boxes (`kind = 0`, any number on) or radio buttons
+(`kind = 1`, exactly one on, the first to begin with); `GET_CLUSTER`
+reads them back.
+
 `FILES` is the file panel: a path-and-mask line, the names in columns, a
 pane of details, filling its window. The server reads no directories: the
 client sends `entries` - `n:u16` then `n ×` (`name:str size:u32 year:u16
@@ -160,6 +190,11 @@ where you are.
 | 0x28 | MARKED_NAMES | `id`      | `n:u16` then `n × str` — a `FILES` panel's marked names, or the one under the cursor if none are |
 | 0x29 | SET_FILES_ERROR | `id text:str` | OK — show a message in the panel's pane, e.g. a folder that could not be read |
 | 0x2A | ACTIVE       | —         | `id` — the active window, or `0` |
+| 0x2B | SET_TEXT     | `id text:str` | OK — new words for a `STATIC` (keeps its place and width), an `INPUT` (keeps its label) or a `TEXT` (starts over) |
+| 0x2C | BLIT         | `id x:i16 y:i16 w:i16 h:i16` then `w×h ×` (`ch:u16 attr:u8`) | OK — cells into a `CANVAS` |
+| 0x2D | MENU_CHECK   | `cmd:u16 on:u8` | OK — tick or untick the menu item that sends `cmd` |
+| 0x2E | GET_CLUSTER  | `id`      | `n:u8` then `n × u8` (on or off) then `current:u8` |
+| 0x2F | GET_CLICK    | `id`      | `has:u8 x:i16 y:i16` — where the mouse last went down on a `CANVAS`, in its cells; read once |
 
 ## Events in
 
@@ -188,11 +223,13 @@ is the client's, and about 90 ms is long enough to be seen.
 
 | op   | name  | payload | reply |
 |------|-------|---------|-------|
-| 0x40 | FRAME | —       | `w:i16 h:i16 cx:i16 cy:i16 hold:u8` then `w×h ×` (`glyph:u8 attr:u8`) |
+| 0x40 | FRAME | —       | `w:i16 h:i16 cx:i16 cy:i16 hold:u8 glyphs:u16` then `w×h ×` (`glyph:u16 attr:u8`) |
 | 0x41 | TAKE  | —       | `pressed:u16 command:u16` |
-| 0x42 | GET_GLYPHS | —  | `256 × u16` — the Unicode code point of each glyph index on the session's code page |
+| 0x42 | GET_GLYPHS | —  | `growing:u8 n:u16` then `n × u16` — the Unicode code point of each glyph index in the session's font |
+| 0x43 | CYCLE | —       | OK — the front window goes to the back (Turbo Vision's F6) |
+| 0x44 | ZOOM  | `id`    | OK — a window fills the work area, or goes back to its size (F5) |
 
-`FRAME` is the whole screen, every time. At 80×25 that is 4000 bytes, and
+`FRAME` is the whole screen, every time. At 80×25 that is 6000 bytes, and
 a client that wants to redraw only what changed keeps the previous frame
 and compares — the server does not know what the client has on its screen.
 `cx, cy` is where the caret should be, or `-1, -1` for none; the client
@@ -216,5 +253,5 @@ There are no callbacks — a callback cannot cross an interrupt.
 
 ## Not yet
 
-Menu bars, hex view, trees and clusters have no ops yet. They exist in the core; the wire will grow to them one at a time, as
+Hex view and trees have no ops yet. They exist in the core; the wire will grow to them one at a time, as
 an example needs them.
