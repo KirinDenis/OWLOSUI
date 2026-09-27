@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    Every C# example publishes as one .exe:
+
+        dotnet publish -c Release -r win-x64
+
+    PublishSingleFile folds Owlosui.dll into the program, and Owlosui.dll
+    carries the core (owlosui-serve.exe) as a resource - see
+    lib/csharp/Owlosui.csproj. So what lands in bin\Release\net8.0\win-x64\
+    publish\ is one file that needs .NET 8 on the machine and nothing
+    else. Only when a runtime is named: a plain `dotnet build` or
+    `dotnet run` is unchanged, and so are the tests.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+</Project>

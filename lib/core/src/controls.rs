@@ -11,6 +11,9 @@
 //! separate controls would be two copies of the keyboard handling, and the
 //! second copy is where the bugs would be.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 /// How many of a cluster's choices may be on at once.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Choice {
@@ -229,7 +232,7 @@ impl StaticText {
             let mut cur = String::new();
             for word in para.split_whitespace() {
                 if !cur.is_empty() && cur.chars().count() + 1 + word.chars().count() > w {
-                    out.push(std::mem::take(&mut cur));
+                    out.push(core::mem::take(&mut cur));
                 }
                 if !cur.is_empty() {
                     cur.push(' ');

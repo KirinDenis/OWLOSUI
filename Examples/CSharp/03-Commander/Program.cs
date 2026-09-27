@@ -1,3 +1,6 @@
+// C# step 3 of 5 - a two-panel file manager: marks, copy, move, a tree of the drive.
+// Before: 02-Notes. Next: 04-Basez-Sokoban, a game on a canvas.
+//
 // A two-panel file manager, in the shape of Norton Commander.
 //
 // Two file panels side by side, Tab between them, Insert to mark. F3 views

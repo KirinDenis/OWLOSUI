@@ -1274,6 +1274,30 @@ fn find_and_replace_over_the_wire() {
 }
 
 #[test]
+fn a_listing_too_big_for_one_request_arrives_in_pieces() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 80, 24), vec![0], s("Files")].concat()));
+    let entry = |name: &str| [s(name), 3u32.to_le_bytes().to_vec(), u16(2026).to_vec(), vec![9, 27, 12, 0, 0]].concat();
+    let piece = |from: usize, n: usize| {
+        let mut p = u16(n as u16).to_vec();
+        for i in from..from + n {
+            p.extend(entry(&format!("F{i:05}.TXT")));
+        }
+        p
+    };
+    // FILES with the first 2000, ADD_FILES with the next 2000.
+    let files = id_of(&c.ok(0x1A, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0], s("*.*"), s("C:\\*.*"), piece(0, 2000)].concat()));
+    c.ok(0x5A, &[u16(files).to_vec(), piece(2000, 2000)].concat());
+    // End: the last name is the 4000th.
+    c.ok(0x30, &[2, 8, 0, 0]);
+    let f = frame(&mut c);
+    assert!(find(&f, "F03999.TXT").is_some(), "{}", picture(&f));
+    let (status, _) = c.call(0x5A, &[u16(win).to_vec(), u16(0).to_vec()].concat());
+    assert_ne!(status, 0, "a window is not a file panel");
+}
+
+#[test]
 fn mistakes_are_replies_not_crashes() {
     let mut c = Client::start();
     assert!(c.err(0x40, &[]).contains("INIT"), "frame before init");

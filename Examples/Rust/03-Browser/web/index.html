@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OWLOSUI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* The page is a screen: black around the cells, nothing else on it. */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; image-rendering: pixelated; }
+  #note { position: fixed; left: 8px; bottom: 4px; color: #888; font: 12px sans-serif; }
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<div id="note"></div>
+<script src="owlosui.js"></script>
+<script>
+  // The whole program: load the module, hand it the canvas, go.
+  Owlosui.start(document.getElementById('screen'), 'owlosui_wasm.wasm').catch(e => {
+    document.getElementById('note').textContent = String(e);
+  });
+</script>
+</body>
+</html>

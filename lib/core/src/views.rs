@@ -5,6 +5,9 @@
 //! pointer to a parent. A view knows what it is and what it contains. Where it
 //! ends up and what colour it takes are decided above it.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::geom::Rect;
 use crate::menu::MenuItem;
 use crate::status::StatusItem;

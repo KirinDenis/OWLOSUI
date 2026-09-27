@@ -19,6 +19,9 @@
 //! not markup — so drawing a frame is a copy, and the parser's cost is paid
 //! when the page arrives rather than sixty times a second.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::cell::{glyph, Glyph};
 use crate::geom::Point;
 
@@ -230,7 +233,7 @@ impl Out {
     }
 
     fn flush(&mut self) {
-        let line = std::mem::take(&mut self.cur);
+        let line = core::mem::take(&mut self.cur);
         self.lines.push(line);
         for _ in 0..self.indent {
             self.cur.push(HCell {

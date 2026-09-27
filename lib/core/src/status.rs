@@ -10,6 +10,9 @@
 //! An item with no key is still clickable, which is how a mouse-only person
 //! reaches Exit.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::event::Key;
 
 #[derive(Clone)]

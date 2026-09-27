@@ -1,3 +1,6 @@
+// C# step 5 of 5 - everything the kit has, one tool per folder, each liftable.
+// Before: 04-Basez-Sokoban. The Rust ladder puts the core on other screens.
+//
 // OWLOS UI Demo: everything the toolkit has, in one program.
 //
 // The shape is the one every text-mode toolkit's demo has had since the

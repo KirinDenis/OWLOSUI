@@ -3,6 +3,9 @@
 //! `i16` is deliberate: it is the natural word on the smallest machine we
 //! intend to run on, and no terminal is 32767 columns wide.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Point {
     pub x: i16,

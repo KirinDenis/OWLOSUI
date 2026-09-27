@@ -10,6 +10,9 @@
 //! What they share — a window, a scrollbar, a caret, a place in the tree —
 //! they share by both being views, which is what the tree is for.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::geom::Rect;
 
 pub struct HexView {

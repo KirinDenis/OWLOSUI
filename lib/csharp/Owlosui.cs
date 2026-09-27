@@ -582,14 +582,26 @@ public sealed class Owlosui : IDisposable
     {
         // The panel fills the window; `top` rows are left free above it.
         var flags = (byte)((multi ? 1 : 0) | (pathLabel ? 0 : 2) | (pathLine ? 0 : 4));
+        var parts = W.EntryChunks(entries);
         var r = Call(Op.Files, W.U16(parent), W.Rect(0, top, 0, 0), new[] { flags },
-                     W.Str(mask), W.Str(Path.Combine(path, mask)), W.Entries(entries));
-        return R.U16(r);
+                     W.Str(mask), W.Str(Path.Combine(path, mask)), parts[0]);
+        var id = R.U16(r);
+        foreach (var more in parts.Skip(1)) Call(Op.AddFiles, W.U16(id), more);
+        return id;
     }
 
     /// <summary>A new listing for a panel: the person went somewhere else, or something changed.</summary>
-    public void SetFiles(ushort id, string path, IEnumerable<FileEntry> entries, string mask = "*.*") =>
-        Call(Op.SetFiles, W.U16(id), W.Str(Path.Combine(path, mask)), W.Str(mask), W.Entries(entries));
+    /// <remarks>
+    /// A request is at most 64K, and a folder of a few thousand names is
+    /// more: the listing goes in pieces, the first with the request and the
+    /// rest added to it. Whoever calls this never sees the seams.
+    /// </remarks>
+    public void SetFiles(ushort id, string path, IEnumerable<FileEntry> entries, string mask = "*.*")
+    {
+        var parts = W.EntryChunks(entries);
+        Call(Op.SetFiles, W.U16(id), W.Str(Path.Combine(path, mask)), W.Str(mask), parts[0]);
+        foreach (var more in parts.Skip(1)) Call(Op.AddFiles, W.U16(id), more);
+    }
 
     /// <summary>Something to say in the panel's pane instead of details: a folder that could not be read.</summary>
     public void SetFilesError(ushort id, string text) => Call(Op.SetFilesError, W.U16(id), W.Str(text));
@@ -1383,7 +1395,7 @@ public sealed class Owlosui : IDisposable
         public const byte SetText = 0x2B, Blit = 0x2C, MenuCheck = 0x2D, GetCluster = 0x2E, GetClick = 0x2F;
         public const byte Cycle = 0x43, Zoom = 0x44, SetButton = 0x45, Focus = 0x46, Cascade = 0x47, Tile = 0x48, SetReadOnly = 0x49;
         public const byte WindowStatus = 0x4A, WindowMenu = 0x4B, WindowList = 0x4C, CycleBack = 0x4D, SizeMove = 0x4E;
-        public const byte SetHistory = 0x4F, GetHistory = 0x50, Palette = 0x51, SetColor = 0x52;
+        public const byte SetHistory = 0x4F, GetHistory = 0x50, Palette = 0x51, SetColor = 0x52, AddFiles = 0x5A;
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
         public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
@@ -1399,12 +1411,27 @@ public sealed class Owlosui : IDisposable
     private byte[] Call(byte op, params byte[][] parts)
     {
         var len = parts.Sum(p => p.Length);
+        // A payload is at most 64K: its length is a u16 on the wire. Sent
+        // anyway, the length would wrap and the server would read the rest
+        // as requests of its own - and a stray 0x00 is QUIT.
+        if (len > ushort.MaxValue)
+            throw new OwlosuiException($"op {op:X2}: {len} bytes is more than one request can carry (65535)");
         var head = new byte[3];
         head[0] = op;
         BitConverter.TryWriteBytes(head.AsSpan(1), (ushort)len);
-        toServer.Write(head);
-        foreach (var p in parts) toServer.Write(p);
-        toServer.Flush();
+        try
+        {
+            toServer.Write(head);
+            foreach (var p in parts) toServer.Write(p);
+            toServer.Flush();
+        }
+        catch (IOException)
+        {
+            // The server is gone already. What it last said - a Rust panic
+            // names its file and line - is worth more than "pipe ended".
+            proc.WaitForExit(500);
+            throw new OwlosuiException("owlosui-serve went away" + (stderr.Length > 0 ? ":\n" + stderr : ""));
+        }
 
         var reply = new byte[3];
         ReadExactly(reply);
@@ -1446,22 +1473,69 @@ public sealed class Owlosui : IDisposable
     /// Where the server is. In order: OWLOSUI_SERVE in the environment, then
     /// the repository's own build next to this source tree, then the PATH.
     /// </summary>
+    /// <summary>
+    /// Where the core is, in this order:
+    ///
+    ///   1. OWLOSUI_SERVE in the environment - a person who says where it
+    ///      is, is right;
+    ///   2. beside the program - a folder that ships the two side by side;
+    ///   3. the repository's own cargo build, walking up from the program:
+    ///      target\debug or target\release, whichever was built last, so
+    ///      `cargo build` after a change is seen at once and a stale release
+    ///      build never hides a fresh debug one;
+    ///   4. the copy inside this assembly, written to the temp folder -
+    ///      what a published single .exe runs on;
+    ///   5. the PATH.
+    /// </summary>
     private static string FindServer()
     {
         var env = Environment.GetEnvironmentVariable("OWLOSUI_SERVE");
         if (!string.IsNullOrEmpty(env)) return env;
 
         var exe = OperatingSystem.IsWindows() ? "owlosui-serve.exe" : "owlosui-serve";
+        var beside = Path.Combine(AppContext.BaseDirectory, exe);
+        if (File.Exists(beside)) return beside;
+
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {
-            foreach (var profile in new[] { "release", "debug" })
-            {
-                var candidate = Path.Combine(dir.FullName, "target", profile, exe);
-                if (File.Exists(candidate)) return candidate;
-            }
+            var built = new[] { "debug", "release" }
+                .Select(profile => new FileInfo(Path.Combine(dir.FullName, "target", profile, exe)))
+                .Where(f => f.Exists)
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .FirstOrDefault();
+            if (built != null) return built.FullName;
         }
+
+        if (Unpack(exe) is { } unpacked) return unpacked;
+
         // Let the OS search the PATH; a clear message if it cannot.
         return "owlosui-serve";
+    }
+
+    /// <summary>
+    /// The server carried inside this assembly, written out where it can be
+    /// run: %TEMP%\owlosui\&lt;hash&gt;\owlosui-serve.exe. The folder is named
+    /// by the bytes, so two versions never overwrite each other, and a copy
+    /// already there - perhaps running - is used as it is.
+    /// </summary>
+    private static string? Unpack(string exe)
+    {
+        using var res = typeof(Owlosui).Assembly.GetManifestResourceStream("owlosui-serve.exe");
+        if (res == null) return null;
+        var bytes = new byte[res.Length];
+        res.ReadExactly(bytes);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..16];
+        var dir = Path.Combine(Path.GetTempPath(), "owlosui", hash);
+        var path = Path.Combine(dir, exe);
+        if (File.Exists(path) && new FileInfo(path).Length == bytes.Length) return path;
+        Directory.CreateDirectory(dir);
+        // Written beside and moved into place, so a second program starting
+        // at the same moment never runs half a file.
+        var tmp = path + "." + Environment.ProcessId + ".tmp";
+        File.WriteAllBytes(tmp, bytes);
+        try { File.Move(tmp, path, overwrite: false); }
+        catch (IOException) { File.Delete(tmp); }
+        return path;
     }
 
     // ---------------------------------------------------------- byte helpers
@@ -1496,6 +1570,32 @@ public sealed class Owlosui : IDisposable
                 v.AddRange(Nodes(n.Children ?? Array.Empty<TreeNode>()));
             }
             return v.ToArray();
+        }
+
+        /// <summary>
+        /// A listing as pieces that each fit in one request with room to
+        /// spare: 60000 bytes of entries at most, each piece its own count.
+        /// Always at least one piece, empty if the folder is.
+        /// </summary>
+        public static List<byte[]> EntryChunks(IEnumerable<FileEntry> entries)
+        {
+            var parts = new List<byte[]>();
+            var piece = new List<FileEntry>();
+            var size = 0;
+            foreach (var e in entries)
+            {
+                var n = Encoding.UTF8.GetByteCount(e.Name) + 2 + 4 + 7;
+                if (piece.Count > 0 && (size + n > 60000 || piece.Count == ushort.MaxValue))
+                {
+                    parts.Add(Entries(piece));
+                    piece.Clear();
+                    size = 0;
+                }
+                piece.Add(e);
+                size += n;
+            }
+            parts.Add(Entries(piece));
+            return parts;
         }
 
         public static byte[] Entries(IEnumerable<FileEntry> entries)

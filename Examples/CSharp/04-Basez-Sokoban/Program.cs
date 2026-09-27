@@ -1,3 +1,6 @@
+// C# step 4 of 5 - a game: a canvas of cells the program draws itself.
+// Before: 03-Commander. Next: 05-OwlosDemo, everything at once.
+//
 // BASE-Z 47, on the wire.
 //
 // A cell is two glyphs, the way the small picture in view.rs is two glyphs:

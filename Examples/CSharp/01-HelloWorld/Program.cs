@@ -1,3 +1,6 @@
+// C# step 1 of 5 - a window, words, a button: the whole shape of a program.
+// Next: 02-Notes, an editor that saves and asks before you leave.
+//
 // The smallest OWLOSUI program there is.
 //
 // A window in the middle of the screen, a line of words, one button. The

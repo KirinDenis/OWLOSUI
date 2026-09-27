@@ -10,6 +10,9 @@
 //! than each of drawing, the arrow keys and the mouse walking the tree in its
 //! own way and disagreeing about which row is which.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 pub struct TreeNode {
     pub text: String,
     pub children: Vec<TreeNode>,

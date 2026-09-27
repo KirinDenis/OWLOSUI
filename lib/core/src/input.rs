@@ -10,6 +10,9 @@
 //! view in its own right for the day dialogs need fields. One implementation,
 //! two uses — copy it and the second copy is where the bugs will be.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::event::{Key, KeyCode};
 
 pub struct InputLine {

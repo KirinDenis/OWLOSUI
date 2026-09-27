@@ -17,6 +17,9 @@
 //!   0x24  its hotkey                     (red on green)
 //! ```
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 /// A command number. Zero means "no command" — an item that opens a submenu,
 /// or a separator.
 pub type Cmd = u16;
@@ -275,7 +278,7 @@ pub fn merge_items(base: &[MenuItem], extra: &[MenuItem]) -> Vec<MenuItem> {
                 out[ix].items.push(MenuItem::line());
                 out[ix].items.extend(clone_items(&it.items));
             }
-            None => out.extend(clone_items(std::slice::from_ref(it))),
+            None => out.extend(clone_items(core::slice::from_ref(it))),
         }
     }
     out

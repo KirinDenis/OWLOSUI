@@ -1,3 +1,6 @@
+//! Rust step 1 of 4 - the core on a terminal, no wire: every control in one program.
+//! Next: 02-Window, the same core drawing its own Windows window.
+//!
 //! The first slice: a desktop, framed windows that move and resize, and a
 //! scrolling viewer inside each one.
 //!

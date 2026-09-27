@@ -6,6 +6,9 @@
 //! outside it simply has nothing happen. That is the whole occlusion story:
 //! draw back to front, clip on the way down.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::cell::{attr, glyph, Cell, Color, Glyph};
 use crate::geom::Rect;
 

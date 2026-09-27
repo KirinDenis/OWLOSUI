@@ -1,0 +1,16 @@
+[package]
+name = "owlosui-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The core in a native Windows window: CreateWindow and GDI, the cells drawn by hand, no console and no wire."
+
+[[bin]]
+name = "owlosui-win"
+path = "src/main.rs"
+
+# No crates: the dozen Win32 functions this needs are declared by hand in
+# win32.rs. The platform layer may have dependencies; it does not need
+# one for this.
+[dependencies]
+owlosui-core = { path = "../../../lib/core" }

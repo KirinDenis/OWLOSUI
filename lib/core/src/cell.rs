@@ -10,6 +10,9 @@
 //! backend can honour it; losing eight background colours to it cannot be
 //! undone.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 /// The sixteen colours. The numbering is the hardware's, not ours.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -114,6 +117,10 @@ pub fn glyph_of(c: char) -> Glyph {
 /// font is CP437; swapping the font swaps the code page with it, which is how
 /// CP866 (Cyrillic) or a Spectrum character set slot in without the core
 /// knowing anything about them.
+/// `repr(C)` so that with the `dos` feature a cell is exactly the two
+/// bytes a CGA card wants, character then attribute, and a frame can go
+/// to video memory as it is.
+#[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cell {
     pub ch: Glyph,

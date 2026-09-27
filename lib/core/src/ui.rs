@@ -7,6 +7,9 @@
 //! WebAssembly import later. Designing for the hardest boundary first paid for
 //! itself before the boundary exists.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::buffer::Buffer;
 use crate::cell::{attr, attr_bg, attr_fg, glyph, Glyph};
 use crate::event::{Button, Event, Key, Mouse, MouseKind};
@@ -921,7 +924,7 @@ impl Ui {
     /// Close a view and everything inside it. A handle to a child of a
     /// closed window must say it is dead, or `is_alive` is not worth asking.
     pub fn close(&mut self, id: ViewId) {
-        let kids = std::mem::take(&mut self.nodes[id.ix()].children);
+        let kids = core::mem::take(&mut self.nodes[id.ix()].children);
         for k in kids {
             self.close(k);
         }

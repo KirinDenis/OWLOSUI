@@ -1,3 +1,6 @@
+// C# step 2 of 5 - an editor, a file, and a question before leaving.
+// Before: 01-HelloWorld. Next: 03-Commander, two panels of files.
+//
 // An editor that saves to a file, and asks before it lets you leave.
 //
 // Two things this shows that HelloWorld does not:

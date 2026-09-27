@@ -2,3 +2,19 @@
 /.vs
 **/bin/
 **/obj/
+
+# The browser module is a build artefact: Examples/Rust/03-Browser/build.cmd makes it.
+Examples/Rust/03-Browser/web/*.wasm
+
+# The DOS build: the flat binary and what a run leaves behind. The two
+# .COM files are tracked, like the sources they come from; the .BIN is
+# the Rust build, made by Examples/Rust/04-DOS/build.cmd.
+Examples/Rust/04-DOS/target/
+Examples/Rust/04-DOS/OWLOS.BIN
+Examples/Rust/04-DOS/*.LOG
+Examples/Rust/04-DOS/OWLOS.OUT
+Examples/Rust/04-DOS/TRACE.TXT
+Examples/Rust/04-DOS/SHOT.BIN
+Examples/Rust/04-DOS/SCREEN.BIN
+Examples/Rust/04-DOS/AUTOTYPE.TXT
+Examples/Rust/04-DOS/dbx.log

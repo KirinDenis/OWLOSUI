@@ -55,6 +55,7 @@ mod op {
     pub const ACTIVATE: u8 = 0x27;
     pub const MARKED_NAMES: u8 = 0x28;
     pub const SET_FILES_ERROR: u8 = 0x29;
+    pub const ADD_FILES: u8 = 0x5A;
     pub const ACTIVE: u8 = 0x2A;
     pub const SET_TEXT: u8 = 0x2B;
     pub const BLIT: u8 = 0x2C;
@@ -821,6 +822,19 @@ impl Server {
                         f.set_path(&path);
                         f.error = None;
                     }
+                    _ => return Err(format!("view {} is not a file panel", id.raw())),
+                }
+            }
+
+            op::ADD_FILES => {
+                // The rest of a listing that did not fit in one request:
+                // a request is at most 64K, and a folder of a few thousand
+                // names is more than that.
+                let id = r.id("id")?;
+                let entries = r.entries(&mut self.cp)?;
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Files(f) => f.add_entries(entries),
                     _ => return Err(format!("view {} is not a file panel", id.raw())),
                 }
             }

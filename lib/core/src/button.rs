@@ -10,6 +10,9 @@
 //! shape: the thing it stands in for can replace it without the parts
 //! changing.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 /// What a button is for, which is what colour it wears. Turbo Vision had
 /// one colour of button; a keypad needs the eye to tell a digit from an
 /// operator from the key that throws everything away.

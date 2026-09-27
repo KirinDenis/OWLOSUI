@@ -17,6 +17,9 @@
 //! memory while the real Turbo Vision was drawing; the cyan set is written
 //! down in `HELPFILE.PAS` as `CHelpColor`.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::cell::{attr, attr_bg, Color};
 
 /// One family of window colours.

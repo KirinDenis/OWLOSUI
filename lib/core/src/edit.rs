@@ -16,6 +16,9 @@
 //! modern one, and it is why a test can be a script of command names rather
 //! than a simulation of somebody's fingers.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::cell::Glyph;
 use crate::geom::Point;
 use crate::views::TextView;

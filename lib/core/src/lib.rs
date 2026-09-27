@@ -10,6 +10,14 @@
 //! terminals, browsers or video memory. This crate has no dependencies and
 //! must never acquire one: it has to be buildable for a machine where the
 //! whole program lives in 64K.
+//!
+//! Which is why it is `no_std` unless the `std` feature says otherwise:
+//! `core` and `alloc` are all it uses, and a DOS build has no more.
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[macro_use]
+extern crate alloc;
 
 pub mod buffer;
 pub mod button;

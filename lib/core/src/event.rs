@@ -5,6 +5,9 @@
 //! so the core refuses to see any of them. A backend translates into these
 //! types and the core never learns which platform it is on.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Mods {
     pub ctrl: bool,

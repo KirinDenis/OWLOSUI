@@ -18,6 +18,9 @@
 //! in a terminal they are not merely traditional but necessary, because Ctrl+C
 //! is taken by the signal.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::edit::Cmd;
 use crate::event::{Key, KeyCode, Mods};
 

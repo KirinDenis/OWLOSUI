@@ -4,6 +4,14 @@
     The C# side of the wire. One file, no packages: a program that uses this
     needs a ProjectReference and nothing else, and the whole client fits in a
     single afternoon's reading.
+
+    And the core rides inside it. `owlosui-serve.exe` is built by cargo as
+    part of this build and embedded in Owlosui.dll as a resource; at run
+    time, when no server is found beside the program or in the repository's
+    target folder, the client writes the embedded one to the temp folder
+    and starts that. So a program published with
+        dotnet publish -c Release -r win-x64
+    is one .exe: the client, the example and the core all in it.
   -->
 
   <PropertyGroup>
@@ -12,6 +20,24 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace></RootNamespace>
     <AssemblyName>Owlosui</AssemblyName>
+    <!-- Symbols inside the DLL, so a single-file publish leaves no .pdb beside it. -->
+    <DebugType>embedded</DebugType>
+    <!-- Where the server comes from: the repository's own cargo build. -->
+    <OwlosuiRoot>$(MSBuildThisFileDirectory)..\..\</OwlosuiRoot>
+    <OwlosuiServer>$(OwlosuiRoot)target\release\owlosui-serve.exe</OwlosuiServer>
   </PropertyGroup>
+
+  <!--
+    Build the server before the client, so the one embedded is today's.
+    cargo does nothing when nothing changed. If cargo is not installed the
+    build still goes on - it warns, and embeds whatever is already there.
+  -->
+  <Target Name="OwlosuiBuildServer" BeforeTargets="BeforeBuild" Condition="'$(OS)' == 'Windows_NT'">
+    <Exec Command="cargo build -p owlosui-serve --release" WorkingDirectory="$(OwlosuiRoot)" ContinueOnError="true" StandardOutputImportance="low" />
+    <ItemGroup Condition="Exists('$(OwlosuiServer)')">
+      <EmbeddedResource Include="$(OwlosuiServer)" LogicalName="owlosui-serve.exe" />
+    </ItemGroup>
+    <Warning Condition="!Exists('$(OwlosuiServer)')" Text="owlosui-serve.exe was not built; Owlosui.dll carries no core and will look for one at run time." />
+  </Target>
 
 </Project>

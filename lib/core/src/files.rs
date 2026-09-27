@@ -24,6 +24,9 @@
 //! The rule cuts both ways, as it does everywhere else here: there is no POSIX
 //! mode field, because DOS could not fill one.
 
+// `no_std` needs these named; with `std` they are the prelude's.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::geom::Rect;
 
 pub const ATTR_READONLY: u8 = 0x01;
@@ -256,6 +259,19 @@ impl FileList {
             .and_then(|n| (0..self.view.len()).find(|&i| self.entries[self.view[i]].name == n))
             .unwrap_or(0);
         self.error = None;
+        self.reveal();
+    }
+
+    /// More of the same listing: a folder too big to arrive in one piece
+    /// arrives in several, and each piece is added to what is there. The
+    /// cursor stays on the name it was on.
+    pub fn add_entries(&mut self, more: Vec<FileEntry>) {
+        let was = self.selected().map(|e| e.name.clone());
+        self.entries.extend(more);
+        self.rebuild();
+        self.current = was
+            .and_then(|n| (0..self.view.len()).find(|&i| self.entries[self.view[i]].name == n))
+            .unwrap_or(0);
         self.reveal();
     }
 
@@ -645,7 +661,7 @@ fn wrap(text: &str, width: i16) -> Vec<String> {
     let mut cur = String::new();
     for word in text.split_whitespace() {
         if !cur.is_empty() && cur.chars().count() + 1 + word.chars().count() > w {
-            out.push(std::mem::take(&mut cur));
+            out.push(core::mem::take(&mut cur));
         }
         if word.chars().count() > w {
             // A single word too long for the line has to be cut, and the edge
