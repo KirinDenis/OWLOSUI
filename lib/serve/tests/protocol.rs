@@ -1086,6 +1086,37 @@ fn an_editor_offers_its_edit_menu_and_reports_how_it_is_set() {
 }
 
 #[test]
+fn a_text_is_coloured_as_a_language_and_keeps_it_through_set_text() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 40, 10), vec![0], s("A.PAS")].concat()));
+    let text = id_of(&c.ok(0x11, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s("begin end.")].concat()));
+    // SYNTAX by file name: found, and the language's name.
+    let r = c.ok(0x5F, &[u16(text).to_vec(), s("A.PAS")].concat());
+    assert_eq!(r[0], 1);
+    assert_eq!(&r[3..], b"Pascal");
+    let f = frame(&mut c);
+    assert_eq!(attr_at(&f, 1, 1), 0x1F, "begin is a keyword: white on blue");
+    assert_eq!(attr_at(&f, 7, 1), 0x1F, "end too");
+    // SET_TEXT: new words, the same language and the same offers.
+    c.ok(0x5D, &[u16(text).to_vec(), vec![0x7F, 1]].concat());
+    c.ok(0x2B, &[u16(text).to_vec(), s("{ note }")].concat());
+    let f = frame(&mut c);
+    assert_eq!(attr_at(&f, 1, 1), 0x17, "a comment: light grey");
+    let st = c.ok(0x5E, &u16(text));
+    assert_eq!(&st[..2], &[0x7F, 1 | 16], "offers, wrap and the colours survived");
+    // Nobody answers to it: not found, and plain again.
+    let r = c.ok(0x5F, &[u16(text).to_vec(), s("A.XYZ")].concat());
+    assert_eq!(r[0], 0);
+    assert_eq!(attr_at(&frame(&mut c), 1, 1), 0x1E, "the editor's yellow");
+    // A language of the program's own.
+    let r = c.ok(0x60, &s("[Talk]\nfiles = TLK\nkeywords = note\n"));
+    assert_eq!(r[0], 1);
+    c.ok(0x5F, &[u16(text).to_vec(), s("Talk")].concat());
+    assert_eq!(attr_at(&frame(&mut c), 3, 1), 0x1F, "note is a Talk keyword");
+}
+
+#[test]
 fn a_window_carries_its_keys_and_menu_items_over_the_wire() {
     let mut c = Client::start();
     c.ok(0x01, &[i16(80), i16(25)].concat());

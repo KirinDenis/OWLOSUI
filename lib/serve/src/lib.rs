@@ -116,6 +116,8 @@ pub mod op {
     pub const REPLACE_ALL: u8 = 0x59;
     pub const EDITOR: u8 = 0x5D;
     pub const GET_EDITOR: u8 = 0x5E;
+    pub const SYNTAX: u8 = 0x5F;
+    pub const SYNTAX_DEFINE: u8 = 0x60;
 }
 
 type Res<T> = Result<T, String>;
@@ -687,6 +689,34 @@ impl Server {
                     return Err(format!("view {} is not a text", id.raw()));
                 }
                 self.settle_focus()?;
+            }
+
+            op::SYNTAX => {
+                // A language by name, extension or file name; empty, or
+                // one nobody answers to, is plain text again.
+                let id = r.id("id")?;
+                let what = r.str("language")?;
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                if !matches!(ui.kind(id), Kind::Text(_)) {
+                    return Err(format!("view {} is not a text", id.raw()));
+                }
+                match ui.set_syntax(id, &what) {
+                    Some(name) => {
+                        out.u8(1);
+                        out.str(&name);
+                    }
+                    None => {
+                        out.u8(0);
+                        out.str("");
+                    }
+                }
+            }
+
+            op::SYNTAX_DEFINE => {
+                let text = r.str("text")?;
+                let n = self.ui()?.add_syntax(&text);
+                out.u8(n.min(255) as u8);
             }
 
             op::GET_EDITOR => {
@@ -1289,15 +1319,9 @@ impl Server {
                 match self.ui()?.kind_mut(id) {
                     Kind::Static(t) => t.text = core,
                     Kind::Input(i) => i.set_text(&core),
-                    Kind::Text(t) => {
-                        *t = {
-                            let mut n = TextView::new(lines);
-                            n.readonly = t.readonly;
-                            n.boxed = t.boxed;
-                            n.focused = t.focused;
-                            n
-                        };
-                    }
+                    // New contents, the same editor: what it offers, its
+                    // wrap, keys and language are kept.
+                    Kind::Text(t) => t.set_lines(lines),
                     _ => return Err(format!("view {} has no text to set", id.raw())),
                 }
             }

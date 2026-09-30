@@ -390,7 +390,9 @@ impl Demo {
             String::from(name)
         };
         let w = kit::window(&mut self.ui, &title, 2, 2, 76, 20, kit::BLUE, CM_CLOSE);
-        kit::editor(&mut self.ui, w, kit::lines_of(&bytes), true); // read-only: a viewer
+        let t = kit::editor(&mut self.ui, w, kit::lines_of(&bytes), true); // read-only: a viewer
+        // Coloured as the language its name says: .ASM, .BAT, .PAS.
+        self.ui.set_syntax(t, name);
         true
     }
 

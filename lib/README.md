@@ -61,6 +61,19 @@ line and column are what they were, and Up and Down go by rows on the
 screen. The person can change the settings from the menu; `GET_EDITOR`
 (`editor_state`, `GetEditor`, `editorState`) reads them back.
 
+**Syntax colours.** `set_syntax(text, "DEMO.PAS")` (`SYNTAX` on the wire;
+`owl.syntax`, `Syntax`, `owl_syntax`, `OwlSyntax`) colours a text as the
+language its name, extension or file name says; Edit > Syntax lets the
+person choose. The core knows C, C#, JavaScript, JSON, Rust, Pascal,
+Assembler, Batch and INI. Each is a few lines of
+[core/src/syntax.ini](core/src/syntax.ini) - comments, strings, keywords,
+no regular expressions, so it runs on DOS too - and that file says what
+every line of the format means. A program adds or replaces a language with
+`add_syntax` (`SYNTAX_DEFINE`) in the same format. The colours are palette
+roles (Syntax keyword, type, comment, string, number, directive), so the
+Colors dialog changes them. Typing on a line recolours from that line down,
+and only as far as the window shows.
+
 An editor that offers nothing - the default - leaves both bars alone, and
 the primitives underneath (`FIND`, `REPLACE`, `SET_READONLY`) are still
 there for a program that builds its own.

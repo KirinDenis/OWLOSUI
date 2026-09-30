@@ -196,11 +196,26 @@ public sealed class Owlosui : IDisposable
         ReadOnly = 16,   // Read only, ticked while on
         Hex = 32,        // the same text as bytes
         Keys = 64,       // Classic keys: Borland's WordStar arrangement
-        All = 127,
+        Syntax = 128,    // Syntax: the language the text is coloured as
+        All = 255,
     }
 
     /// <summary>How an editor is set, and where its caret is: line and column from 0.</summary>
-    public readonly record struct EditorState(Offer Offers, bool Wrap, bool ReadOnly, bool Classic, bool Hex, int Line, int Col);
+    public readonly record struct EditorState(Offer Offers, bool Wrap, bool ReadOnly, bool Classic, bool Hex, bool Syntax, int Line, int Col);
+
+    /// <summary>
+    /// Colour a text as a language: its name ("Pascal"), an extension ("PAS")
+    /// or a file name ("DEMO.PAS"). The language's name, or null when there
+    /// is none - and then the text is plain.
+    /// </summary>
+    public string? Syntax(ushort text, string language)
+    {
+        var r = Call(Op.Syntax, W.U16(text), W.Str(language));
+        return r[0] != 0 ? R.Str(r, 1) : null;
+    }
+
+    /// <summary>Languages of the program's own, in the format of lib/core/src/syntax.ini; how many.</summary>
+    public int DefineSyntax(string ini) => Call(Op.SyntaxDefine, W.Str(ini))[0];
 
     /// <summary>
     /// What a text offers and how it starts. The person can change each
@@ -216,7 +231,7 @@ public sealed class Owlosui : IDisposable
     {
         var r = Call(Op.GetEditor, W.U16(text));
         var s = r[1];
-        return new EditorState((Offer)r[0], (s & 1) != 0, (s & 2) != 0, (s & 4) != 0, (s & 8) != 0, R.U16(r, 2), R.U16(r, 4));
+        return new EditorState((Offer)r[0], (s & 1) != 0, (s & 2) != 0, (s & 4) != 0, (s & 8) != 0, (s & 16) != 0, R.U16(r, 2), R.U16(r, 4));
     }
 
     /// <summary>
@@ -1489,7 +1504,7 @@ public sealed class Owlosui : IDisposable
         public const byte WindowStatus = 0x4A, WindowMenu = 0x4B, WindowList = 0x4C, CycleBack = 0x4D, SizeMove = 0x4E;
         public const byte SetHistory = 0x4F, GetHistory = 0x50, Palette = 0x51, SetColor = 0x52, AddFiles = 0x5A;
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
-        public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E;
+        public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E, Syntax = 0x5F, SyntaxDefine = 0x60;
         public const byte OpenWindow = 0x5B, Wait = 0x5C;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;

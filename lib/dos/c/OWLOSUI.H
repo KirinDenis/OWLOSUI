@@ -61,12 +61,14 @@ typedef unsigned short owl_id;          /* a view; 0 is the desktop */
 #define OWL_OFFER_READONLY 0x10         /* Read only */
 #define OWL_OFFER_HEX      0x20         /* the same text as bytes */
 #define OWL_OFFER_KEYS     0x40         /* Classic keys: Borland's WordStar arrangement */
-#define OWL_OFFER_ALL      0x7F
+#define OWL_OFFER_SYNTAX   0x80         /* Syntax: the language the text is coloured as */
+#define OWL_OFFER_ALL      0xFF
 /* ---- and how it is set ---- */
 #define OWL_EDIT_WRAP      0x01
 #define OWL_EDIT_READONLY  0x02
 #define OWL_EDIT_CLASSIC   0x04
 #define OWL_EDIT_HEX       0x08
+#define OWL_EDIT_SYNTAX    0x10         /* read back only: set a language with owl_syntax */
 
 /* ---- the session ---- */
 int    owl_check(void);                 /* started by OWLOSRES? says how, if not */
@@ -107,6 +109,8 @@ void   owl_set_text(owl_id id, const char *text);
 void   owl_editor(owl_id text, unsigned char offers, unsigned char state);
                                         /* OWL_OFFER_ bits; OWL_EDIT_ bits */
 unsigned char owl_editor_state(owl_id text);  /* OWL_EDIT_ bits as the person left them */
+int    owl_syntax(owl_id text, const char *language);
+                                        /* colour as C, PAS, DEMO.ASM ...; 0 if no such language */
 void   owl_close(owl_id id);
 void   owl_activate(owl_id id);
 owl_id owl_active(void);

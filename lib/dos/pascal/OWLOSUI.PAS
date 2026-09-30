@@ -61,12 +61,14 @@ const
   OfferReadOnly = $10;                  { Read only }
   OfferHex      = $20;                  { the same text as bytes }
   OfferKeys     = $40;                  { Classic keys: Borland's WordStar arrangement }
-  OfferAll      = $7F;
+  OfferSyntax   = $80;                  { Syntax: the language the text is coloured as }
+  OfferAll      = $FF;
   { and how it is set }
   EditWrap      = $01;
   EditReadOnly  = $02;
   EditClassic   = $04;
   EditHex       = $08;
+  EditSyntax    = $10;                  { read back only: set a language with OwlSyntax }
 
 type
   TGlyphs = array[0..255] of Word;      { each glyph as Unicode }
@@ -104,6 +106,8 @@ function  OwlEnd: Word;
 procedure OwlSetText(Id: Word; const Text: string);
 procedure OwlEditor(Text: Word; Offers, State: Byte);   { Offer.. bits; Edit.. bits }
 function  OwlEditorState(Text: Word): Byte;              { Edit.. bits as the person left them }
+function  OwlSyntax(Text: Word; const Language: string): Boolean;
+                                        { colour as C, PAS, DEMO.ASM ...; False if no such language }
 procedure OwlClose(Id: Word);
 procedure OwlActivate(Id: Word);
 function  OwlActive: Word;
@@ -375,6 +379,13 @@ begin
   OwlBegin($5E); OwlU16(Text);
   OwlSend;
   OwlEditorState := Rep[4];
+end;
+
+function OwlSyntax(Text: Word; const Language: string): Boolean;
+begin
+  OwlBegin($5F); OwlU16(Text); OwlStr(Language);
+  OwlSend;
+  OwlSyntax := Rep[3] <> 0;
 end;
 
 procedure OwlClose(Id: Word);    begin WithId($20, Id); end;

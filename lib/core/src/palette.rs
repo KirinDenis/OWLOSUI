@@ -152,6 +152,15 @@ pub struct Palette {
     pub label_active: u8,
     /// A marked item in a list or a file panel - yellow, as Norton had it.
     pub list_marked: u8,
+
+    /// Syntax colours, on a document's blue. In a window of another family
+    /// the foreground is kept and the background is that window's text's.
+    pub syntax_keyword: u8,
+    pub syntax_type: u8,
+    pub syntax_comment: u8,
+    pub syntax_string: u8,
+    pub syntax_number: u8,
+    pub syntax_directive: u8,
 }
 
 impl Palette {
@@ -355,7 +364,34 @@ impl Palette {
             label_key: attr(Color::Yellow, Color::LightGray),
             label_active: attr(Color::White, Color::LightGray),
             list_marked: attr(Color::Yellow, Color::Blue),
+
+            // Chosen, not measured, in the spirit of Borland's IDEs: the
+            // text stays the editor's yellow, the language's own words are
+            // white, and what is written for a person rather than for the
+            // machine - a comment - steps back into grey.
+            syntax_keyword: attr(Color::White, Color::Blue),
+            syntax_type: attr(Color::LightGreen, Color::Blue),
+            syntax_comment: attr(Color::LightGray, Color::Blue),
+            syntax_string: attr(Color::LightCyan, Color::Blue),
+            syntax_number: attr(Color::LightMagenta, Color::Blue),
+            syntax_directive: attr(Color::LightRed, Color::Blue),
         }
+    }
+
+    /// The colour of a syntax role on a window whose ordinary text is
+    /// `text`: the role's foreground on that text's background.
+    pub fn syntax_on(&self, role: crate::syntax::Role, text: u8) -> u8 {
+        use crate::syntax::Role;
+        let a = match role {
+            Role::Text => return text,
+            Role::Keyword => self.syntax_keyword,
+            Role::Type => self.syntax_type,
+            Role::Comment => self.syntax_comment,
+            Role::String => self.syntax_string,
+            Role::Number => self.syntax_number,
+            Role::Directive => self.syntax_directive,
+        };
+        (text & 0xF0) | (a & 0x0F)
     }
 }
 
@@ -456,6 +492,12 @@ impl Palette {
         ("Grey dialog", "text selected"),
         ("Grey dialog", "link"),
         ("Grey dialog", "link focus"),
+        ("Syntax", "keyword"),
+        ("Syntax", "type"),
+        ("Syntax", "comment"),
+        ("Syntax", "string"),
+        ("Syntax", "number"),
+        ("Syntax", "directive"),
     ];
 
     /// The attribute of entry `ix` of `NAMES`.
@@ -547,6 +589,12 @@ impl Palette {
             83 => Some(self.gray.text_selected),
             84 => Some(self.gray.link),
             85 => Some(self.gray.link_focus),
+            86 => Some(self.syntax_keyword),
+            87 => Some(self.syntax_type),
+            88 => Some(self.syntax_comment),
+            89 => Some(self.syntax_string),
+            90 => Some(self.syntax_number),
+            91 => Some(self.syntax_directive),
             _ => None,
         }
     }
@@ -640,6 +688,12 @@ impl Palette {
             83 => self.gray.text_selected = attr,
             84 => self.gray.link = attr,
             85 => self.gray.link_focus = attr,
+            86 => self.syntax_keyword = attr,
+            87 => self.syntax_type = attr,
+            88 => self.syntax_comment = attr,
+            89 => self.syntax_string = attr,
+            90 => self.syntax_number = attr,
+            91 => self.syntax_directive = attr,
             _ => return false,
         }
         true

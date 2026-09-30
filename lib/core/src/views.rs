@@ -197,6 +197,14 @@ pub struct TextView {
     pub keymap: Option<crate::keymap::Keymap>,
     /// The hex view standing in for this text while it is shown.
     pub(crate) hex: Option<crate::ui::ViewId>,
+    /// The language it is coloured as: which of the desktop's syntaxes.
+    pub(crate) syntax: Option<u16>,
+    /// The colouring state each line starts in (`syntax::update_states`),
+    /// known for the first `states_valid` lines. A change to line n makes
+    /// every state after it unknown, and it is worked out again only as far
+    /// as the window shows.
+    pub(crate) states: Vec<u16>,
+    pub(crate) states_valid: usize,
 
     pub(crate) undo_stack: Vec<crate::edit::Edit>,
     pub(crate) redo_stack: Vec<crate::edit::Edit>,
@@ -221,6 +229,9 @@ impl TextView {
             offers: 0,
             keymap: None,
             hex: None,
+            syntax: None,
+            states: Vec::new(),
+            states_valid: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
         }
@@ -229,6 +240,22 @@ impl TextView {
     pub fn readonly(mut self) -> Self {
         self.readonly = true;
         self
+    }
+
+    /// New contents, starting over - caret at the top, nothing to undo, not
+    /// modified - but the same editor: what it offers, how it is set and
+    /// what language it is coloured as are kept.
+    pub fn set_lines(&mut self, lines: Vec<Vec<crate::cell::Glyph>>) {
+        self.lines = if lines.is_empty() { vec![Vec::new()] } else { lines };
+        self.top = 0;
+        self.top_row = 0;
+        self.left = 0;
+        self.cur = crate::geom::Point::new(0, 0);
+        self.anchor = None;
+        self.modified = false;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.states_valid = 0;
     }
 
     /// Convenience for ASCII-only text. Anything else must be encoded to the

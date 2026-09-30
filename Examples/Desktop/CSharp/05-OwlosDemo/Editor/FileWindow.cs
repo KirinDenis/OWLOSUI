@@ -57,8 +57,11 @@ public sealed class FileWindow
         // wrap and the two keymaps, while this window is in front. Not Read
         // only or Hex - this window does those itself, with F4 and F7, which
         // is what it is here to show.
-        owl.Editor(text, Owlosui.Offer.Edit | Owlosui.Offer.Find | Owlosui.Offer.Replace | Owlosui.Offer.Wrap | Owlosui.Offer.Keys,
+        owl.Editor(text, Owlosui.Offer.Edit | Owlosui.Offer.Find | Owlosui.Offer.Replace | Owlosui.Offer.Wrap
+                         | Owlosui.Offer.Keys | Owlosui.Offer.Syntax,
                    readOnly: true);
+        // Coloured as its language, which the file's name says.
+        owl.Syntax(text, path);
         // The keys and menu items this window brings with it.
         owl.WindowStatus(Id, new Owlosui.StatusItem("~F4~ Edit", CmEditView, ConsoleKey.F4),
                              new Owlosui.StatusItem("~F7~ Hex", CmHex, ConsoleKey.F7));

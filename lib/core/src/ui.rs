@@ -231,6 +231,14 @@ const CM_SEARCH_REPLACE: Cmd = 0xFF51;
 const CM_SEARCH_ALL: Cmd = 0xFF52;
 const CM_SEARCH_CANCEL: Cmd = 0xFF53;
 const CM_NOTICE_OK: Cmd = 0xFF54;
+/// Edit > Syntax: 0xFF60 is None, 0xFF61 on the languages in list order.
+const CM_ED_SYNTAX: Cmd = 0xFF60;
+const SYNTAX_MENU_MAX: Cmd = 64;
+
+/// A command the editor answers itself.
+fn is_editor_cmd(cmd: Cmd) -> bool {
+    (CM_ED_UNDO..=CM_ED_KEYS).contains(&cmd) || (CM_ED_SYNTAX..CM_ED_SYNTAX + SYNTAX_MENU_MAX).contains(&cmd)
+}
 
 /// The Find or Replace dialog while it is up, and the editor it searches.
 struct Search {
@@ -292,6 +300,12 @@ pub struct Ui {
     /// Ctrl+Q has been pressed in a classic editor, and the next key says
     /// what for: Borland's two-key commands.
     chord: bool,
+    /// The languages texts can be coloured as: the core's own, read from
+    /// `syntax.ini` the first time one is asked for, then the program's.
+    /// A text holds an index, so nothing is ever taken out; a later one of
+    /// the same name is found first.
+    syntaxes: Vec<crate::syntax::Syntax>,
+    syntaxes_loaded: bool,
 }
 
 impl Ui {
@@ -321,6 +335,8 @@ impl Ui {
             last_search: None,
             notice: None,
             chord: false,
+            syntaxes: Vec::new(),
+            syntaxes_loaded: false,
         }
     }
 
@@ -696,9 +712,23 @@ impl Ui {
                     "Find a word and put another one in its place", text && !ro));
             }
         }
-        if o & (WRAP | READONLY | HEX | KEYS) != 0 {
+        if o & (WRAP | READONLY | HEX | KEYS | SYNTAX) != 0 {
             if !items.is_empty() {
                 items.push(MenuItem::line());
+            }
+            if o & SYNTAX != 0 {
+                let current = t.syntax.and_then(|c| self.syntaxes.get(c as usize)).map(|s| s.name.as_str());
+                let mut langs = vec![item("~N~one", String::new(), CM_ED_SYNTAX, "Plain text, all in one colour", text)
+                    .checked(current.is_none())];
+                for (n, &i) in self.syntax_list().iter().enumerate().take(SYNTAX_MENU_MAX as usize - 1) {
+                    let name = &self.syntaxes[i].name;
+                    let hint = format!("Colour it as {name}: its keywords, comments, strings and numbers");
+                    let on = current.is_some_and(|c| c.eq_ignore_ascii_case(name));
+                    langs.push(item(name, String::new(), CM_ED_SYNTAX + 1 + n as Cmd, &hint, text).checked(on));
+                }
+                let mut sub = MenuItem::sub("S~y~ntax", langs);
+                sub.hint = "Which language the text is coloured as".into();
+                items.push(sub);
             }
             if o & WRAP != 0 {
                 items.push(item("~W~ord wrap", String::new(), CM_ED_WRAP,
@@ -759,6 +789,10 @@ impl Ui {
             };
         }
         let mut s = format!("Ln {} Col {}", t.cur.y as i32 + 1, t.cur.x as i32 + 1);
+        if let Some(lang) = t.syntax.and_then(|c| self.syntaxes.get(c as usize)) {
+            s.push_str("  ");
+            s.push_str(&lang.name);
+        }
         if t.wrap {
             s.push_str("  Wrap");
         }
@@ -816,6 +850,14 @@ impl Ui {
                 if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
                     t.keymap = Some(if now == Keymap::Classic { Keymap::Modern } else { Keymap::Classic });
                 }
+            }
+            c if (CM_ED_SYNTAX..CM_ED_SYNTAX + SYNTAX_MENU_MAX).contains(&c) => {
+                let ix = (c - CM_ED_SYNTAX) as usize;
+                let name = match ix {
+                    0 => String::new(),
+                    _ => self.syntax_list().get(ix - 1).map(|&i| self.syntaxes[i].name.clone()).unwrap_or_default(),
+                };
+                self.set_syntax(tid, &name);
             }
             _ => {}
         }
@@ -1144,6 +1186,10 @@ impl Ui {
     /// view that is not a text.
     pub fn set_editor(&mut self, id: ViewId, offers: u8, state: u8) -> bool {
         use crate::edit::state::*;
+        if offers & crate::edit::offer::SYNTAX != 0 {
+            // The Syntax menu lists them; they are read now, once.
+            self.load_syntaxes();
+        }
         let r = self.abs_rect(id);
         let hex_now = match &mut self.nodes[id.ix()].kind {
             Kind::Text(t) => {
@@ -1185,7 +1231,74 @@ impl Ui {
         if t.hex.is_some() {
             s |= HEX;
         }
+        if t.syntax.is_some() {
+            s |= SYNTAX;
+        }
         Some((t.offers, s, t.cur.y, t.cur.x))
+    }
+
+    // ------------------------------------------------------------ syntax
+
+    fn load_syntaxes(&mut self) {
+        if !self.syntaxes_loaded {
+            self.syntaxes_loaded = true;
+            let mut own = crate::syntax::parse(crate::syntax::BUILTIN);
+            own.append(&mut self.syntaxes);
+            self.syntaxes = own;
+        }
+    }
+
+    /// Languages of the program's own, in the format of `syntax.ini`. One
+    /// with the name of a language the core has takes its place. How many
+    /// were read.
+    pub fn add_syntax(&mut self, ini: &str) -> usize {
+        self.load_syntaxes();
+        let mut more = crate::syntax::parse(ini);
+        let n = more.len();
+        self.syntaxes.append(&mut more);
+        n
+    }
+
+    /// The languages by name, each once, in the order they came: what
+    /// Edit > Syntax lists.
+    pub fn syntax_names(&mut self) -> Vec<String> {
+        self.load_syntaxes();
+        self.syntax_list().into_iter().map(|i| self.syntaxes[i].name.clone()).collect()
+    }
+
+    /// The index of each language that counts: the last one of each name.
+    fn syntax_list(&self) -> Vec<usize> {
+        let mut out: Vec<usize> = Vec::new();
+        for (i, s) in self.syntaxes.iter().enumerate() {
+            match out.iter().position(|&o| self.syntaxes[o].name.eq_ignore_ascii_case(&s.name)) {
+                Some(p) => out[p] = i,
+                None => out.push(i),
+            }
+        }
+        out
+    }
+
+    /// Colour a text as a language, named by its name (`Pascal`), an
+    /// extension (`PAS`) or a file name (`DEMO.PAS`); an empty name, or one
+    /// nobody answers to, turns the colours off. The language's name, or
+    /// `None` when there is no such language.
+    pub fn set_syntax(&mut self, id: ViewId, what: &str) -> Option<String> {
+        self.load_syntaxes();
+        let found = self.syntax_list().into_iter().rev().find(|&i| self.syntaxes[i].answers_to(what));
+        let name = found.map(|i| self.syntaxes[i].name.clone());
+        if let Kind::Text(t) = &mut self.nodes[id.ix()].kind {
+            t.syntax = found.map(|i| i as u16);
+            t.states_valid = 0;
+        }
+        name
+    }
+
+    /// The language a text is coloured as.
+    pub fn syntax_of(&self, id: ViewId) -> Option<String> {
+        match &self.nodes[id.ix()].kind {
+            Kind::Text(t) => t.syntax.and_then(|i| self.syntaxes.get(i as usize)).map(|s| s.name.clone()),
+            _ => None,
+        }
     }
 
     /// A tree node somebody tried to open that has no children yet: its
@@ -1575,7 +1688,7 @@ impl Ui {
     /// A command from the menu or the status line. An editor's own is done
     /// here and now; any other waits for the program to collect it.
     fn emit(&mut self, cmd: Cmd) {
-        if (CM_ED_UNDO..=CM_ED_KEYS).contains(&cmd) {
+        if is_editor_cmd(cmd) {
             self.editor_command(cmd);
         } else {
             self.command = Some(cmd);
@@ -1821,7 +1934,7 @@ impl Ui {
             }
             return true;
         }
-        if (CM_ED_UNDO..=CM_ED_KEYS).contains(&cmd) {
+        if is_editor_cmd(cmd) {
             self.editor_command(cmd);
             return true;
         }
@@ -2120,7 +2233,15 @@ impl Ui {
                     f.layout(r, screen_w);
                 }
                 Kind::Hex(h) => h.layout(r),
-                Kind::Text(t) => t.width = r.w,
+                Kind::Text(t) => {
+                    t.width = r.w;
+                    // The lines the window shows need their starting
+                    // colouring state; lines below them are left for later.
+                    if let Some(s) = t.syntax.and_then(|s| self.syntaxes.get(s as usize)) {
+                        let upto = t.top.max(0) as usize + r.h.max(0) as usize + 1;
+                        crate::syntax::update_states(t, s, upto);
+                    }
+                }
                 Kind::List(l) => l.set_rows(r.h),
                 Kind::Tree(t) => t.set_rows(r.h),
                 _ => {}
@@ -3323,6 +3444,7 @@ impl Ui {
             if skip < line.len() {
                 let take = (abs.w as usize).min(line.len() - skip);
                 buf.raw(abs.x, abs.y + row, &line[skip..skip + take], a, clip);
+                self.paint_syntax(t, li, skip, skip + take, abs.x, abs.y + row, a, buf, clip);
             }
 
             // The selection is painted after the text and recolours it, so a
@@ -3334,6 +3456,23 @@ impl Ui {
                         buf.recolor(abs.x + col, abs.y + row, p.text_selected, clip);
                     }
                 }
+            }
+        }
+    }
+
+    /// Recolour characters `from..to` of line `li`, drawn from column `x`,
+    /// by what they are in the text's language. Over the colour the line
+    /// was drawn in, so a barred caret line keeps its bar.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_syntax(&self, t: &TextView, li: usize, from: usize, to: usize, x: i16, y: i16, base: u8, buf: &mut Buffer, clip: Rect) {
+        let Some(s) = t.syntax.and_then(|s| self.syntaxes.get(s as usize)) else { return };
+        let Some(line) = t.lines.get(li) else { return };
+        let state = if li < t.states_valid { t.states[li] } else { 0 };
+        let mut roles = Vec::new();
+        s.paint(line, state, Some(&mut roles));
+        for (k, r) in roles[from.min(roles.len())..to.min(roles.len())].iter().enumerate() {
+            if *r != crate::syntax::Role::Text {
+                buf.recolor(x + k as i16, y, self.palette.syntax_on(*r, base), clip);
             }
         }
     }
@@ -3361,6 +3500,7 @@ impl Ui {
                 p.text
             };
             buf.raw(abs.x, y, &line[s..e], a, clip);
+            self.paint_syntax(t, li as usize, s, e, abs.x, y, a, buf, clip);
             if t.anchor.is_some() {
                 // A row that goes on in the next one ends at its last
                 // character; only the line's last row shows the line break

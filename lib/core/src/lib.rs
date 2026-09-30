@@ -34,6 +34,7 @@ pub mod keymap;
 pub mod menu;
 pub mod palette;
 pub mod status;
+pub mod syntax;
 pub mod tree;
 pub mod ui;
 pub mod views;

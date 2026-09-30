@@ -577,10 +577,13 @@ view_file:
         mov  cx,[file_n]
         mov  al,1               ; read-only: a viewer
         call owl_text_dos
-        ; With Find, Word wrap and the bytes in hex on its Edit menu.
+        ; With Find, Word wrap, the bytes in hex and the language on its
+        ; Edit menu - and coloured as the language its name says.
         mov  bx,ax
-        mov  ax,(EDIT_READONLY shl 8) or OFFER_FIND or OFFER_WRAP or OFFER_HEX
+        mov  ax,(EDIT_READONLY shl 8) or OFFER_FIND or OFFER_WRAP or OFFER_HEX or OFFER_SYNTAX
         call owl_editor
+        mov  si,path_buf        ; the extension decides: .ASM, .BAT, .PAS
+        call owl_syntax
         clc
         ret
 .close_fail:

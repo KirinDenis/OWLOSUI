@@ -43,7 +43,9 @@ pub mod offer {
     pub const HEX: u8 = 32;
     /// Classic keys: Borland's WordStar arrangement, or the modern one.
     pub const KEYS: u8 = 64;
-    pub const ALL: u8 = 127;
+    /// Syntax: the language the text is coloured as, chosen from a list.
+    pub const SYNTAX: u8 = 128;
+    pub const ALL: u8 = 255;
 }
 
 /// How an editor is set, as bits: what `Ui::set_editor` takes and
@@ -59,6 +61,9 @@ pub mod state {
     pub const CLASSIC: u8 = 4;
     /// Shown as bytes.
     pub const HEX: u8 = 8;
+    /// Coloured as a language. Read only: the language is set by name,
+    /// with `Ui::set_syntax`.
+    pub const SYNTAX: u8 = 16;
 }
 
 /// Where each row of a line starts when it is folded at `width`.
@@ -395,6 +400,9 @@ impl TextView {
     fn splice(&mut self, a: Point, b: Point, new: &[Vec<Glyph>]) -> Vec<Vec<Glyph>> {
         let old = self.extract(a, b);
         self.modified = true;
+        // Line a.y still starts as it did; what every line after it starts
+        // in has to be worked out again, and is, when it is next shown.
+        self.states_valid = self.states_valid.min(a.y as usize + 1);
 
         let prefix = self.lines[a.y as usize][..a.x as usize].to_vec();
         let suffix = self.lines[b.y as usize][b.x as usize..].to_vec();

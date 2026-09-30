@@ -167,6 +167,12 @@ unsigned char owl_editor_state(owl_id text)
     owl_begin(0x5E); owl_u16(text); owl_send();
     return owl_reply()[1];
 }
+
+int owl_syntax(owl_id text, const char *language)
+{
+    owl_begin(0x5F); owl_u16(text); owl_str(language); owl_send();
+    return owl_reply()[0];
+}
 void owl_close(owl_id id)    { with_id(0x20, id); }
 void owl_activate(owl_id id) { with_id(0x27, id); }
 owl_id owl_active(void)      { owl_begin(0x2A); return send_id(); }

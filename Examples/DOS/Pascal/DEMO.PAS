@@ -174,7 +174,7 @@ var
   N: Word;
   Size: LongInt;
   Title: string;
-  W: Word;
+  W, T: Word;
 begin
   ViewFile := False;
   Assign(F, Path);
@@ -186,8 +186,11 @@ begin
   if Size > N then Title := Name + ' - the first ' + IntStr(N) + ' bytes'
   else Title := Name;
   W := OwlWindow(0, 2, 2, 76, 20, OwlBlue, Title, CmClose);
-  { A viewer, with Find, Word wrap and the bytes in hex on its Edit menu. }
-  OwlEditor(OwlTextDos(W, FileBuf, N, 1), OfferFind or OfferWrap or OfferHex, EditReadOnly);
+  { A viewer, with Find, Word wrap, the bytes in hex and the language on its
+    Edit menu - and coloured as the language its name says. }
+  T := OwlTextDos(W, FileBuf, N, 1);
+  OwlEditor(T, OfferFind or OfferWrap or OfferHex or OfferSyntax, EditReadOnly);
+  OwlSyntax(T, Name);
   ViewFile := True;
 end;
 

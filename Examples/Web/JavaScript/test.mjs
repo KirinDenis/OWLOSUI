@@ -220,6 +220,24 @@ await test('Demo: an editor brings an Edit menu the core answers - Word wrap, Fi
   check(o.active() === w, 'the editor is not in front again');
 });
 
+await test('Demo: a file is coloured as the language its name says', async () => {
+  const o = await owl();
+  const app = new Demo.App(o);
+  app.addDoc('HELLO.PAS', 'begin { hi }\nend.', null, null);
+  const t = app.docs.get(o.active()).text;
+  check(o.editorState(t).syntax, 'no language for HELLO.PAS');
+  const f = o.frame();
+  const at = f.find('begin');
+  check(f.attr(at.x, at.y) === 0x1F, `begin is not white on blue: ${f.attr(at.x, at.y).toString(16)}`, f);
+  const c = f.find('{ hi }');
+  check(f.attr(c.x, c.y) === 0x17, 'the comment is not grey', f);
+  // A name nobody answers to stays plain; Edit > Syntax lists the languages.
+  check(o.syntax(t, 'NOTES.XYZ') === null && !o.editorState(t).syntax, 'NOTES.XYZ got a language');
+  key(o, app, 'e', { alt: true });
+  key(o, app, 'y');
+  check(o.frame().find('Pascal') && o.frame().find('Assembler'), 'no languages listed', o.frame());
+});
+
 await test('Demo: the ASCII table names a clicked glyph; the puzzle slides', async () => {
   const o = await owl();
   const app = new Demo.App(o);

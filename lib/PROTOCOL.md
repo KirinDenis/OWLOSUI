@@ -268,6 +268,8 @@ is the client's, and about 90 ms is long enough to be seen.
 | 0x49 | SET_READONLY | `id on:u8` | OK — a text view becomes a viewer (`[view]` in its title) or an editor again |
 | 0x5D | EDITOR | `id offers:u8 state:u8` | OK — what a text view offers, and how it is set; see below |
 | 0x5E | GET_EDITOR | `id` | `offers:u8 state:u8 line:u16 col:u16` — the same, as it is now (the person may have changed it from the menu), and where the caret is, both from 0 |
+| 0x5F | SYNTAX | `id language:str` | `found:u8 name:str` — colour a text as a language, named by its name (`Pascal`), an extension (`PAS`) or a file name (`DEMO.PAS`); empty, or a name nobody answers to, is plain text |
+| 0x60 | SYNTAX_DEFINE | `text:str` | `count:u8` — languages of the program's own, in the format of `lib/core/src/syntax.ini`; one named like the core's takes its place |
 | 0x48 | TILE  | —       | OK — the windows share the work area with no overlap; a fixed-size one stands in its cell at its own size |
 
 `EDITOR.offers` switches on whole features of an editor, and the core then
@@ -281,6 +283,7 @@ editor's window is active. None of them sends the program a command.
     bit 4  ReadOnly  Read only, ticked while on
     bit 5  Hex       Hex view: the same text as bytes; the text's id keeps working
     bit 6  Keys      Classic keys: Borland's WordStar arrangement, or the modern one
+    bit 7  Syntax    Syntax: None, or one of the languages, to colour the text as
 
 The items go into the bar's Edit menu after a line, or, when the bar has
 none, into an Edit menu of their own after the first menu. Without a menu
@@ -290,6 +293,12 @@ offering nothing - the default - changes neither bar.
 
 `EDITOR.state`: bit 0 word wrap (long lines folded at the edge, on the
 screen only), bit 1 read only, bit 2 classic keys, bit 3 shown as hex.
+`GET_EDITOR` also sets bit 4 while the text is coloured as a language;
+`EDITOR` ignores it - a language is chosen by name, with `SYNTAX`.
+
+The core knows C, C#, JavaScript, JSON, Rust, Pascal, Assembler, Batch and
+INI. Their colours are palette roles (`Syntax keyword`, `type`, `comment`,
+`string`, `number`, `directive`), so `SET_COLOR` changes them like any other.
 
 `FRAME` is the whole screen, every time. At 80×25 that is 6000 bytes, and
 a client that wants to redraw only what changed keeps the previous frame

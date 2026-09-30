@@ -88,6 +88,7 @@ OP_CYCLE_BACK   = 4Dh
 OP_WAIT         = 5Ch
 OP_EDITOR       = 5Dh
 OP_GET_EDITOR   = 5Eh
+OP_SYNTAX       = 5Fh
 
 ; ---- what an editor offers (owl_editor): the core then runs each by itself --
 OFFER_EDIT      = 01h           ; Undo, Redo, Cut, Copy, Paste, Select all
@@ -97,12 +98,14 @@ OFFER_WRAP      = 08h           ; Word wrap
 OFFER_READONLY  = 10h           ; Read only
 OFFER_HEX       = 20h           ; the same text as bytes
 OFFER_KEYS      = 40h           ; Classic keys: Borland's WordStar arrangement
-OFFER_ALL       = 7Fh
+OFFER_SYNTAX    = 80h           ; Syntax: the language the text is coloured as
+OFFER_ALL       = 0FFh
 ; ---- and how it is set --------------------------------------------------------
 EDIT_WRAP       = 01h
 EDIT_READONLY   = 02h
 EDIT_CLASSIC    = 04h
 EDIT_HEX        = 08h
+EDIT_SYNTAX     = 10h           ; read back only: set a language with owl_syntax
 
 ; ---- WINDOW flags -------------------------------------------------------------
 WF_MODAL        = 01h
@@ -624,6 +627,17 @@ owl_editor_state:
         owl_w bx
         call owl_call
         mov  al,[OWL_REPLY+4]
+        ret
+
+; BX: a text. SI: a zero-ended language - its name, an extension or a
+; file name: 'ASM', 'DEMO.PAS'. AL: 1 if there is such a language and the
+; text is now coloured as it, 0 if not and the text is plain.
+owl_syntax:
+        owl_op OP_SYNTAX
+        owl_w bx
+        call owl_zstr
+        call owl_call
+        mov  al,[OWL_REPLY+3]
         ret
 
 ; An editor holding bytes in DOS's code page. BX: the window, SI: the

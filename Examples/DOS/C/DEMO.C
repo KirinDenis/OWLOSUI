@@ -155,6 +155,7 @@ static int view_file(const char *path, const char *name)
     unsigned n;
     long size;
     owl_id w;
+    owl_id t;
     if (!fp) return 0;
     n = fread(file_buf, 1, sizeof file_buf, fp);
     fseek(fp, 0, SEEK_END);
@@ -163,9 +164,11 @@ static int view_file(const char *path, const char *name)
     if (size > (long)n) sprintf(title, "%s - the first %u bytes", name, n);
     else strcpy(title, name);
     w = owl_window(0, 2, 2, 76, 20, OWL_BLUE, title, CM_CLOSE);
-    /* A viewer, with Find, Word wrap and the bytes in hex on its Edit menu. */
-    owl_editor(owl_text_dos(w, file_buf, n, 1),
-               OWL_OFFER_FIND | OWL_OFFER_WRAP | OWL_OFFER_HEX, OWL_EDIT_READONLY);
+    /* A viewer, with Find, Word wrap, the bytes in hex and the language on
+       its Edit menu - and coloured as the language its name says. */
+    t = owl_text_dos(w, file_buf, n, 1);
+    owl_editor(t, OWL_OFFER_FIND | OWL_OFFER_WRAP | OWL_OFFER_HEX | OWL_OFFER_SYNTAX, OWL_EDIT_READONLY);
+    owl_syntax(t, name);
     return 1;
 }
 

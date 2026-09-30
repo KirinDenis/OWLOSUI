@@ -150,14 +150,15 @@ pub fn clicked(ui: &mut Ui, canvas: ViewId) -> Option<(i16, i16)> {
 
 /// An editor filling its window; read-only makes it a viewer, `[view]`.
 /// An editor offers everything it has on an Edit menu of its own while its
-/// window is in front; a viewer offers Find, Word wrap and the bytes in
-/// hex. The core runs all of it - nothing comes back to the program.
+/// window is in front; a viewer offers Find, Word wrap, the bytes in hex
+/// and the language to colour it as. The core runs all of it - nothing
+/// comes back to the program.
 pub fn editor(ui: &mut Ui, parent: ViewId, lines: Vec<Vec<Glyph>>, readonly: bool) -> ViewId {
     use owlosui_core::edit::{offer, state};
     let id = ui.insert(parent, Rect::default(), Kind::Text(TextView::new(lines)));
     ui.set_dock(id, Dock::Fill);
     if readonly {
-        ui.set_editor(id, offer::FIND | offer::WRAP | offer::HEX, state::READONLY);
+        ui.set_editor(id, offer::FIND | offer::WRAP | offer::HEX | offer::SYNTAX, state::READONLY);
     } else {
         ui.set_editor(id, offer::ALL, 0);
     }

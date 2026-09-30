@@ -137,6 +137,10 @@ export class App {
     // window is in front: Find, Replace, Word wrap, Read only, Hex view,
     // Classic keys. The core runs all of it; nothing comes back here.
     this.owl.editor(t, Offer.All);
+    // Coloured as its language, which its name says: DEMO.PAS is Pascal.
+    // A name no language answers to stays plain, and Edit > Syntax can
+    // still choose one.
+    this.owl.syntax(t, name);
     this.editors.push(w);
     this.docs.set(w, { text: t, source, path, name, crlf });
   }
