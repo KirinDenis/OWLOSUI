@@ -86,6 +86,23 @@ OP_WINDOW_STATUS = 4Ah
 OP_WINDOW_LIST  = 4Ch
 OP_CYCLE_BACK   = 4Dh
 OP_WAIT         = 5Ch
+OP_EDITOR       = 5Dh
+OP_GET_EDITOR   = 5Eh
+
+; ---- what an editor offers (owl_editor): the core then runs each by itself --
+OFFER_EDIT      = 01h           ; Undo, Redo, Cut, Copy, Paste, Select all
+OFFER_FIND      = 02h           ; Find... Ctrl+F, Find next Ctrl+L
+OFFER_REPLACE   = 04h           ; Replace... Ctrl+H
+OFFER_WRAP      = 08h           ; Word wrap
+OFFER_READONLY  = 10h           ; Read only
+OFFER_HEX       = 20h           ; the same text as bytes
+OFFER_KEYS      = 40h           ; Classic keys: Borland's WordStar arrangement
+OFFER_ALL       = 7Fh
+; ---- and how it is set --------------------------------------------------------
+EDIT_WRAP       = 01h
+EDIT_READONLY   = 02h
+EDIT_CLASSIC    = 04h
+EDIT_HEX        = 08h
 
 ; ---- WINDOW flags -------------------------------------------------------------
 WF_MODAL        = 01h
@@ -585,6 +602,28 @@ owl_reply_text:
         mov  byte [di],0
         pop  di
         pop  cx
+        ret
+
+; BX: a text. AL: what it offers (OFFER_ bits), AH: how it is set (EDIT_
+; bits). From then on the core answers its Edit menu, its keys and its
+; Find and Replace dialogs by itself; nothing comes back to the program.
+owl_editor:
+        push ax
+        owl_op OP_EDITOR
+        owl_w bx
+        pop  ax
+        call owl_byte           ; the offers
+        mov  al,ah
+        call owl_byte           ; the state
+        owl_send
+        ret
+
+; BX: a text. AL: its EDIT_ bits as the person has left them.
+owl_editor_state:
+        owl_op OP_GET_EDITOR
+        owl_w bx
+        call owl_call
+        mov  al,[OWL_REPLY+4]
         ret
 
 ; An editor holding bytes in DOS's code page. BX: the window, SI: the

@@ -199,6 +199,27 @@ await test('Demo: menu bar, hints, and every tool opens', async () => {
   check(o.frame().find('Windows [modal]'), 'Alt+0 did not list the windows', o.frame());
 });
 
+await test('Demo: an editor brings an Edit menu the core answers - Word wrap, Find', async () => {
+  const o = await owl();
+  const app = new Demo.App(o);
+  check(!o.frame().row(0).includes('Edit'), 'no editor, no Edit menu', o.frame());
+  app.onCommand(Demo.CmNew);
+  let f = o.frame();
+  check(f.row(0).includes('File  Edit  Tools'), 'the Edit menu is not after File', f);
+  // Alt+E, W: Word wrap - the core does it, the program hears nothing.
+  const w = o.active();
+  const t = app.docs.get(w).text;
+  key(o, app, 'e', { alt: true });
+  check(o.frame().find('Word wrap') && o.frame().find('Find...'), 'no editor items', o.frame());
+  key(o, app, 'w');
+  check(o.editorState(t).wrap, 'Word wrap did not turn on');
+  // Ctrl+F: the core's own Find dialog; Escape leaves it.
+  key(o, app, 'f', { ctrl: true });
+  check(o.frame().find('Text to find'), 'no Find dialog', o.frame());
+  key(o, app, 'Escape');
+  check(o.active() === w, 'the editor is not in front again');
+});
+
 await test('Demo: the ASCII table names a clicked glyph; the puzzle slides', async () => {
   const o = await owl();
   const app = new Demo.App(o);
@@ -224,6 +245,110 @@ await test('Demo: Colors recolours the desktop live, and Cancel puts it back', a
   key(o, app, 'Escape');
   check(o.frame().attr(2, 2) === before, 'Cancel did not put the colour back', o.frame());
 });
+
+// ------------------------------------------------------------------ files
+//
+// The server's folder and WebDAV, against RUN.CMD's own server started
+// here on a folder of its own; the browser's storage has no Node
+// equivalent, so only its message for a browser without one is checked.
+
+const { spawn } = await import('node:child_process');
+const { mkdtempSync, writeFileSync, mkdirSync, readFileSync: readText, rmSync } = await import('node:fs');
+const { tmpdir } = await import('node:os');
+const { join } = await import('node:path');
+const { fileURLToPath } = await import('node:url');
+const { ServerFolder } = await import('../../../lib/js/files/server.js');
+const { WebDavFolder, parseMultistatus } = await import('../../../lib/js/files/webdav.js');
+const { BrowserStorage } = await import('../../../lib/js/files/browser.js');
+
+const folder = mkdtempSync(join(tmpdir(), 'owlosui-files-'));
+writeFileSync(join(folder, 'WELCOME.TXT'), 'Hello from the server.\n');
+mkdirSync(join(folder, 'NOTES'));
+writeFileSync(join(folder, 'NOTES', 'A.TXT'), 'note a\n');
+const exe = fileURLToPath(new URL(`../../../target/release/owlosui-httpd${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url));
+const server = spawn(exe, [fileURLToPath(new URL('../../..', import.meta.url)), '/', '--files', folder, '--no-open']);
+const origin = await new Promise((resolve, reject) => {
+  let seen = '';
+  server.stdout.on('data', d => {
+    seen += d;
+    const m = seen.match(/at (http:\/\/localhost:\d+)\//);
+    if (m) resolve(m[1]);
+  });
+  server.on('error', reject);
+  setTimeout(() => reject(new Error(`no server: ${seen}`)), 10000);
+});
+
+for (const [what, source] of [["the server's folder", new ServerFolder(`${origin}/files`)], ['WebDAV', new WebDavFolder(`${origin}/dav/`)]]) {
+  await test(`Files: ${what} lists a folder, reads a file and saves one`, async () => {
+    const top = await source.list('/');
+    check(top.some(e => e.name === 'WELCOME.TXT' && !e.dir && e.size === 23), `no WELCOME.TXT: ${JSON.stringify(top)}`);
+    check(top.some(e => e.name === 'NOTES' && e.dir), 'no NOTES folder');
+    check((await source.list('/NOTES/')).some(e => e.name === 'A.TXT'), 'no A.TXT in NOTES');
+    check((await source.read('/WELCOME.TXT')) === 'Hello from the server.\n', 'read back something else');
+    await source.write(`/NOTES/${what.length}.TXT`, 'saved');
+    check(readText(join(folder, 'NOTES', `${what.length}.TXT`), 'utf8') === 'saved', 'the save did not reach the disk');
+  });
+}
+
+await test('Files: a WebDAV answer is read whatever prefix the server gives DAV:', async () => {
+  const xml = `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:lp1="DAV:">
+    <d:response><d:href>/remote.php/dav/files/me/</d:href><d:propstat><d:prop><lp1:resourcetype><d:collection/></lp1:resourcetype></d:prop></d:propstat></d:response>
+    <d:response><d:href>/remote.php/dav/files/me/Photos/</d:href><d:propstat><d:prop><lp1:resourcetype><d:collection/></lp1:resourcetype></d:prop></d:propstat></d:response>
+    <d:response><d:href>/remote.php/dav/files/me/Read%20me.md</d:href><d:propstat><d:prop><lp1:resourcetype/><d:getcontentlength>42</d:getcontentlength><d:getlastmodified>Tue, 29 Sep 2026 10:00:00 GMT</d:getlastmodified></d:prop></d:propstat></d:response>
+  </d:multistatus>`;
+  const e = parseMultistatus(xml, '/remote.php/dav/files/me/');
+  check(e.length === 2, `${e.length} entries, not 2: the folder itself is not one of them`);
+  check(e[0].name === 'Photos' && e[0].dir, 'Photos is not a folder');
+  check(e[1].name === 'Read me.md' && e[1].size === 42 && e[1].date.getUTCDate() === 29, `the file came out ${JSON.stringify(e[1])}`);
+});
+
+await test("Files: a browser with no storage for pages is told so in words", async () => {
+  let message = '';
+  try { await new BrowserStorage().list('/'); } catch (err) { message = err.message; }
+  check(/no storage for a page/.test(message), `said: ${message}`);
+});
+
+await test("Demo: Open from the server's folder, W and Enter open WELCOME.TXT, F2 saves it", async () => {
+  const o = await owl();
+  const app = new Demo.App(o);
+  app.openFrom(new ServerFolder(`${origin}/files`));
+  await app.pending;
+  let f = o.frame();
+  check(f.find("Open - the server's folder") && f.find('Examples/Web/files on the computer'), 'no Open dialog explaining itself', f);
+  check(f.find('WELCOME.TXT') && f.find('NOTES'), 'the folder is not in the panel', f);
+  key(o, app, 'w');
+  key(o, app, 'Enter');
+  await app.pending;
+  f = o.frame();
+  check(f.find("WELCOME.TXT - the server's folder") && f.find('Hello from the server.'), 'the file did not open', f);
+  o.type('Edited. ');
+  key(o, app, 'F2');
+  await app.pending;
+  check(o.frame().find('is saved in'), 'no word that it was saved', o.frame());
+  check(readText(join(folder, 'WELCOME.TXT'), 'utf8').startsWith('Edited. Hello'), 'the disk did not change');
+});
+
+await test('Demo: a CR LF file opens without a glyph for CR and is saved with CR LF again', async () => {
+  writeFileSync(join(folder, 'DOS.TXT'), 'line one\r\nline two\r\n');
+  const o = await owl();
+  const app = new Demo.App(o);
+  app.openFrom(new WebDavFolder(`${origin}/dav/`));
+  await app.pending;
+  app.chosen('DOS.TXT');
+  await app.pending;
+  const f = o.frame();
+  check(f.find('DOS.TXT - the WebDAV folder') && f.find('line two'), 'the file did not open', f);
+  const one = f.find('line one');
+  check(one && f.char(one.x + 8, one.y) === ' ', 'a CR shows as a glyph after the line', f);
+  o.type('X');
+  key(o, app, 'F2');
+  await app.pending;
+  const disk = readText(join(folder, 'DOS.TXT'), 'utf8');
+  check(disk === 'Xline one\r\nline two\r\n', `saved as ${JSON.stringify(disk)}`);
+});
+
+server.kill();
+rmSync(folder, { recursive: true, force: true });
 
 console.log(failed ? `${failed} case(s) FAILED` : 'all cases passed');
 process.exit(failed ? 1 : 0);

@@ -266,7 +266,30 @@ is the client's, and about 90 ms is long enough to be seen.
 | 0x4A | WINDOW_STATUS | `id` then the items of STATUS | OK — the keys the window carries: on the status line, and bound, only while it is the active window |
 | 0x4B | WINDOW_MENU | `id` then the items of MENU_BAR | OK — the window's menus, merged into the bar while it is active: a submenu named like one on the bar goes into it after a line, any other goes on the end |
 | 0x49 | SET_READONLY | `id on:u8` | OK — a text view becomes a viewer (`[view]` in its title) or an editor again |
+| 0x5D | EDITOR | `id offers:u8 state:u8` | OK — what a text view offers, and how it is set; see below |
+| 0x5E | GET_EDITOR | `id` | `offers:u8 state:u8 line:u16 col:u16` — the same, as it is now (the person may have changed it from the menu), and where the caret is, both from 0 |
 | 0x48 | TILE  | —       | OK — the windows share the work area with no overlap; a fixed-size one stands in its cell at its own size |
+
+`EDITOR.offers` switches on whole features of an editor, and the core then
+does all of each one itself - its items, its keys, its dialogs - while the
+editor's window is active. None of them sends the program a command.
+
+    bit 0  Edit      Undo, Redo, Cut, Copy, Paste, Select all
+    bit 1  Find      Find... (Ctrl+F, or Ctrl+Q F with classic keys) and Find next (Ctrl+L)
+    bit 2  Replace   Replace... (Ctrl+H, or Ctrl+Q A)
+    bit 3  Wrap      Word wrap, ticked while on
+    bit 4  ReadOnly  Read only, ticked while on
+    bit 5  Hex       Hex view: the same text as bytes; the text's id keeps working
+    bit 6  Keys      Classic keys: Borland's WordStar arrangement, or the modern one
+
+The items go into the bar's Edit menu after a line, or, when the bar has
+none, into an Edit menu of their own after the first menu. Without a menu
+bar, Find and Replace go on the status line instead. Either way the status
+line's right end says where the caret is (`Ln 3 Col 7  Wrap`). An editor
+offering nothing - the default - changes neither bar.
+
+`EDITOR.state`: bit 0 word wrap (long lines folded at the edge, on the
+screen only), bit 1 read only, bit 2 classic keys, bit 3 shown as hex.
 
 `FRAME` is the whole screen, every time. At 80×25 that is 6000 bytes, and
 a client that wants to redraw only what changed keeps the previous frame

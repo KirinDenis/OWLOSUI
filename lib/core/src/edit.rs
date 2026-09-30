@@ -23,6 +23,67 @@ use crate::cell::Glyph;
 use crate::geom::Point;
 use crate::views::TextView;
 
+/// What an editor offers on the menu bar and the status line, as bits of
+/// `TextView::offers`. Each one is a whole feature switched on: the items,
+/// their keys and, for Find and Replace, the dialog the core builds for
+/// them. A program that wants the feature and not the item leaves the bit
+/// off and calls the primitive itself - `find`, `wrap`, `readonly`.
+pub mod offer {
+    /// Undo, Redo, Cut, Copy, Paste, Select all.
+    pub const EDIT: u8 = 1;
+    /// Find... and Find next.
+    pub const FIND: u8 = 2;
+    /// Replace...
+    pub const REPLACE: u8 = 4;
+    /// Word wrap, ticked while it is on.
+    pub const WRAP: u8 = 8;
+    /// Read only, ticked while it is on.
+    pub const READONLY: u8 = 16;
+    /// Hex view: the same text as bytes.
+    pub const HEX: u8 = 32;
+    /// Classic keys: Borland's WordStar arrangement, or the modern one.
+    pub const KEYS: u8 = 64;
+    pub const ALL: u8 = 127;
+}
+
+/// How an editor is set, as bits: what `Ui::set_editor` takes and
+/// `Ui::editor_state` reports. The person can change each of these from the
+/// Edit menu, so a program that cares reads them back rather than
+/// remembering what it set.
+pub mod state {
+    /// Lines folded at the edge.
+    pub const WRAP: u8 = 1;
+    /// A viewer: nothing typed changes the text.
+    pub const READONLY: u8 = 2;
+    /// Borland's keys rather than the modern ones.
+    pub const CLASSIC: u8 = 4;
+    /// Shown as bytes.
+    pub const HEX: u8 = 8;
+}
+
+/// Where each row of a line starts when it is folded at `width`.
+///
+/// A row ends after the last space that fits, so a word is not cut in two;
+/// a word longer than the row is cut where the row ends, because there is
+/// nowhere else. A line that exactly fills the width gets an empty row
+/// after it, and that is on purpose: the caret at the end of the line has
+/// to stand somewhere, and a column past the edge is nowhere.
+pub fn row_starts(line: &[Glyph], width: i16) -> Vec<usize> {
+    let w = width.max(1) as usize;
+    let mut starts = vec![0];
+    let mut s = 0;
+    while line.len() - s >= w {
+        let end = s + w;
+        let fold = line[s..end]
+            .iter()
+            .rposition(|&g| g == b' ' as Glyph)
+            .map_or(end, |i| s + i + 1);
+        starts.push(fold);
+        s = fold;
+    }
+    starts
+}
+
 /// What an editor can be asked to do. Keys are somebody else's problem.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Cmd {
@@ -140,6 +201,153 @@ impl TextView {
         }
         self.cur.y = self.cur.y.clamp(0, self.last_line());
         self.cur.x = self.cur.x.clamp(0, self.line_len(self.cur.y));
+    }
+
+    // ---------------------------------------------------------------- folding
+    //
+    // With `wrap` on, a line is one or more rows on the screen. Everything
+    // the text *is* stays in lines - the caret is still a line and a column,
+    // an edit is still a splice - and only what is about the screen goes by
+    // rows: Up and Down, Home and End, paging, scrolling, where a click
+    // lands. A row is named by its line and its number within the line, so
+    // nothing ever counts the rows of the whole text: a long file costs no
+    // more per key than a short one.
+
+    /// Whether lines are being folded now: asked for, and laid out.
+    pub fn wrapping(&self) -> bool {
+        self.wrap && self.width > 0
+    }
+
+    /// Where each row of line `y` starts; one row at 0 when not folding.
+    pub fn rows_of(&self, y: i16) -> Vec<usize> {
+        match self.lines.get(y as usize) {
+            Some(l) if self.wrapping() => row_starts(l, self.width),
+            _ => vec![0],
+        }
+    }
+
+    /// The row a point is on within its line, and its column on that row.
+    pub fn row_col(&self, p: Point) -> (i16, i16) {
+        let starts = self.rows_of(p.y);
+        let x = p.x.max(0) as usize;
+        let r = starts.iter().rposition(|&s| s <= x).unwrap_or(0);
+        (r as i16, (x - starts[r]) as i16)
+    }
+
+    /// The point on row `row` of line `y` nearest column `col`. A row that
+    /// is followed by another ends one short of where that one starts: the
+    /// column where it starts belongs to it.
+    fn at_row(&self, y: i16, row: i16, col: i16) -> Point {
+        let starts = self.rows_of(y);
+        let r = (row.max(0) as usize).min(starts.len() - 1);
+        let last = match starts.get(r + 1) {
+            Some(&next) => next - 1,
+            None => self.line_len(y) as usize,
+        };
+        let x = (starts[r] + col.max(0) as usize).min(last.max(starts[r]));
+        Point::new(x as i16, y)
+    }
+
+    /// The row after (y, row), or `None` at the end of the text.
+    pub fn next_row(&self, y: i16, row: i16) -> Option<(i16, i16)> {
+        if (row as usize) + 1 < self.rows_of(y).len() {
+            Some((y, row + 1))
+        } else if y < self.last_line() {
+            Some((y + 1, 0))
+        } else {
+            None
+        }
+    }
+
+    /// The row before (y, row), or `None` at the top.
+    pub fn prev_row(&self, y: i16, row: i16) -> Option<(i16, i16)> {
+        if row > 0 {
+            Some((y, row - 1))
+        } else if y > 0 {
+            Some((y - 1, self.rows_of(y - 1).len() as i16 - 1))
+        } else {
+            None
+        }
+    }
+
+    /// The first row on the screen. `top_row` is kept inside its line here
+    /// rather than wherever the width changes, because the width changes
+    /// in more places than one.
+    pub fn first_row(&self) -> (i16, i16) {
+        let top = self.top.clamp(0, self.last_line());
+        let rows = self.rows_of(top).len() as i16;
+        (top, self.top_row.clamp(0, rows - 1))
+    }
+
+    /// The row `n` rows down the screen, or `None` below the end.
+    pub fn screen_row(&self, n: i16) -> Option<(i16, i16)> {
+        let mut at = self.first_row();
+        for _ in 0..n {
+            at = self.next_row(at.0, at.1)?;
+        }
+        Some(at)
+    }
+
+    /// Where a point is on the screen of a folding view, as (column, row)
+    /// counted from the view's corner, if it is within `page` rows.
+    pub fn screen_of(&self, p: Point, page: i16) -> Option<(i16, i16)> {
+        let (r, col) = self.row_col(p);
+        let want = (p.y, r);
+        let mut at = self.first_row();
+        for n in 0..page {
+            if at == want {
+                return Some((col, n));
+            }
+            at = self.next_row(at.0, at.1)?;
+        }
+        None
+    }
+
+    /// The point under a cell of a folding view.
+    pub fn point_at(&self, col: i16, row: i16) -> Point {
+        let mut at = self.first_row();
+        for _ in 0..row.max(0) {
+            match self.next_row(at.0, at.1) {
+                Some(a) => at = a,
+                None => break,
+            }
+        }
+        self.at_row(at.0, at.1, col)
+    }
+
+    /// Scroll a folding view by rows; it stops with the last row showing.
+    pub fn scroll_rows(&mut self, delta: i16, page: i16) {
+        let mut at = self.first_row();
+        for _ in 0..delta.unsigned_abs() {
+            let step = if delta > 0 {
+                // Only while there is something below the page to bring up.
+                if self.screen_row(page).is_none() {
+                    break;
+                }
+                self.next_row(at.0, at.1)
+            } else {
+                self.prev_row(at.0, at.1)
+            };
+            match step {
+                Some(a) => {
+                    at = a;
+                    self.top = a.0;
+                    self.top_row = a.1;
+                }
+                None => break,
+            }
+        }
+        self.top = at.0;
+        self.top_row = at.1;
+    }
+
+    /// Fold, or stop folding. The caret stays on its character, and the
+    /// view, `page` rows high, comes to it.
+    pub fn set_wrap(&mut self, on: bool, page: i16) {
+        self.wrap = on;
+        self.top_row = 0;
+        self.left = 0;
+        self.follow_caret(page);
     }
 
     /// The selected span, if there is one.
@@ -414,6 +622,33 @@ impl TextView {
                     self.cur.x = 0;
                 }
             }
+            // Folded, the vertical moves go by rows on the screen and keep
+            // the column on the row, which is what the eye is following.
+            LineUp | LineDown | PageUp | PageDown if self.wrapping() => {
+                let n = if matches!(cmd, LineUp | LineDown) { 1 } else { page.max(1) };
+                let (mut r, col) = self.row_col(self.cur);
+                let mut y = self.cur.y;
+                for _ in 0..n {
+                    let step = if matches!(cmd, LineUp | PageUp) {
+                        self.prev_row(y, r)
+                    } else {
+                        self.next_row(y, r)
+                    };
+                    match step {
+                        Some((ny, nr)) => {
+                            y = ny;
+                            r = nr;
+                        }
+                        None => break,
+                    }
+                }
+                self.cur = self.at_row(y, r, col);
+            }
+            LineStart | LineEnd if self.wrapping() => {
+                let (r, _) = self.row_col(self.cur);
+                let col = if cmd == LineStart { 0 } else { i16::MAX };
+                self.cur = self.at_row(self.cur.y, r, col);
+            }
             LineUp => self.cur.y = (self.cur.y - 1).max(0),
             LineDown => self.cur.y = self.cur.y.saturating_add(1).min(self.last_line()),
             PageUp => self.cur.y = self.cur.y.saturating_sub(page).max(0),
@@ -550,7 +785,31 @@ impl TextView {
 
     /// Scroll only as far as it takes to see the caret. Anything more and the
     /// text jumps under the typist's hands.
-    fn follow_caret(&mut self, page: i16) {
+    pub(crate) fn follow_caret(&mut self, page: i16) {
+        if self.wrapping() {
+            // The same rule by rows: up to the caret's row if it is above,
+            // and if it is below, far enough that it is the last one.
+            let (r, _) = self.row_col(self.cur);
+            let caret = (self.cur.y, r);
+            let first = self.first_row();
+            if caret < first {
+                (self.top, self.top_row) = caret;
+            } else if self.screen_of(self.cur, page.max(1)).is_none() {
+                let mut at = caret;
+                for _ in 1..page.max(1) {
+                    match self.prev_row(at.0, at.1) {
+                        Some(a) => at = a,
+                        None => break,
+                    }
+                }
+                (self.top, self.top_row) = at;
+            } else {
+                (self.top, self.top_row) = first;
+            }
+            self.left = 0;
+            return;
+        }
+        self.top_row = 0;
         if self.cur.y < self.top {
             self.top = self.cur.y;
         } else if self.cur.y >= self.top + page {

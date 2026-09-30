@@ -53,6 +53,21 @@ const
   ModCtrl     = 2;
   ModAlt      = 4;
 
+  { what an editor offers (OwlEditor): the core then runs each by itself }
+  OfferEdit     = $01;                  { Undo, Redo, Cut, Copy, Paste, Select all }
+  OfferFind     = $02;                  { Find... Ctrl+F, Find next Ctrl+L }
+  OfferReplace  = $04;                  { Replace... Ctrl+H }
+  OfferWrap     = $08;                  { Word wrap }
+  OfferReadOnly = $10;                  { Read only }
+  OfferHex      = $20;                  { the same text as bytes }
+  OfferKeys     = $40;                  { Classic keys: Borland's WordStar arrangement }
+  OfferAll      = $7F;
+  { and how it is set }
+  EditWrap      = $01;
+  EditReadOnly  = $02;
+  EditClassic   = $04;
+  EditHex       = $08;
+
 type
   TGlyphs = array[0..255] of Word;      { each glyph as Unicode }
 
@@ -87,6 +102,8 @@ function  OwlEnd: Word;
 
 { changing things }
 procedure OwlSetText(Id: Word; const Text: string);
+procedure OwlEditor(Text: Word; Offers, State: Byte);   { Offer.. bits; Edit.. bits }
+function  OwlEditorState(Text: Word): Byte;              { Edit.. bits as the person left them }
 procedure OwlClose(Id: Word);
 procedure OwlActivate(Id: Word);
 function  OwlActive: Word;
@@ -345,6 +362,19 @@ procedure OwlSetText(Id: Word; const Text: string);
 begin
   OwlBegin($2B); OwlU16(Id); OwlStr(Text);
   OwlSend;
+end;
+
+procedure OwlEditor(Text: Word; Offers, State: Byte);
+begin
+  OwlBegin($5D); OwlU16(Text); OwlU8(Offers); OwlU8(State);
+  OwlSend;
+end;
+
+function OwlEditorState(Text: Word): Byte;
+begin
+  OwlBegin($5E); OwlU16(Text);
+  OwlSend;
+  OwlEditorState := Rep[4];
 end;
 
 procedure OwlClose(Id: Word);    begin WithId($20, Id); end;

@@ -16,6 +16,8 @@
 //     learned on; the word and the missing caret are the difference.
 //   * Closing an edited file asks first. The question is a modal box,
 //     and its Yes and No are this window's commands too.
+//   * The Edit menu - Find, Replace, Word wrap, Classic keys - is not
+//     here at all: `Editor` switches it on and the core answers it.
 
 namespace OwlosDemo.Editor;
 
@@ -51,6 +53,12 @@ public sealed class FileWindow
         original = string.Join("\n", lines);
         Id = owl.Window(System.IO.Path.GetFileName(path), owl.Width - 10, owl.Height - 6, closeCmd: closeCmd);
         text = owl.Text(Id, original, readOnly: true);
+        // What the core does by itself: an Edit menu with Find, Replace, Word
+        // wrap and the two keymaps, while this window is in front. Not Read
+        // only or Hex - this window does those itself, with F4 and F7, which
+        // is what it is here to show.
+        owl.Editor(text, Owlosui.Offer.Edit | Owlosui.Offer.Find | Owlosui.Offer.Replace | Owlosui.Offer.Wrap | Owlosui.Offer.Keys,
+                   readOnly: true);
         // The keys and menu items this window brings with it.
         owl.WindowStatus(Id, new Owlosui.StatusItem("~F4~ Edit", CmEditView, ConsoleKey.F4),
                              new Owlosui.StatusItem("~F7~ Hex", CmHex, ConsoleKey.F7));

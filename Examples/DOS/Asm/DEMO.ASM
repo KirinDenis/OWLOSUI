@@ -318,8 +318,13 @@ editor_new:
         owl_rect 0,0,0,0
         owl_b    0              ; fill the window
         owl_b    0              ; editable
-        owl_s    'Type here. Shift and the arrows select, Ctrl+Z takes it back.'
+        owl_s    'Type here. Shift and the arrows select, Ctrl+Z takes it back. The Edit menu has Find, Replace and Word wrap.'
         owl_send
+        ; Everything the editor has, on an Edit menu of its own while this
+        ; window is in front: the core runs it all, nothing comes back here.
+        mov  bx,ax
+        mov  ax,OFFER_ALL       ; AH 0: starts plain
+        call owl_editor
         ret
 
 ; ============================================================================
@@ -572,6 +577,10 @@ view_file:
         mov  cx,[file_n]
         mov  al,1               ; read-only: a viewer
         call owl_text_dos
+        ; With Find, Word wrap and the bytes in hex on its Edit menu.
+        mov  bx,ax
+        mov  ax,(EDIT_READONLY shl 8) or OFFER_FIND or OFFER_WRAP or OFFER_HEX
+        call owl_editor
         clc
         ret
 .close_fail:

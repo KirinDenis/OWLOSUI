@@ -28,7 +28,7 @@ the next one is.
 | | Desktop | Web | DOS |
 |---|---|---|---|
 | **start with** | `dotnet run` in [Desktop/CSharp/01-HelloWorld](Desktop/CSharp/01-HelloWorld/Program.cs) | `Web\RUN.CMD` | `DOS\Asm\RUNWIN.BAT DEMO` |
-| **the full demo** | [Desktop/CSharp/05-OwlosDemo](Desktop/CSharp/05-OwlosDemo/Program.cs) in a console, [06-Window](Desktop/CSharp/06-Window/Program.cs) in a window | [Web/JavaScript/05-Demo](Web/JavaScript/05-Demo/app.js) | DEMO in [assembler](DOS/Asm/DEMO.ASM), [C](DOS/C/DEMO.C) and [Pascal](DOS/Pascal/DEMO.PAS); [the Rust app](DOS/Rust/src/main.rs) |
+| **the full demo** | [Desktop/CSharp/05-OwlosDemo](Desktop/CSharp/05-OwlosDemo/Program.cs) in a console, [06-Window](Desktop/CSharp/06-Window/Program.cs) in a window | [Web/JavaScript/05-Demo](Web/JavaScript/05-Demo/app.js) | DEMO in [assembler](DOS/Asm/DEMO.ASM), [C](DOS/C/DEMO.C) and [Pascal](DOS/Pascal/DEMO.PAS) through the resident, and in [Rust](DOS/Rust/src/demo.rs) with the core linked in |
 | **how it reaches the core** | C#: a pipe to `owlosui-serve`, carried inside the client. Rust: linked in | JavaScript: the same server compiled to WebAssembly. Rust: linked into the module | assembler, C, Pascal: INT 60h to OWLOSRES, the resident. Rust: linked into a flat binary |
 | **read next** | [Desktop/README.md](Desktop/README.md) | [Web/README.md](Web/README.md) | [DOS/README.md](DOS/README.md) |
 

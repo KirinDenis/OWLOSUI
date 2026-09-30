@@ -15,7 +15,7 @@ Examples/Web/Rust/01-Linked/web/*.wasm
 # .COM files are tracked, like the sources they come from; the .BIN is
 # the Rust build, made by Examples/DOS/Rust/build.cmd.
 Examples/DOS/Rust/target/
-Examples/DOS/Rust/OWLOS.BIN
+Examples/DOS/Rust/*.BIN
 Examples/DOS/Rust/*.LOG
 Examples/DOS/Rust/OWLOS.OUT
 Examples/DOS/Rust/TRACE.TXT
@@ -44,6 +44,11 @@ Examples/DOS/*/*.TPU
 lib/dos/target/
 lib/dos/*.LOG
 lib/dos/TRACE.TXT
+
+# The folder the web demo reads and saves (Examples/Web/files): only its
+# welcome file is the repository's; what a visitor saves there is theirs.
+Examples/Web/files/*
+!Examples/Web/files/WELCOME.TXT
 
 # The core for JavaScript: lib/js/build.cmd makes it.
 lib/js/owlosui-wire.wasm

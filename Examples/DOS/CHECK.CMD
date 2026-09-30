@@ -6,12 +6,17 @@ rem A folder's TEST.CMD builds first, then calls this.
 rem
 rem The emulator's own exit code is not looked at: this DOSBox-X faults
 rem while closing after some runs that ended well, the Rust example's too.
+rem
+rem The keys are typed as on a US keyboard, whatever the host's is: DOSBox-X
+rem follows the Windows layout by default, and on a Slovak one the digit
+rem row types letters, so 12+30 never became a sum.
+set DOSBOXX_OPTS=%DOSBOXX_OPTS% -set "dos keyboardlayout=us"
 del SHOTS.TXT RUN.OUT 2>nul
 call .\RUNWIN.BAT HELLO TEST
 findstr /c:"after" RUN.OUT >nul || (echo FAIL: HELLO never came back & exit /b 1)
 findstr /c:"errorlevel" RUN.OUT >nul && (echo FAIL: HELLO did not leave with code 0 & exit /b 1)
 findstr /c:"Hello, world!" SHOTS.TXT >nul || (echo FAIL: HELLO's window was not on the screen & exit /b 1)
-echo ok: HELLO drew its window through INT 60h, and OK ended it
+echo ok: HELLO drew its window, and OK ended it
 del SHOTS.TXT RUN.OUT 2>nul
 call .\RUNWIN.BAT DEMO TEST
 findstr /c:"after" RUN.OUT >nul || (echo FAIL: DEMO never came back & exit /b 1)

@@ -63,11 +63,23 @@ pub struct StatusLine {
     pub items: Vec<StatusItem>,
     /// The application's own items, which every composition starts from.
     pub base: Vec<StatusItem>,
+    /// Words at the right end - where the caret is in the active editor,
+    /// and how it is set. Composed with the items; shown only where it
+    /// does not cover one.
+    pub right: String,
 }
 
 impl StatusLine {
     pub fn new(items: Vec<StatusItem>) -> Self {
-        StatusLine { base: items.clone(), items }
+        StatusLine { base: items.clone(), items, right: String::new() }
+    }
+
+    /// Where the items end.
+    pub fn items_end(&self) -> i16 {
+        match self.items.len() {
+            0 => 0,
+            n => self.item_x(n - 1) + self.items[n - 1].width(),
+        }
     }
 
     /// Where an item starts. One column in from the left, two between items

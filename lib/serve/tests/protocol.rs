@@ -1054,6 +1054,38 @@ fn a_viewer_becomes_an_editor_and_a_hex_dump_shows_bytes() {
 }
 
 #[test]
+fn an_editor_offers_its_edit_menu_and_reports_how_it_is_set() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    // A bar with File only, and a window with an editor in it.
+    let file = item(0, 0, "~F~ile", "", [vec![1], item(0, 1, "~N~ew", "", vec![0])].concat());
+    c.ok(0x1C, &[vec![1], file].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 1, 30, 10), vec![0], s("A.TXT")].concat()));
+    let text = id_of(&c.ok(0x11, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s("one two three four five six seven")].concat()));
+    assert!(find(&frame(&mut c), "Edit").is_none(), "nothing offered yet");
+    // EDITOR: everything offered, word wrap on.
+    c.ok(0x5D, &[u16(text).to_vec(), vec![0x7F, 1]].concat());
+    let f = frame(&mut c);
+    assert_eq!(find(&f, "Edit").map(|p| p.1), Some(0), "an Edit menu on the bar");
+    // Twenty-eight columns inside: "seven" goes down to a row of its own.
+    assert_eq!(find(&f, "one two three four five six ").map(|p| p.1), Some(2), "{}", picture(&f));
+    assert_eq!(find(&f, "seven").map(|p| p.1), Some(3), "folded");
+    // GET_EDITOR: offers, state, line, column.
+    let st = c.ok(0x5E, &u16(text));
+    assert_eq!(&st[..2], &[0x7F, 1]);
+    // The person turns on Read only from the menu: Alt+E, O.
+    c.ok(0x30, &[0, b'e', 0, 4]);
+    c.ok(0x30, &[0, b'o', 0, 0]);
+    // A menu pick shows for a moment before it acts: TICK delivers it.
+    c.ok(0x32, &[]);
+    c.ok(0x41, &[]);
+    let st = c.ok(0x5E, &u16(text));
+    assert_eq!(st[1], 1 | 2, "wrap and read only: {st:?}");
+    let (status, _) = c.call(0x5D, &[u16(win).to_vec(), vec![0, 0]].concat());
+    assert_ne!(status, 0, "a window is not a text");
+}
+
+#[test]
 fn a_window_carries_its_keys_and_menu_items_over_the_wire() {
     let mut c = Client::start();
     c.ok(0x01, &[i16(80), i16(25)].concat());

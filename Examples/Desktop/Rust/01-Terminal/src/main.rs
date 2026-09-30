@@ -314,7 +314,16 @@ fn open_file(ui: &mut Ui, parent: owlosui_core::ViewId, rect: Rect, path: &str) 
 
     // The size given here does not matter: the measure pass makes a window's
     // content fill its client area before every frame.
-    ui.insert(wid, Rect::default(), Kind::Text(TextView::new(lines)));
+    let t = ui.insert(wid, Rect::default(), Kind::Text(TextView::new(lines)));
+    offer_editing(ui, t);
+}
+
+/// An editor's Edit menu - Find, Replace, Word wrap, Hex view and the rest,
+/// run by the core itself. Not the keys: this program already switches the
+/// keymap for every editor at once from Options.
+fn offer_editing(ui: &mut Ui, t: owlosui_core::ViewId) {
+    use owlosui_core::edit::offer;
+    ui.set_editor(t, offer::ALL & !offer::KEYS, 0);
 }
 
 /// Every remaining control in one dialog, so the whole set can be seen at
@@ -505,7 +514,8 @@ fn open_document(ui: &mut Ui, path: &std::path::Path) {
             .lines()
             .map(|l| codepage::current().encode_known(&l.replace('\t', "    ")))
             .collect();
-        ui.insert(wid, Rect::default(), Kind::Text(TextView::new(lines)));
+        let t = ui.insert(wid, Rect::default(), Kind::Text(TextView::new(lines)));
+        offer_editing(ui, t);
     }
 }
 

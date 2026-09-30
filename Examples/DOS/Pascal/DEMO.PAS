@@ -89,7 +89,10 @@ begin
   Inc(Editors);
   N := Editors and 7;
   W := OwlWindow(0, 2 + N, 1 + N, 56, 14, OwlBlue, 'UNTITLED' + IntStr(Editors) + '.TXT', CmClose);
-  OwlText(W, 'Type here. Shift and the arrows select, Ctrl+Z takes it back.');
+  { Everything the editor has, on an Edit menu of its own while this window
+    is in front: the core runs it all, nothing comes back here. }
+  OwlEditor(OwlText(W, 'Type here. Shift and the arrows select, Ctrl+Z takes it back. ' +
+                       'The Edit menu has Find, Replace and Word wrap.'), OfferAll, 0);
 end;
 
 { ---- File > Open: the file panel, the folder read through DOS ----------- }
@@ -183,7 +186,8 @@ begin
   if Size > N then Title := Name + ' - the first ' + IntStr(N) + ' bytes'
   else Title := Name;
   W := OwlWindow(0, 2, 2, 76, 20, OwlBlue, Title, CmClose);
-  OwlTextDos(W, FileBuf, N, 1);         { read-only: a viewer }
+  { A viewer, with Find, Word wrap and the bytes in hex on its Edit menu. }
+  OwlEditor(OwlTextDos(W, FileBuf, N, 1), OfferFind or OfferWrap or OfferHex, EditReadOnly);
   ViewFile := True;
 end;
 

@@ -15,7 +15,8 @@ CWSDPMI.EXE                  the DPMI host both need
 LOADER.INC                   the loader: DPMI, four megabytes, two selectors, a jump
 OWLOSRES.ASM                 the resident's loader: LOADER.INC and nothing else
 src/owlosres.rs              the resident: INT 60h, EXEC, the screen
-src/lib.rs                   the machine: memory, B800, the keyboard, INT 33h, a heap
+src/lib.rs                   the machine: memory, B800, the keyboard, INT 33h, a heap,
+                             DOS's folders and files, and `run`, a program's main loop
 asm/OWLOSUI.INC              the binding for FASM
 c/OWLOSUI.H, c/OWLOSUI.C     the binding for C (Open Watcom, 16-bit)
 pascal/OWLOSUI.PAS           the binding for Pascal (Borland Pascal 7)

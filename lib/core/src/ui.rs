@@ -37,6 +37,16 @@ fn trim(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
+/// Glyphs back into the core's kind of string, a char per glyph.
+fn glyph_string(g: &[Glyph]) -> String {
+    g.iter().map(|&c| char::from_u32(c as u32).unwrap_or('?')).collect()
+}
+
+/// A menu called Edit, whatever its hotkey.
+fn is_edit_menu(it: &crate::menu::MenuItem) -> bool {
+    !it.items.is_empty() && it.label().eq_ignore_ascii_case("edit")
+}
+
 /// A labelled field. The label is plain and the field is a sunken box the eye
 /// can find without reading anything, which is the only job the colours have.
 fn draw_input(
@@ -200,6 +210,44 @@ const CM_WINLIST_CANCEL: Cmd = 0xFF02;
 /// The rows of a history list, one command each: 0xFF10 + the row.
 const CM_HISTORY: Cmd = 0xFF10;
 
+// What an editor puts on the bars (`edit::offer`), and the buttons of the
+// Find and Replace dialogs the core builds for it. They are the toolkit's
+// own, like the window list's, and never reach the program.
+const CM_ED_UNDO: Cmd = 0xFF40;
+const CM_ED_REDO: Cmd = 0xFF41;
+const CM_ED_CUT: Cmd = 0xFF42;
+const CM_ED_COPY: Cmd = 0xFF43;
+const CM_ED_PASTE: Cmd = 0xFF44;
+const CM_ED_SELECT_ALL: Cmd = 0xFF45;
+const CM_ED_FIND: Cmd = 0xFF46;
+const CM_ED_FIND_NEXT: Cmd = 0xFF47;
+const CM_ED_REPLACE: Cmd = 0xFF48;
+const CM_ED_WRAP: Cmd = 0xFF49;
+const CM_ED_READONLY: Cmd = 0xFF4A;
+const CM_ED_HEX: Cmd = 0xFF4B;
+const CM_ED_KEYS: Cmd = 0xFF4C;
+const CM_SEARCH_GO: Cmd = 0xFF50;
+const CM_SEARCH_REPLACE: Cmd = 0xFF51;
+const CM_SEARCH_ALL: Cmd = 0xFF52;
+const CM_SEARCH_CANCEL: Cmd = 0xFF53;
+const CM_NOTICE_OK: Cmd = 0xFF54;
+
+/// The Find or Replace dialog while it is up, and the editor it searches.
+struct Search {
+    dialog: ViewId,
+    find: ViewId,
+    with: Option<ViewId>,
+    options: ViewId,
+    target: ViewId,
+}
+
+/// What was searched for last, so Find next can go on without a dialog.
+struct LastSearch {
+    pattern: Vec<Glyph>,
+    case_sensitive: bool,
+    whole_word: bool,
+}
+
 pub struct Ui {
     nodes: Vec<Node>,
     root: ViewId,
@@ -236,6 +284,14 @@ pub struct Ui {
     /// pause is the whole of the feedback. The waiting is the backend's job —
     /// the core has no clock and must not grow one.
     pending_pick: Option<(ViewId, Cmd)>,
+    /// An editor's Find or Replace dialog, while one is up.
+    search: Option<Search>,
+    last_search: Option<LastSearch>,
+    /// The box that says a search found nothing, or how many it replaced.
+    notice: Option<ViewId>,
+    /// Ctrl+Q has been pressed in a classic editor, and the next key says
+    /// what for: Borland's two-key commands.
+    chord: bool,
 }
 
 impl Ui {
@@ -261,6 +317,10 @@ impl Ui {
             clipboard: Vec::new(),
             command: None,
             pending_pick: None,
+            search: None,
+            last_search: None,
+            notice: None,
+            chord: false,
         }
     }
 
@@ -561,6 +621,573 @@ impl Ui {
         }
     }
 
+    // ------------------------------------------------------------ the editor
+    //
+    // What an editor offers (`TextView::offers`) it brings with it: while its
+    // window is active the Edit menu has its items, the status line says
+    // where the caret is, and the keys work - and the core answers all of
+    // it itself, Find and Replace dialogs included. A program sets the bits
+    // once and has an editor; it writes no handler for any of this.
+
+    /// The text a window is about: its first child, the text a hex view is
+    /// standing in for, or the memo holding the focus in a dialog.
+    fn window_editor(&self, win: ViewId) -> Option<ViewId> {
+        let first = *self.nodes[win.ix()].children.first()?;
+        match &self.nodes[first.ix()].kind {
+            Kind::Text(_) => Some(first),
+            Kind::Hex(h) => h.source.filter(|s| self.is_alive(*s)),
+            _ => self
+                .focused()
+                .filter(|f| matches!(self.nodes[f.ix()].kind, Kind::Text(_))),
+        }
+    }
+
+    fn editor_keymap(&self, t: &TextView) -> Keymap {
+        t.keymap.unwrap_or(self.keymap)
+    }
+
+    /// The Edit menu an editor brings, or `None` when it offers nothing.
+    fn editor_menu(&self, tid: ViewId) -> Option<crate::menu::MenuItem> {
+        use crate::edit::offer::*;
+        use crate::menu::MenuItem;
+        let Kind::Text(t) = &self.nodes[tid.ix()].kind else { return None };
+        let o = t.offers;
+        if o & ALL == 0 {
+            return None;
+        }
+        let classic = self.editor_keymap(t) == Keymap::Classic;
+        let keys = |modern: &str, old: &str| if classic { old.to_string() } else { modern.to_string() };
+        let hex = t.hex.is_some();
+        let (ro, text) = (t.readonly, !hex);
+        let sel = t.selection().is_some();
+        let item = |label: &str, key: String, cmd: Cmd, hint: &str, on: bool| {
+            let mut m = MenuItem::new(label, &key, cmd).hint(hint);
+            m.enabled = on;
+            m
+        };
+        let mut items: Vec<MenuItem> = Vec::new();
+        if o & EDIT != 0 {
+            items.push(item("~U~ndo", keys("Ctrl+Z", "Ctrl+U"), CM_ED_UNDO,
+                "Take back the last change", text && !ro && !t.undo_stack.is_empty()));
+            items.push(item("~R~edo", keys("Ctrl+Y", ""), CM_ED_REDO,
+                "Put back what Undo took back", text && !ro && !t.redo_stack.is_empty()));
+            items.push(MenuItem::line());
+            items.push(item("Cu~t~", keys("Ctrl+X", "Shift+Del"), CM_ED_CUT,
+                "The selected text to the clipboard, and out of the text", text && !ro && sel));
+            items.push(item("~C~opy", keys("Ctrl+C", "Ctrl+Ins"), CM_ED_COPY,
+                "The selected text to the clipboard", text && sel));
+            items.push(item("~P~aste", keys("Ctrl+V", "Shift+Ins"), CM_ED_PASTE,
+                "What is on the clipboard, into the text at the caret", text && !ro && !self.clipboard.is_empty()));
+            items.push(item("Select ~a~ll", keys("Ctrl+A", ""), CM_ED_SELECT_ALL,
+                "The whole text, to copy it or type over it", text));
+        }
+        if o & (FIND | REPLACE) != 0 {
+            if !items.is_empty() {
+                items.push(MenuItem::line());
+            }
+            if o & FIND != 0 {
+                items.push(item("~F~ind...", keys("Ctrl+F", "Ctrl+Q F"), CM_ED_FIND,
+                    "Look for a word or a phrase in this text", text));
+                items.push(item("Find ~n~ext", "Ctrl+L".into(), CM_ED_FIND_NEXT,
+                    "The next place the last search matches", text && self.last_search.is_some()));
+            }
+            if o & REPLACE != 0 {
+                items.push(item("R~e~place...", keys("Ctrl+H", "Ctrl+Q A"), CM_ED_REPLACE,
+                    "Find a word and put another one in its place", text && !ro));
+            }
+        }
+        if o & (WRAP | READONLY | HEX | KEYS) != 0 {
+            if !items.is_empty() {
+                items.push(MenuItem::line());
+            }
+            if o & WRAP != 0 {
+                items.push(item("~W~ord wrap", String::new(), CM_ED_WRAP,
+                    "Long lines folded at the window's edge; the file itself is not changed", text)
+                    .checked(t.wrap));
+            }
+            if o & READONLY != 0 {
+                items.push(item("Read ~o~nly", String::new(), CM_ED_READONLY,
+                    "Look without changing anything: typing does nothing", text)
+                    .checked(ro));
+            }
+            if o & HEX != 0 {
+                items.push(item("~H~ex view", String::new(), CM_ED_HEX,
+                    "The same text as bytes, each one in hexadecimal", true)
+                    .checked(hex));
+            }
+            if o & KEYS != 0 {
+                items.push(item("C~l~assic keys", String::new(), CM_ED_KEYS,
+                    "Borland's WordStar keys (Ctrl+S D E X move); off: Ctrl+C, V, Z as everywhere", text)
+                    .checked(classic));
+            }
+        }
+        Some(MenuItem::sub("~E~dit", items))
+    }
+
+    /// The keys an editor puts on the status line - only when there is no
+    /// menu bar to show them, because there is room on one line for the
+    /// program's keys or for these, rarely for both.
+    fn editor_status(&self, tid: ViewId) -> Vec<crate::status::StatusItem> {
+        use crate::edit::offer::*;
+        use crate::status::StatusItem;
+        let mut out = Vec::new();
+        let Kind::Text(t) = &self.nodes[tid.ix()].kind else { return out };
+        if self.menu_bar_id().is_some() || t.hex.is_some() {
+            return out;
+        }
+        let classic = self.editor_keymap(t) == Keymap::Classic;
+        if t.offers & FIND != 0 {
+            out.push(StatusItem::new(if classic { "~Ctrl+Q F~ Find" } else { "~Ctrl+F~ Find" }, None, CM_ED_FIND));
+        }
+        if t.offers & REPLACE != 0 && !t.readonly {
+            out.push(StatusItem::new(if classic { "~Ctrl+Q A~ Replace" } else { "~Ctrl+H~ Replace" }, None, CM_ED_REPLACE));
+        }
+        out
+    }
+
+    /// Where the caret is and how the editor is set, for the right end of
+    /// the status line: `Ln 12 Col 5  Wrap`.
+    fn editor_indicator(&self, tid: ViewId) -> String {
+        let Kind::Text(t) = &self.nodes[tid.ix()].kind else { return String::new() };
+        if t.offers == 0 {
+            return String::new();
+        }
+        if let Some(h) = t.hex {
+            return match &self.nodes[h.ix()].kind {
+                Kind::Hex(hv) => format!("Hex  byte {} of {} ", hv.cursor + 1, hv.bytes.len()),
+                _ => String::new(),
+            };
+        }
+        let mut s = format!("Ln {} Col {}", t.cur.y as i32 + 1, t.cur.x as i32 + 1);
+        if t.wrap {
+            s.push_str("  Wrap");
+        }
+        if t.readonly {
+            s.push_str("  Read only");
+        }
+        if self.editor_keymap(t) == Keymap::Classic {
+            s.push_str("  Classic keys");
+        }
+        s.push(' ');
+        s
+    }
+
+    /// One of the editor's own commands, on the active window's editor.
+    fn editor_command(&mut self, cmd: Cmd) {
+        use crate::edit::Cmd as E;
+        let Some(win) = self.active_window() else { return };
+        let Some(tid) = self.window_editor(win) else { return };
+        let hex = matches!(&self.nodes[tid.ix()].kind, Kind::Text(t) if t.hex.is_some());
+        if hex && cmd != CM_ED_HEX {
+            return;
+        }
+        match cmd {
+            CM_ED_UNDO => self.run_edit(tid, E::Undo),
+            CM_ED_REDO => self.run_edit(tid, E::Redo),
+            CM_ED_CUT => self.run_edit(tid, E::Cut),
+            CM_ED_COPY => self.run_edit(tid, E::Copy),
+            CM_ED_PASTE => self.run_edit(tid, E::Paste),
+            CM_ED_SELECT_ALL => self.run_edit(tid, E::SelectAll),
+            CM_ED_FIND => self.open_search(tid, false),
+            CM_ED_REPLACE => self.open_search(tid, true),
+            CM_ED_FIND_NEXT => self.search_again(tid),
+            CM_ED_WRAP => {
+                let r = self.abs_rect(tid);
+                if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
+                    t.width = r.w;
+                    let on = !t.wrap;
+                    t.set_wrap(on, r.h);
+                }
+                self.follow_x(tid);
+            }
+            CM_ED_READONLY => {
+                let ro = matches!(&self.nodes[tid.ix()].kind, Kind::Text(t) if t.readonly);
+                self.set_readonly(tid, !ro);
+                if ro && self.focused().is_none() {
+                    self.focus_first();
+                }
+            }
+            CM_ED_HEX => self.toggle_hex(tid),
+            CM_ED_KEYS => {
+                let now = match &self.nodes[tid.ix()].kind {
+                    Kind::Text(t) => self.editor_keymap(t),
+                    _ => return,
+                };
+                if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
+                    t.keymap = Some(if now == Keymap::Classic { Keymap::Modern } else { Keymap::Classic });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// An editing command, as if its key had been pressed.
+    fn run_edit(&mut self, tid: ViewId, c: crate::edit::Cmd) {
+        let r = self.abs_rect(tid);
+        let clip = &mut self.clipboard;
+        if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
+            t.width = r.w;
+            t.exec(c, false, r.h, clip);
+        }
+        self.follow_x(tid);
+    }
+
+    /// Scroll sideways to the caret, as the vertical scroll already does.
+    /// A folding view has nothing to its right.
+    fn follow_x(&mut self, tid: ViewId) {
+        let r = self.abs_rect(tid);
+        if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
+            if t.wrapping() {
+                t.left = 0;
+                t.follow_caret(r.h);
+                return;
+            }
+            if t.cur.x < t.left {
+                t.left = t.cur.x;
+            } else if t.cur.x >= t.left + r.w {
+                t.left = t.cur.x - r.w + 1;
+            }
+            t.left = t.left.max(0);
+        }
+    }
+
+    /// The keys an editor's offers bring: Find, Replace, Find next, and
+    /// Borland's Ctrl+Q chords for them. True when the key was one.
+    fn editor_key(&mut self, tid: ViewId, k: Key) -> bool {
+        use crate::edit::offer::*;
+        use crate::event::KeyCode as K;
+        let (offers, ro, km) = match &self.nodes[tid.ix()].kind {
+            Kind::Text(t) => (t.offers, t.readonly, self.editor_keymap(t)),
+            _ => return false,
+        };
+        if offers & (FIND | REPLACE) == 0 {
+            self.chord = false;
+            return false;
+        }
+        if self.chord {
+            // The second key of Ctrl+Q something: with Ctrl or without, as
+            // Borland's took it. Anything else is let go of quietly.
+            self.chord = false;
+            if let K::Char(c) = k.code {
+                match c.to_ascii_lowercase() {
+                    'f' if offers & FIND != 0 => self.open_search(tid, false),
+                    'a' if offers & REPLACE != 0 && !ro => self.open_search(tid, true),
+                    _ => {}
+                }
+            }
+            return true;
+        }
+        if !(k.mods.ctrl && !k.mods.alt && !k.mods.shift) {
+            return false;
+        }
+        let K::Char(c) = k.code else { return false };
+        match (km, c.to_ascii_lowercase()) {
+            (Keymap::Classic, 'q') => self.chord = true,
+            (Keymap::Modern, 'f') if offers & FIND != 0 => self.open_search(tid, false),
+            (Keymap::Modern, 'h') if offers & REPLACE != 0 && !ro => self.open_search(tid, true),
+            (_, 'l') if offers & FIND != 0 => self.search_again(tid),
+            _ => return false,
+        }
+        true
+    }
+
+    /// A key for a text view: the editor's own keys first, then its keymap.
+    fn text_key(&mut self, id: ViewId, k: Key) {
+        if self.editor_key(id, k) {
+            return;
+        }
+        let km = match &self.nodes[id.ix()].kind {
+            Kind::Text(t) => self.editor_keymap(t),
+            _ => return,
+        };
+        let Some((cmd, extend)) = km.lookup(k) else { return };
+        let r = self.abs_rect(id);
+        let clip = &mut self.clipboard;
+        if let Kind::Text(t) = &mut self.nodes[id.ix()].kind {
+            t.width = r.w;
+            t.exec(cmd, extend, r.h, clip);
+        }
+        self.follow_x(id);
+    }
+
+    /// The Find dialog, or the Replace dialog: a modal the core builds and
+    /// answers itself. It starts with the selected words, when a few are
+    /// selected, or with what was looked for last.
+    fn open_search(&mut self, tid: ViewId, replace: bool) {
+        use crate::button::Button;
+        use crate::controls::Cluster;
+        use crate::input::InputLine;
+        if self.modal().is_some() || self.search.is_some() {
+            return;
+        }
+        let (start, case, whole) = {
+            let Kind::Text(t) = &self.nodes[tid.ix()].kind else { return };
+            let sel = t.selected_text();
+            let from_sel = (sel.len() == 1 && !sel[0].is_empty()).then(|| glyph_string(&sel[0]));
+            let last = self.last_search.as_ref();
+            (
+                from_sel.or_else(|| last.map(|l| glyph_string(&l.pattern))).unwrap_or_default(),
+                last.is_some_and(|l| l.case_sensitive),
+                last.is_some_and(|l| l.whole_word),
+            )
+        };
+        let work = self.work_area();
+        let w = 56.min(work.w - 2).max(30);
+        let h = if replace { 12 } else { 10 };
+        let mut win = Window::new(if replace { "Replace" } else { "Find" });
+        win.palette = crate::palette::WinPalette::Gray;
+        win.modal = true;
+        win.resizable = false;
+        win.zoomable = false;
+        win.closable = false;
+        win.centred = true;
+        let r = Rect::new(work.x + (work.w - w) / 2, work.y + (work.h - h) / 2, w, h);
+        let root = self.root;
+        let dialog = self.insert(root, r, Kind::Window(win));
+        // Both labels the same length, so the two fields start in one column.
+        let find = self.insert(dialog, Rect::new(2, 1, w - 6, 1), Kind::Input(InputLine::new("Text to find", &start)));
+        self.set_dock(find, Dock::Manual);
+        let with = if replace {
+            let id = self.insert(dialog, Rect::new(2, 3, w - 6, 1), Kind::Input(InputLine::new("Replace with", "")));
+            self.set_dock(id, Dock::Manual);
+            Some(id)
+        } else {
+            None
+        };
+        let top = if replace { 5 } else { 3 };
+        let mut c = Cluster::checks(&["~C~ase sensitive", "~W~hole words only"]);
+        c.on[0] = case;
+        c.on[1] = whole;
+        let options = self.insert(dialog, Rect::new(2, top, 30, 2), Kind::Cluster(c));
+        self.set_dock(options, Dock::Manual);
+        let buttons = if replace {
+            vec![
+                Button::new("~R~eplace", CM_SEARCH_REPLACE).default(),
+                Button::new("Replace ~a~ll", CM_SEARCH_ALL),
+                Button::new("Cancel", CM_SEARCH_CANCEL).cancel(),
+            ]
+        } else {
+            vec![
+                Button::new("~F~ind", CM_SEARCH_GO).default(),
+                Button::new("Cancel", CM_SEARCH_CANCEL).cancel(),
+            ]
+        };
+        let row = self.insert(dialog, Rect::default(), Kind::Buttons(ButtonRow::new(buttons)));
+        self.set_dock(row, Dock::BottomRight(w - 2, 2));
+        self.focus_first();
+        self.search = Some(Search { dialog, find, with, options, target: tid });
+    }
+
+    /// A button of the Find or Replace dialog.
+    fn search_command(&mut self, cmd: Cmd) {
+        let Some(s) = self.search.take() else { return };
+        if cmd == CM_SEARCH_CANCEL || !self.is_alive(s.target) {
+            self.close(s.dialog);
+            return;
+        }
+        let input = |ui: &Ui, id: ViewId| match &ui.nodes[id.ix()].kind {
+            Kind::Input(i) => i.text.clone(),
+            _ => String::new(),
+        };
+        let text = input(self, s.find);
+        let with = s.with.map(|id| crate::cell::glyphs(&input(self, id))).unwrap_or_default();
+        let (case, whole) = match &self.nodes[s.options.ix()].kind {
+            Kind::Cluster(c) => (c.on[0], c.on[1]),
+            _ => (false, false),
+        };
+        let pattern = crate::cell::glyphs(&text);
+        if pattern.is_empty() {
+            // Nothing to look for yet: the dialog stays for it to be typed.
+            self.search = Some(s);
+            return;
+        }
+        self.last_search = Some(LastSearch { pattern: pattern.clone(), case_sensitive: case, whole_word: whole });
+        let t = s.target;
+        match cmd {
+            CM_SEARCH_GO => {
+                self.close(s.dialog);
+                if !self.find_around(t) {
+                    self.notice("Find", &format!("\"{text}\" is not in this text."));
+                }
+            }
+            CM_SEARCH_REPLACE => {
+                // The first press finds; each press after replaces what is
+                // selected and finds the next, so every change is seen.
+                let (_, found) = self.replace_text(t, &pattern, &with, case, whole);
+                let found = found || self.find_around(t);
+                self.follow_x(t);
+                if found {
+                    self.search = Some(s);
+                } else {
+                    self.close(s.dialog);
+                    self.notice("Replace", &format!("There is no more \"{text}\" in this text."));
+                }
+            }
+            CM_SEARCH_ALL => {
+                self.close(s.dialog);
+                let n = self.replace_all_text(t, &pattern, &with, case, whole);
+                self.follow_x(t);
+                let said = match n {
+                    0 => format!("\"{text}\" is not in this text."),
+                    1 => "1 replaced.".to_string(),
+                    n => format!("{n} replaced."),
+                };
+                self.notice("Replace", &said);
+            }
+            _ => {}
+        }
+    }
+
+    /// The last search again, from the caret on and round from the top;
+    /// with none yet, the Find dialog.
+    fn search_again(&mut self, tid: ViewId) {
+        if self.last_search.is_none() {
+            return self.open_search(tid, false);
+        }
+        if !self.find_around(tid) {
+            let text = self.last_search.as_ref().map(|l| glyph_string(&l.pattern)).unwrap_or_default();
+            self.notice("Find", &format!("\"{text}\" is not in this text."));
+        }
+    }
+
+    /// The last search after the caret and, failing that, from the top: a
+    /// person asking to find a word means anywhere in the text, not only
+    /// below where they happen to be standing.
+    fn find_around(&mut self, tid: ViewId) -> bool {
+        let Some(l) = &self.last_search else { return false };
+        let (pat, case, whole) = (l.pattern.clone(), l.case_sensitive, l.whole_word);
+        let r = self.abs_rect(tid);
+        let found = match &mut self.nodes[tid.ix()].kind {
+            Kind::Text(t) => {
+                t.width = r.w;
+                if t.find(&pat, case, whole) {
+                    true
+                } else {
+                    let (cur, anchor) = (t.cur, t.anchor);
+                    t.cur = Point::new(0, 0);
+                    t.anchor = None;
+                    let again = t.find(&pat, case, whole);
+                    if !again {
+                        t.cur = cur;
+                        t.anchor = anchor;
+                    }
+                    again
+                }
+            }
+            _ => false,
+        };
+        self.follow_x(tid);
+        found
+    }
+
+    /// A box with a sentence and OK, which the core closes itself.
+    fn notice(&mut self, title: &str, text: &str) {
+        if let Some(n) = self.notice.take() {
+            self.close(n);
+        }
+        let row = ButtonRow::new(vec![crate::button::Button::new("~O~K", CM_NOTICE_OK).default()]);
+        self.notice = Some(self.message_box(title, text, row));
+    }
+
+    /// Show the text as bytes, or the bytes as text again. The hex view
+    /// takes the text's place in the window and the text waits, alive and
+    /// untouched, until it comes back - so the program's handle to it goes
+    /// on working the whole time.
+    fn toggle_hex(&mut self, tid: ViewId) {
+        let Some(win) = self.nodes[tid.ix()].parent else { return };
+        let showing = match &mut self.nodes[tid.ix()].kind {
+            Kind::Text(t) => t.hex.take(),
+            _ => return,
+        };
+        if let Some(h) = showing {
+            if let Kind::Hex(hv) = &mut self.nodes[h.ix()].kind {
+                hv.source = None;
+            }
+            let at = self.nodes[win.ix()].children.iter().position(|k| *k == h);
+            self.close(h);
+            let kids = &mut self.nodes[win.ix()].children;
+            kids.insert(at.unwrap_or(0).min(kids.len()), tid);
+            return;
+        }
+        let bytes: Vec<u8> = match &self.nodes[tid.ix()].kind {
+            Kind::Text(t) => {
+                let mut b = Vec::new();
+                for (i, l) in t.lines.iter().enumerate() {
+                    if i > 0 {
+                        b.push(b'\n');
+                    }
+                    b.extend(l.iter().map(|&g| u8::try_from(g as u32).unwrap_or(b'?')));
+                }
+                b
+            }
+            _ => return,
+        };
+        let mut hv = crate::hex::HexView::new(bytes);
+        hv.source = Some(tid);
+        let (rect, dock) = (self.nodes[tid.ix()].rect, self.nodes[tid.ix()].dock);
+        let h = self.insert(win, rect, Kind::Hex(hv));
+        self.set_dock(h, dock);
+        let kids = &mut self.nodes[win.ix()].children;
+        kids.retain(|k| *k != h);
+        if let Some(pos) = kids.iter().position(|k| *k == tid) {
+            kids[pos] = h;
+        } else {
+            kids.insert(0, h);
+        }
+        if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
+            t.hex = Some(h);
+        }
+    }
+
+    /// What an editor offers and how it is set, all at once: `offers` is the
+    /// bits of `edit::offer`, `state` those of `edit::state`. False for a
+    /// view that is not a text.
+    pub fn set_editor(&mut self, id: ViewId, offers: u8, state: u8) -> bool {
+        use crate::edit::state::*;
+        let r = self.abs_rect(id);
+        let hex_now = match &mut self.nodes[id.ix()].kind {
+            Kind::Text(t) => {
+                t.offers = offers;
+                if r.w > 0 {
+                    t.width = r.w;
+                }
+                if t.wrap != (state & WRAP != 0) {
+                    t.set_wrap(state & WRAP != 0, r.h.max(1));
+                }
+                t.keymap = (state & CLASSIC != 0).then_some(Keymap::Classic);
+                t.hex.is_some()
+            }
+            _ => return false,
+        };
+        self.set_readonly(id, state & READONLY != 0);
+        if hex_now != (state & HEX != 0) {
+            self.toggle_hex(id);
+        }
+        true
+    }
+
+    /// An editor's offers, its state (`edit::state` bits) and where its
+    /// caret is, line and column from 0. `None` for a view that is not a
+    /// text.
+    pub fn editor_state(&self, id: ViewId) -> Option<(u8, u8, i16, i16)> {
+        use crate::edit::state::*;
+        let Kind::Text(t) = &self.nodes[id.ix()].kind else { return None };
+        let mut s = 0;
+        if t.wrap {
+            s |= WRAP;
+        }
+        if t.readonly {
+            s |= READONLY;
+        }
+        if self.editor_keymap(t) == Keymap::Classic {
+            s |= CLASSIC;
+        }
+        if t.hex.is_some() {
+            s |= HEX;
+        }
+        Some((t.offers, s, t.cur.y, t.cur.x))
+    }
+
     /// A tree node somebody tried to open that has no children yet: its
     /// path, once. The program answers with `tree_set_children`.
     pub fn tree_take_expand(&mut self, id: ViewId) -> Option<Vec<usize>> {
@@ -630,7 +1257,7 @@ impl Ui {
     pub fn complete_pick(&mut self) {
         if let Some((_, cmd)) = self.pending_pick.take() {
             self.close_menu();
-            self.command = Some(cmd);
+            self.emit(cmd);
         }
         if let Some(w) = self.active_window() {
             for row in self.button_rows(w) {
@@ -734,19 +1361,43 @@ impl Ui {
             return;
         }
         let active = self.active_window();
-        let (status, menu) = match active.map(|a| &self.nodes[a.ix()].kind) {
+        let (mut status, mut menu) = match active.map(|a| &self.nodes[a.ix()].kind) {
             Some(Kind::Window(w)) => (w.status.clone(), clone_items(&w.menu)),
             _ => (Vec::new(), Vec::new()),
         };
+        // The editor's own, after the window's: an Edit menu, its keys, and
+        // where the caret is.
+        let editor = active.and_then(|a| self.window_editor(a));
+        let own_edit = menu.iter().any(|it| is_edit_menu(it));
+        let mut right = String::new();
+        let mut edit_added = false;
+        if let Some(tid) = editor {
+            if let Some(edit) = self.editor_menu(tid) {
+                menu.push(edit);
+                edit_added = true;
+            }
+            status.extend(self.editor_status(tid));
+            right = self.editor_indicator(tid);
+        }
         if let Some(sid) = self.status_id() {
             if let Kind::Status(s) = &mut self.nodes[sid.ix()].kind {
                 s.items = s.base.clone();
                 s.items.extend(status);
+                s.right = right;
             }
         }
         if let Some(bar) = self.menu_bar_id() {
             if let Kind::MenuBar(m) = &mut self.nodes[bar.ix()].kind {
+                let bar_edit = m.base.iter().any(|it| is_edit_menu(it));
                 m.items = merge_items(&m.base, &menu);
+                // An Edit menu nobody else had goes where everybody looks
+                // for it, after the first menu, not on the end of the bar.
+                if edit_added && !bar_edit && !own_edit {
+                    if let Some(pos) = m.items.iter().rposition(|it| is_edit_menu(it)) {
+                        let it = m.items.remove(pos);
+                        m.items.insert(1.min(m.items.len()), it);
+                    }
+                }
             }
         }
     }
@@ -918,12 +1569,30 @@ impl Ui {
         }
         let cmd = it.cmd;
         self.close_menu();
-        self.command = Some(cmd);
+        self.emit(cmd);
+    }
+
+    /// A command from the menu or the status line. An editor's own is done
+    /// here and now; any other waits for the program to collect it.
+    fn emit(&mut self, cmd: Cmd) {
+        if (CM_ED_UNDO..=CM_ED_KEYS).contains(&cmd) {
+            self.editor_command(cmd);
+        } else {
+            self.command = Some(cmd);
+        }
     }
 
     /// Close a view and everything inside it. A handle to a child of a
     /// closed window must say it is dead, or `is_alive` is not worth asking.
     pub fn close(&mut self, id: ViewId) {
+        // A text and the hex view standing in for it go together: the text
+        // is out of the window while the bytes are shown, so closing the
+        // window would otherwise leave it behind, alive and unreachable.
+        let partner = match &mut self.nodes[id.ix()].kind {
+            Kind::Hex(h) => h.source.take(),
+            Kind::Text(t) => t.hex.take(),
+            _ => None,
+        };
         let kids = core::mem::take(&mut self.nodes[id.ix()].children);
         for k in kids {
             self.close(k);
@@ -931,6 +1600,14 @@ impl Ui {
         self.nodes[id.ix()].alive = false;
         if let Some(parent) = self.nodes[id.ix()].parent {
             self.nodes[parent.ix()].children.retain(|k| *k != id);
+        }
+        if let Some(p) = partner.filter(|p| self.nodes[p.ix()].alive) {
+            match &mut self.nodes[p.ix()].kind {
+                Kind::Hex(h) => h.source = None,
+                Kind::Text(t) => t.hex = None,
+                _ => {}
+            }
+            self.close(p);
         }
     }
 
@@ -1134,6 +1811,20 @@ impl Ui {
         if cmd < CM_INTERNAL {
             return false;
         }
+        if (CM_SEARCH_GO..=CM_SEARCH_CANCEL).contains(&cmd) {
+            self.search_command(cmd);
+            return true;
+        }
+        if cmd == CM_NOTICE_OK {
+            if let Some(n) = self.notice.take() {
+                self.close(n);
+            }
+            return true;
+        }
+        if (CM_ED_UNDO..=CM_ED_KEYS).contains(&cmd) {
+            self.editor_command(cmd);
+            return true;
+        }
         if let Some(wl) = self.winlist.take() {
             let chosen = match &self.nodes[wl.list.ix()].kind {
                 Kind::List(l) => wl.windows.get(l.current).copied(),
@@ -1312,6 +2003,10 @@ impl Ui {
         let tid = self.focused().or_else(|| self.text_child(win))?;
         let abs = self.abs_rect(tid);
         match &self.nodes[tid.ix()].kind {
+            Kind::Text(t) if !t.readonly && t.wrapping() => t
+                .screen_of(t.cur, abs.h)
+                .map(|(c, r)| Point::new(abs.x + c, abs.y + r))
+                .filter(|p| abs.contains(*p)),
             Kind::Text(t) if !t.readonly => {
                 let p = Point::new(abs.x + t.cur.x - t.left, abs.y + t.cur.y - t.top);
                 abs.contains(p).then_some(p)
@@ -1425,6 +2120,7 @@ impl Ui {
                     f.layout(r, screen_w);
                 }
                 Kind::Hex(h) => h.layout(r),
+                Kind::Text(t) => t.width = r.w,
                 Kind::List(l) => l.set_rows(r.h),
                 Kind::Tree(t) => t.set_rows(r.h),
                 _ => {}
@@ -1994,6 +2690,10 @@ impl Ui {
         // panel's width holds. For text that is characters and for a file
         // panel it is whole columns, which is why it cannot just be `inner.w`.
         let (top, rows, left, cols, hpage) = match &self.nodes[tid.ix()].kind {
+            // Folded text has nothing to scroll sideways, and its vertical
+            // bar counts lines, not rows: counting rows would mean folding
+            // the whole text on every frame to place one square.
+            Kind::Text(t) if t.wrapping() => (t.top, t.line_count(), 0, 0, inner.w),
             Kind::Text(t) => (t.top, t.line_count(), t.left, t.longest(), inner.w),
             Kind::Html(h) => (h.top, h.line_count(), 0, 0, inner.w),
             Kind::Hex(h) => (h.top, h.total_rows(), 0, 0, inner.w),
@@ -2431,6 +3131,12 @@ impl Ui {
                 }
             }
         }
+        // The editor's words at the right end, where they cover nothing.
+        let len = s.right.chars().count() as i16;
+        let x = abs.right() - len;
+        if len > 0 && x >= abs.x + s.items_end() + 2 {
+            buf.text(x, abs.y, &s.right, p.status, clip);
+        }
     }
 
     fn draw_label(&self, l: &crate::controls::Label, abs: Rect, buf: &mut Buffer, clip: Rect) {
@@ -2598,6 +3304,9 @@ impl Ui {
         // but in the bytes they are not, and the bytes are what we check
         // ourselves against.
         buf.fill(abs, SP, body, clip);
+        if t.wrapping() {
+            return self.draw_folded(t, abs, buf, clip, p, body);
+        }
         for row in 0..abs.h {
             let li = t.top as usize + row as usize;
             let Some(line) = t.lines.get(li) else { break };
@@ -2623,6 +3332,46 @@ impl Ui {
                 for col in 0..abs.w {
                     if t.is_selected(li as i16, t.left + col) {
                         buf.recolor(abs.x + col, abs.y + row, p.text_selected, clip);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Text with its lines folded: row after row from the first on the
+    /// screen, each a piece of a line. Everything else is as `draw_text`
+    /// does it - the caret's line barred if asked, the selection over it.
+    fn draw_folded(&self, t: &TextView, abs: Rect, buf: &mut Buffer, clip: Rect, p: &WinColors, body: u8) {
+        let mut at = Some(t.first_row());
+        for row in 0..abs.h {
+            let Some((li, r)) = at else { break };
+            at = t.next_row(li, r);
+            let line = &t.lines[li as usize];
+            let starts = t.rows_of(li);
+            let s = starts[r as usize];
+            let next = starts.get(r as usize + 1).copied();
+            let e = next.unwrap_or(line.len());
+            let y = abs.y + row;
+            let a = if t.highlight_line && li == t.cur.y {
+                buf.fill(Rect::new(abs.x, y, abs.w, 1), b' ', p.text_selected, clip);
+                p.text_selected
+            } else if t.boxed {
+                body
+            } else {
+                p.text
+            };
+            buf.raw(abs.x, y, &line[s..e], a, clip);
+            if t.anchor.is_some() {
+                // A row that goes on in the next one ends at its last
+                // character; only the line's last row shows the line break
+                // selected, as an unfolded line does.
+                let cols = match next {
+                    Some(n) => (n - s) as i16,
+                    None => abs.w,
+                };
+                for col in 0..cols.min(abs.w) {
+                    if t.is_selected(li, s as i16 + col) {
+                        buf.recolor(abs.x + col, y, p.text_selected, clip);
                     }
                 }
             }
@@ -2782,7 +3531,8 @@ impl Ui {
                             if let Some(ix) = s.item_at(p.x - abs.x) {
                                 let it = &s.items[ix];
                                 if it.enabled && it.cmd != 0 {
-                                    self.command = Some(it.cmd);
+                                    let cmd = it.cmd;
+                                    self.emit(cmd);
                                 }
                             }
                         }
@@ -3093,6 +3843,13 @@ impl Ui {
             return;
         };
         match axis {
+            // The bar of folded text counts lines: the square is on a line
+            // and the view starts at that line's first row.
+            Axis::Vertical if t.wrapping() => {
+                t.top = pos.clamp(0, (t.line_count() - 1).max(0));
+                t.top_row = 0;
+            }
+            Axis::Horizontal if t.wrapping() => {}
             Axis::Vertical => {
                 let max = (t.line_count() - page).max(0);
                 t.top = pos.clamp(0, max);
@@ -3171,6 +3928,7 @@ impl Ui {
         };
         let page = self.abs_rect(first).h;
         match &mut self.nodes[first.ix()].kind {
+            Kind::Text(t) if t.wrapping() => t.scroll_rows(delta, page),
             Kind::Text(t) => {
                 let max = (t.lines.len() as i16 - page).max(0);
                 t.top = (t.top + delta).clamp(0, max);
@@ -3244,7 +4002,7 @@ impl Ui {
         // modality exists to prevent.
         if self.modal().is_none() {
             if let Some(cmd) = self.status_command(k) {
-                self.command = Some(cmd);
+                self.emit(cmd);
                 return;
             }
         }
@@ -3330,24 +4088,7 @@ impl Ui {
         // here, by a table, and the editor is handed the command — which is
         // why there can be two keymaps and why a test can drive the editor
         // without pretending to be a keyboard.
-        let Some((cmd, extend)) = self.keymap.lookup(k) else {
-            return;
-        };
-
-        let inner = self.abs_rect(first);
-        let clip = &mut self.clipboard;
-        let Kind::Text(t) = &mut self.nodes[first.ix()].kind else {
-            return;
-        };
-        t.exec(cmd, extend, inner.h, clip);
-
-        // Horizontal scrolling follows the caret, the way vertical does.
-        if t.cur.x < t.left {
-            t.left = t.cur.x;
-        } else if t.cur.x >= t.left + inner.w {
-            t.left = t.cur.x - inner.w + 1;
-        }
-        t.left = t.left.max(0);
+        self.text_key(first, k)
     }
 
     /// A help page has no caret, so it answers to a different, much shorter
@@ -3708,6 +4449,10 @@ impl Ui {
                     f.path.focused = false;
                 }
             }
+            Kind::Text(t) if t.wrapping() => {
+                t.cur = t.point_at(col, row);
+                t.anchor = None;
+            }
             Kind::Text(t) => {
                 t.cur.y = (t.top + row).clamp(0, (t.line_count() - 1).max(0));
                 let len = t.lines.get(t.cur.y as usize).map_or(0, |l| l.len()) as i16;
@@ -3793,16 +4538,7 @@ impl Ui {
                 }
                 _ => {}
             },
-            Kind::Text(_) => {
-                let Some((cmd, extend)) = self.keymap.lookup(k) else {
-                    return;
-                };
-                let inner = self.abs_rect(id);
-                let clip = &mut self.clipboard;
-                if let Kind::Text(t) = &mut self.nodes[id.ix()].kind {
-                    t.exec(cmd, extend, inner.h, clip);
-                }
-            }
+            Kind::Text(_) => self.text_key(id, k),
             Kind::Tree(t) => match k.code {
                 K::Up => t.step(-1),
                 K::Down => t.step(1),

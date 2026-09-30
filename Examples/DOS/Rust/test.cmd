@@ -29,3 +29,6 @@ call .\RUNWIN.BAT STRESS
 findstr /c:"errorlevel" OWLOS.OUT >nul && (echo FAIL: the stress run did not survive & type OWLOS.OUT & type TRACE.TXT & exit /b 1)
 if not exist SHOT.BIN echo FAIL: no frame after the stress run & exit /b 1
 echo ok: a minute of dragging and zooming, and the heap held
+rem Last, HELLO and DEMO, with the keys and the checks every DOS folder
+rem shares: the same program as in Asm, C and Pascal must show the same.
+call ..\CHECK.CMD || exit /b 1

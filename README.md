@@ -34,7 +34,7 @@ The toolkit is in [lib/](lib/README.md). Everything that uses it is in
   short: [the terminal](lib/console/src/term.rs),
   [the Windows window](lib/window/src/lib.rs),
   [the canvas](lib/js/owlosui.js),
-  [DOS](Examples/DOS/Rust/src/main.rs).
+  [DOS](lib/dos/src/lib.rs).
 
 ## The contract
 
@@ -72,7 +72,8 @@ Examples/             everything that uses it
     Web/Rust          01-Linked: the core and the application in one module
     DOS/Asm, DOS/C, DOS/Pascal
                       HELLO and the demo, the same in each, through the resident
-    DOS/Rust          the application as a DOS program: a flat binary under DPMI
+    DOS/Rust          HELLO and the demo with the core linked in, and the shared
+                      application: flat binaries under DPMI
     shared/app.rs     the one Rust application the window, the web and DOS draw
 ```
 

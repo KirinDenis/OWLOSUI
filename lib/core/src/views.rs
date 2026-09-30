@@ -178,6 +178,25 @@ pub struct TextView {
     /// never did this, and a full-width highlight is the single thing that
     /// makes a screen stop looking like Turbo Vision.
     pub highlight_line: bool,
+    /// Long lines folded at the view's right edge - at a space when the row
+    /// has one, in the middle of the word when it has none. Only the picture
+    /// folds: the lines, the caret's line and column, and the saved file are
+    /// what they were, and there is no sideways scrolling while it is on.
+    pub wrap: bool,
+    /// Which folded row of line `top` the view starts on. Always 0 without
+    /// `wrap`.
+    pub top_row: i16,
+    /// How wide the view was last laid out: where `wrap` folds. Zero until
+    /// the first layout, and folding waits for it.
+    pub width: i16,
+    /// What this editor offers on the menu bar and the status line while
+    /// its window is active: the bits of `edit::offer`. Zero, the default,
+    /// offers nothing and the bars are the program's alone.
+    pub offers: u8,
+    /// This editor's own arrangement of keys, or the desktop's when `None`.
+    pub keymap: Option<crate::keymap::Keymap>,
+    /// The hex view standing in for this text while it is shown.
+    pub(crate) hex: Option<crate::ui::ViewId>,
 
     pub(crate) undo_stack: Vec<crate::edit::Edit>,
     pub(crate) redo_stack: Vec<crate::edit::Edit>,
@@ -196,6 +215,12 @@ impl TextView {
             focused: false,
             modified: false,
             highlight_line: false,
+            wrap: false,
+            top_row: 0,
+            width: 0,
+            offers: 0,
+            keymap: None,
+            hex: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
         }

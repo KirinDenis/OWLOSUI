@@ -137,7 +137,10 @@ impl App {
         win.close_cmd = CM_CLOSE;
         let wid = self.ui.insert(root, r, Kind::Window(win));
         let lines = SAMPLE.lines().map(owlosui_core::glyphs).collect();
-        self.ui.insert(wid, Rect::default(), Kind::Text(TextView::new(lines)));
+        let text = self.ui.insert(wid, Rect::default(), Kind::Text(TextView::new(lines)));
+        // Everything the editor has, on an Edit menu of its own while this
+        // window is in front: the core runs it all, nothing comes back here.
+        self.ui.set_editor(text, owlosui_core::edit::offer::ALL, 0);
         self.ui.focus_first();
     }
 

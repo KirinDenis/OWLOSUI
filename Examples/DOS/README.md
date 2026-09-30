@@ -6,7 +6,7 @@ Programs on DOS: a real machine, DOSBox-X, or anything in between.
 Asm/            HELLO and DEMO in assembler (FASM)       \
 C/              HELLO and DEMO in C (Open Watcom)          > through the resident
 Pascal/         HELLO and DEMO in Pascal (Borland Pascal 7) /
-Rust/           the shared Rust application, the core linked in
+Rust/           HELLO and DEMO in Rust, and the shared application: the core linked in
 TESTKEYS.BAT    the keys the tests type - the same for every language
 CHECK.CMD       runs a folder's HELLO and DEMO and checks what they showed
 ```
@@ -40,8 +40,9 @@ the others - and they are tested with the same keys and the same checks.
 In every folder:
 
 ```
-RUN HELLO          under DOS: CWSDPMI, then OWLOSRES with the program
-RUNWIN DEMO        from Windows: the same in DOSBox-X
+RUN DEMO           under DOS: CWSDPMI, then OWLOSRES with the program;
+                   from Windows: DOSBox-X starts and does the same in there
+RUNWIN DEMO        from Windows, the same as RUN DEMO there
 BUILD              from Windows: the programs from their sources
 TEST               from Windows: build, run both, type at them, check
 ```
@@ -63,10 +64,13 @@ the two are.
 
 ## Rust: the core linked in
 
-[Rust/](Rust/README.md) is the core and [the shared application](../shared/app.rs)
-- the one the browser and the Windows window run - built for DOS: a flat
-32-bit binary under DPMI, standing on the same machine layer as the
-resident (`lib/dos`). No interrupt: the program is the toolkit.
+[Rust/](Rust/README.md) has HELLO and DEMO too, the same two programs the
+other way in: they link the core and make each part from its own types,
+where the other three ask the resident for it. No interrupt: the program
+is the toolkit. They stand on the same machine layer as the resident
+(`lib/dos`) and get the same test. Beside them is
+[the shared application](../shared/app.rs), the one the browser and the
+Windows window run, built for DOS.
 
 ## Testing all of it
 
@@ -81,6 +85,9 @@ DOSBox-X types at the programs with AUTOTYPE, which presses keys one at a
 time and cannot hold Alt, so the test reaches the menus with F10 and the
 arrows. F12 photographs the screen into `SHOTS.TXT`, and `CHECK.CMD`
 looks for what should be there: the menu bar, 12+30 shown as 42, the
-calendar's days, the table, a tile slid, the About box. The DOSBox-X here
-faults while closing after some runs that ended well - the Rust example's
-too - so the emulator's exit code is not looked at; the program's is.
+calendar's days, the table, a tile slid, a file opened and a folder
+walked, the About box. The keys are typed on a US layout whatever the
+host's is: DOSBox-X follows the Windows keyboard, and on a Slovak one the
+digit row types letters. The DOSBox-X here faults while closing after some
+runs that ended well, so the emulator's exit code is not looked at; the
+program's is.

@@ -32,6 +32,39 @@ Or they ask the server to open its own window (`OPEN_WINDOW`) and draw
 nothing at all - which is what every DOS program does: the resident owns
 the screen.
 
+## The editor
+
+A text view is an editor, and a program says in one call what it offers:
+
+```
+Rust        ui.set_editor(text, offer::ALL, 0)
+C#          owl.Editor(text, Owlosui.Offer.All)
+JavaScript  owl.editor(text, Offer.All)
+C           owl_editor(text, OWL_OFFER_ALL, 0)
+Pascal      OwlEditor(Text, OfferAll, 0)
+assembler   mov bx,text / mov ax,OFFER_ALL / call owl_editor
+```
+
+Each bit is a whole feature: Edit (Undo, Cut, Copy, Paste, Select all),
+Find, Replace, Word wrap, Read only, Hex view, Classic keys. While the
+editor's window is in front, the core puts them on the menu bar - in the
+program's Edit menu if it has one, or in one of their own after File -
+binds their keys (Ctrl+F, Ctrl+H, Ctrl+L; Ctrl+Q F and Ctrl+Q A with
+Borland's keys), builds the Find and Replace dialogs, and says on the right
+of the status line where the caret is. Nothing comes back to the program;
+it writes no handler for any of it. With no menu bar, Find and Replace go on
+the status line instead.
+
+Word wrap folds long lines at the window's edge, after the last space that
+fits. Only the picture folds: the lines, the saved file and the caret's
+line and column are what they were, and Up and Down go by rows on the
+screen. The person can change the settings from the menu; `GET_EDITOR`
+(`editor_state`, `GetEditor`, `editorState`) reads them back.
+
+An editor that offers nothing - the default - leaves both bars alone, and
+the primitives underneath (`FIND`, `REPLACE`, `SET_READONLY`) are still
+there for a program that builds its own.
+
 ## Building
 
 From the repository root, with [Rust](https://rustup.rs):

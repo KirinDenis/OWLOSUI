@@ -22,6 +22,10 @@ pub struct HexView {
     /// The byte under the caret.
     pub cursor: usize,
     rows: i16,
+    /// The text this view is standing in for, when an editor's Hex view
+    /// put it there: the text is kept, out of the window, until it comes
+    /// back.
+    pub source: Option<crate::ui::ViewId>,
 }
 
 /// Sixteen bytes to a row, always, with a wider gap in the middle.
@@ -55,6 +59,7 @@ impl HexView {
             top: 0,
             cursor: 0,
             rows: 1,
+            source: None,
         }
     }
 

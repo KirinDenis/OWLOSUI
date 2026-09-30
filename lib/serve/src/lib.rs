@@ -114,6 +114,8 @@ pub mod op {
     pub const FIND: u8 = 0x57;
     pub const REPLACE: u8 = 0x58;
     pub const REPLACE_ALL: u8 = 0x59;
+    pub const EDITOR: u8 = 0x5D;
+    pub const GET_EDITOR: u8 = 0x5E;
 }
 
 type Res<T> = Result<T, String>;
@@ -671,6 +673,32 @@ impl Server {
                     return Err(format!("view {} is not a text", id.raw()));
                 }
                 self.settle_focus()?;
+            }
+
+            op::EDITOR => {
+                // What the editor offers on the bars, and how it is set:
+                // the core then answers its Edit menu, its keys and its
+                // Find and Replace dialogs by itself.
+                let id = r.id("id")?;
+                let offers = r.u8("offers")?;
+                let state = r.u8("state")?;
+                let id = self.alive(id)?;
+                if !self.ui()?.set_editor(id, offers, state) {
+                    return Err(format!("view {} is not a text", id.raw()));
+                }
+                self.settle_focus()?;
+            }
+
+            op::GET_EDITOR => {
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let Some((offers, state, line, col)) = self.ui()?.editor_state(id) else {
+                    return Err(format!("view {} is not a text", id.raw()));
+                };
+                out.u8(offers);
+                out.u8(state);
+                out.u16(line.max(0) as u16);
+                out.u16(col.max(0) as u16);
             }
 
             op::STATIC => {

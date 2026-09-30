@@ -53,6 +53,21 @@ typedef unsigned short owl_id;          /* a view; 0 is the desktop */
 #define OWL_CTRL      2
 #define OWL_ALT       4
 
+/* ---- what an editor offers (owl_editor): the core then runs each by itself ---- */
+#define OWL_OFFER_EDIT     0x01         /* Undo, Redo, Cut, Copy, Paste, Select all */
+#define OWL_OFFER_FIND     0x02         /* Find... Ctrl+F, Find next Ctrl+L */
+#define OWL_OFFER_REPLACE  0x04         /* Replace... Ctrl+H */
+#define OWL_OFFER_WRAP     0x08         /* Word wrap */
+#define OWL_OFFER_READONLY 0x10         /* Read only */
+#define OWL_OFFER_HEX      0x20         /* the same text as bytes */
+#define OWL_OFFER_KEYS     0x40         /* Classic keys: Borland's WordStar arrangement */
+#define OWL_OFFER_ALL      0x7F
+/* ---- and how it is set ---- */
+#define OWL_EDIT_WRAP      0x01
+#define OWL_EDIT_READONLY  0x02
+#define OWL_EDIT_CLASSIC   0x04
+#define OWL_EDIT_HEX       0x08
+
 /* ---- the session ---- */
 int    owl_check(void);                 /* started by OWLOSRES? says how, if not */
 void   owl_init(void);                  /* the desktop: 80 by 25 */
@@ -89,6 +104,9 @@ owl_id owl_end(void);
 
 /* ---- changing things ---- */
 void   owl_set_text(owl_id id, const char *text);
+void   owl_editor(owl_id text, unsigned char offers, unsigned char state);
+                                        /* OWL_OFFER_ bits; OWL_EDIT_ bits */
+unsigned char owl_editor_state(owl_id text);  /* OWL_EDIT_ bits as the person left them */
 void   owl_close(owl_id id);
 void   owl_activate(owl_id id);
 owl_id owl_active(void);

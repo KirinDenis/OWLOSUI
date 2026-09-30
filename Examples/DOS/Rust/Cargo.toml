@@ -15,6 +15,20 @@ path = "src/main.rs"
 test = false
 bench = false
 
+# HELLO and DEMO: the programs Asm, C and Pascal have too, part for part -
+# here with the core linked in. Their loaders are HELLO.COM and DEMO.COM.
+[[bin]]
+name = "hello"
+path = "src/hello.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "demo"
+path = "src/demo.rs"
+test = false
+bench = false
+
 [dependencies]
 # The `dos` feature makes a glyph a byte, so a cell is the two bytes the
 # card wants; no `std`, because there is none.

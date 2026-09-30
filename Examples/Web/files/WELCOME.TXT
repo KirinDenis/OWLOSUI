@@ -1,0 +1,18 @@
+This file is in Examples/Web/files, on the computer running RUN.CMD.
+
+The demo reaches this folder two ways, both through RUN.CMD's own little
+web server:
+
+  File > Open from > The server's folder
+      plain HTTP: the page asks for a file and gets it; saving sends it
+      back. Any web server can be taught those two things.
+
+  File > Open from > A WebDAV folder
+      WebDAV, the protocol NAS boxes and Nextcloud share folders with.
+      Here it is the same folder; type another address and it is theirs.
+
+Try it: change this text, press F2 to save, and open it again - either
+way. The file on disk changes too.
+
+The third place, This browser's storage, is not on any server: it is a
+small private disk the browser keeps for this page.

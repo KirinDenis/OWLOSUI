@@ -22,4 +22,6 @@ call Examples\Web\Rust\01-Linked\build.cmd >nul || exit /b 1
 set PAGE=/Examples/Web/Rust/01-Linked/web/
 
 :serve
-cargo run -q --release -p owlosui-httpd -- . %PAGE%
+rem Examples\Web\files is the folder the demo's File menu reads and saves,
+rem as "the server's folder" at /files/ and as a WebDAV share at /dav/.
+cargo run -q --release -p owlosui-httpd -- . %PAGE% --files Examples\Web\files

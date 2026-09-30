@@ -10,6 +10,9 @@ rem live in lib\dos, three folders up.
 rem
 rem     RUN x TEST      DOSBox-X types the test's keys (..\TESTKEYS.BAT)
 rem                     and closes when the program has ended
+rem From Windows this starts DOSBox-X and runs itself in there (RUNWIN.BAT):
+rem RUN DEMO is RUN DEMO on either side.
+if "%OS%"=="Windows_NT" goto windows
 if "%1"=="" goto usage
 echo before %1 > RUN.OUT
 ..\..\..\lib\dos\CWSDPMI.EXE
@@ -21,4 +24,7 @@ if "%2"=="TEST" exit
 goto end
 :usage
 echo RUN HELLO, or RUN DEMO
+goto end
+:windows
+call "%~dp0RUNWIN.BAT" %1 %2
 :end

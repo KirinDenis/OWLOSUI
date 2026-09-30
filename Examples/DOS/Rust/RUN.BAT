@@ -14,8 +14,20 @@ rem     RUN KEYS       DOSBox-X only: AUTOTYPE presses F4, F12 (a frame into
 rem                    SHOT.BIN), Escape, then leaves through the File menu
 rem     RUN x EXIT     ...and close the emulator (for RUNWIN.BAT)
 rem
+rem     RUN HELLO      HELLO, and RUN DEMO the demo: the same programs as in
+rem     RUN DEMO       ..\Asm, ..\C and ..\Pascal, with the core linked in
+rem     RUN x TEST     ...with the test's keys (..\TESTKEYS.BAT), then closes
+rem
 rem After the program, SCRDUMP writes the screen it left into SCREEN.BIN,
 rem and OWLOS.OUT says what the batch saw: the file is the screen.
+rem From Windows this starts DOSBox-X and runs itself in there (RUNWIN.BAT):
+rem RUN DEMO is RUN DEMO on either side.
+if "%OS%"=="Windows_NT" goto windows
+rem DOS compares names as they are typed: demo and DEMO both count.
+if "%1"=="HELLO" goto program
+if "%1"=="hello" goto program
+if "%1"=="DEMO" goto program
+if "%1"=="demo" goto program
 echo before %1 > OWLOS.OUT
 if "%1"=="DUMP" goto dump
 if "%1"=="HELP" goto help
@@ -38,3 +50,17 @@ AUTOTYPE > AUTOTYPE.TXT
 SCRDUMP SCREEN.BIN
 if errorlevel 1 echo scrdump failed >> OWLOS.OUT
 if "%2"=="EXIT" exit
+goto end
+
+:program
+echo before %1 > RUN.OUT
+CWSDPMI.EXE
+if "%2"=="TEST" call ..\TESTKEYS.BAT %1
+%1.COM
+if errorlevel 1 echo errorlevel 1 or more >> RUN.OUT
+echo after >> RUN.OUT
+if "%2"=="TEST" exit
+goto end
+:windows
+call "%~dp0RUNWIN.BAT" %1 %2
+:end

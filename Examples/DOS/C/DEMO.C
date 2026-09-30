@@ -80,7 +80,11 @@ static void editor_new(void)
     owl_id w;
     sprintf(title, "UNTITLED%d.TXT", n);
     w = owl_window(0, 2 + (n & 7), 1 + (n & 7), 56, 14, OWL_BLUE, title, CM_CLOSE);
-    owl_text(w, "Type here. Shift and the arrows select, Ctrl+Z takes it back.");
+    /* Everything the editor has, on an Edit menu of its own while this
+       window is in front: the core runs it all, nothing comes back here. */
+    owl_editor(owl_text(w, "Type here. Shift and the arrows select, Ctrl+Z takes it back. "
+                           "The Edit menu has Find, Replace and Word wrap."),
+               OWL_OFFER_ALL, 0);
 }
 
 /* ---- File > Open: the file panel, the folder read through DOS ---------- */
@@ -159,7 +163,9 @@ static int view_file(const char *path, const char *name)
     if (size > (long)n) sprintf(title, "%s - the first %u bytes", name, n);
     else strcpy(title, name);
     w = owl_window(0, 2, 2, 76, 20, OWL_BLUE, title, CM_CLOSE);
-    owl_text_dos(w, file_buf, n, 1);    /* read-only: a viewer */
+    /* A viewer, with Find, Word wrap and the bytes in hex on its Edit menu. */
+    owl_editor(owl_text_dos(w, file_buf, n, 1),
+               OWL_OFFER_FIND | OWL_OFFER_WRAP | OWL_OFFER_HEX, OWL_EDIT_READONLY);
     return 1;
 }
 

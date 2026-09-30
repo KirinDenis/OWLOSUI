@@ -180,6 +180,46 @@ public sealed class Owlosui : IDisposable
     public void SetReadOnly(ushort text, bool on) => Call(Op.SetReadOnly, W.U16(text), new[] { (byte)(on ? 1 : 0) });
 
     /// <summary>
+    /// What an editor offers, for <see cref="Editor"/>: each a whole feature
+    /// the core then runs by itself while the editor's window is active -
+    /// its items in the Edit menu, its keys, and for Find and Replace the
+    /// dialogs. None of them sends the program a command.
+    /// </summary>
+    [Flags]
+    public enum Offer : byte
+    {
+        None = 0,
+        Edit = 1,        // Undo, Redo, Cut, Copy, Paste, Select all
+        Find = 2,        // Find... (Ctrl+F) and Find next (Ctrl+L)
+        Replace = 4,     // Replace... (Ctrl+H)
+        Wrap = 8,        // Word wrap, ticked while on
+        ReadOnly = 16,   // Read only, ticked while on
+        Hex = 32,        // the same text as bytes
+        Keys = 64,       // Classic keys: Borland's WordStar arrangement
+        All = 127,
+    }
+
+    /// <summary>How an editor is set, and where its caret is: line and column from 0.</summary>
+    public readonly record struct EditorState(Offer Offers, bool Wrap, bool ReadOnly, bool Classic, bool Hex, int Line, int Col);
+
+    /// <summary>
+    /// What a text offers and how it starts. The person can change each
+    /// setting from the Edit menu; <see cref="GetEditor"/> reads them back.
+    /// </summary>
+    public void Editor(ushort text, Offer offers, bool wrap = false, bool readOnly = false, bool classic = false, bool hex = false)
+    {
+        var state = (byte)((wrap ? 1 : 0) | (readOnly ? 2 : 0) | (classic ? 4 : 0) | (hex ? 8 : 0));
+        Call(Op.Editor, W.U16(text), new[] { (byte)offers, state });
+    }
+
+    public EditorState GetEditor(ushort text)
+    {
+        var r = Call(Op.GetEditor, W.U16(text));
+        var s = r[1];
+        return new EditorState((Offer)r[0], (s & 1) != 0, (s & 2) != 0, (s & 4) != 0, (s & 8) != 0, R.U16(r, 2), R.U16(r, 4));
+    }
+
+    /// <summary>
     /// What an input line has been given before, newest first. Down, or
     /// the ▼ at the field's end, lists them; a pick fills the field. Enter
     /// in the field adds to the list.
@@ -1449,7 +1489,7 @@ public sealed class Owlosui : IDisposable
         public const byte WindowStatus = 0x4A, WindowMenu = 0x4B, WindowList = 0x4C, CycleBack = 0x4D, SizeMove = 0x4E;
         public const byte SetHistory = 0x4F, GetHistory = 0x50, Palette = 0x51, SetColor = 0x52, AddFiles = 0x5A;
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
-        public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59;
+        public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E;
         public const byte OpenWindow = 0x5B, Wait = 0x5C;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;

@@ -24,10 +24,11 @@
 extern crate alloc;
 
 use alloc::collections::VecDeque;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
 use core::arch::asm;
-use owlosui_core::{Buffer, Button, Event, Key, KeyCode, Mods, Mouse, MouseKind};
+use owlosui_core::{Buffer, Button, Event, FileEntry, Key, KeyCode, Mods, Mouse, MouseKind, Ui};
 
 // ------------------------------------------------------------- the machine
 
@@ -321,18 +322,23 @@ pub fn decode(ascii: u8, scan: u8) -> Option<Key> {
             _ => return None,
         }
     } else {
-        match ascii {
-            13 => KeyCode::Enter,
-            27 => KeyCode::Esc,
-            9 => KeyCode::Tab,
-            8 => KeyCode::Backspace,
-            1..=26 if mods.ctrl => KeyCode::Char((b'a' + ascii - 1) as char),
-            _ => {
-                // Plain typing. The shift flag is not a modifier on a
-                // letter that already arrived in its case.
-                mods.shift = false;
-                KeyCode::Char(ascii as char)
+        // A key with an ASCII code says its own modifiers: the BIOS gives no
+        // code at all when Alt is held, Ctrl with a letter gives 1 to 26,
+        // and a letter arrives in its case. So the flags byte is not asked
+        // here. It would be wrong to: on a keyboard whose AltGr makes
+        // characters - Slovak, German - the flags say Alt while the key
+        // typed a backslash, and a backslash is what was meant.
+        mods = Mods::default();
+        match (ascii, scan) {
+            (13, _) => KeyCode::Enter,
+            (27, _) => KeyCode::Esc,
+            (9, _) => KeyCode::Tab,
+            (8, 0x0E) => KeyCode::Backspace,
+            (1..=26, _) => {
+                mods.ctrl = true;
+                KeyCode::Char((b'a' + ascii - 1) as char)
             }
+            _ => KeyCode::Char(ascii as char), // plain typing
         }
     };
     Some(Key { code, mods })
@@ -718,4 +724,196 @@ pub fn shot(bytes: &[u8]) {
     real_int(0x21, &mut w);
     let mut c = RealRegs { eax: 0x3E00, ebx: handle, ..Default::default() };
     real_int(0x21, &mut c);
+}
+
+// ----------------------------------------------------------- a program's loop
+
+/// What stands behind the screen: a core, and whoever acts on what it
+/// says - the same shape as `lib/window`'s `Program`, for DOS.
+pub trait Program {
+    /// The core whose desktop is on the screen.
+    fn ui(&mut self) -> &mut Ui;
+    /// After every key or click: act on whatever was pressed or chosen.
+    /// False ends the program.
+    fn after_input(&mut self) -> bool;
+}
+
+/// The whole of a DOS program's main loop: draw the desktop into video
+/// memory, wait for a key or the mouse, hand it to the core, let the
+/// program act - until it says stop. Then a clean screen and back to DOS.
+pub fn run(program: &mut dyn Program) -> ! {
+    let mut buf = Buffer::new(80, 25);
+    let mut mouse = MouseState::detect();
+    let mut queue = VecDeque::new();
+    loop {
+        let ui = program.ui();
+        ui.draw(&mut buf);
+        let bytes = frame_bytes(&buf, mouse.pointer());
+        show(&bytes);
+        cursor(ui.cursor().map(|p| (p.x, p.y)));
+        // A pressed button is seen down for a moment before it happens.
+        if ui.pick_pending() {
+            hold();
+            program.ui().complete_pick();
+            if !program.after_input() {
+                break;
+            }
+            continue;
+        }
+        if queue.is_empty() {
+            wait_input(&mut mouse, &mut queue, &bytes);
+        }
+        if let Some(ev) = queue.pop_front() {
+            program.ui().handle(ev);
+            if !program.after_input() {
+                break;
+            }
+        }
+    }
+    clear_screen();
+    dos_exit(0)
+}
+
+// ------------------------------------------------ DOS: the date, folders, files
+
+/// The block folders and files go through: a path, DOS's DTA, and 8 KB
+/// of data, below a megabyte where DOS can reach them. Asked for once.
+static mut IO: u16 = 0;
+const IO_PATH: u16 = 0;
+const IO_DTA: u16 = 0x100;
+const IO_DATA: u16 = 0x200;
+const IO_DATA_SIZE: usize = 8192;
+
+fn io_block() -> Option<u16> {
+    unsafe {
+        if IO == 0 {
+            IO = dos_alloc(((IO_DATA as usize + IO_DATA_SIZE) / 16) as u16)?;
+        }
+        Some(IO)
+    }
+}
+
+/// A path into the block, zero-ended. A core string is glyph indices, and
+/// on DOS a glyph is the byte a file name is made of.
+fn put_path(seg: u16, path: &str) {
+    let mut b: Vec<u8> = path.chars().take(250).map(|c| c as u32 as u8).collect();
+    b.push(0);
+    write_real(real(seg, IO_PATH), &b);
+}
+
+fn name_of(bytes: &[u8]) -> String {
+    bytes.iter().take_while(|&&b| b != 0).map(|&b| b as char).collect()
+}
+
+/// Today, from DOS: year, month, day.
+pub fn dos_date() -> (u16, u8, u8) {
+    let mut r = RealRegs { eax: 0x2A00, ..Default::default() };
+    real_int(0x21, &mut r);
+    ((r.ecx & 0xFFFF) as u16, (r.edx >> 8) as u8, r.edx as u8)
+}
+
+/// The current folder, drive and all: C:\EXAMPLES\DOS\RUST.
+pub fn current_dir() -> String {
+    let mut r = RealRegs { eax: 0x1900, ..Default::default() };
+    real_int(0x21, &mut r);
+    let drive = b'A' + (r.eax & 0xFF) as u8;
+    let mut dir = String::new();
+    dir.push(drive as char);
+    dir.push_str(":\\");
+    let Some(seg) = io_block() else { return dir };
+    let mut q = RealRegs { eax: 0x4700, edx: 0, esi: IO_PATH as u32, ds: seg, ..Default::default() };
+    real_int(0x21, &mut q);
+    if q.flags & 1 == 0 {
+        let mut b = [0u8; 64];
+        read_real(real(seg, IO_PATH), &mut b);
+        dir.push_str(&name_of(&b));
+    }
+    dir
+}
+
+/// A folder's entries, the way a file panel wants them: `..` as DOS gives
+/// it, `.` left out; `None` if DOS cannot read the folder.
+pub fn read_dir(dir: &str) -> Option<Vec<FileEntry>> {
+    let seg = io_block()?;
+    let mut pattern = String::from(dir);
+    if !pattern.ends_with('\\') {
+        pattern.push('\\');
+    }
+    pattern.push_str("*.*");
+    put_path(seg, &pattern);
+    let mut dta = RealRegs { eax: 0x1A00, edx: IO_DTA as u32, ds: seg, ..Default::default() };
+    real_int(0x21, &mut dta);
+    let mut r = RealRegs { eax: 0x4E00, ecx: 0x37, edx: IO_PATH as u32, ds: seg, ..Default::default() };
+    real_int(0x21, &mut r);
+    let mut v = Vec::new();
+    if r.flags & 1 != 0 {
+        // No more files: a folder with nothing in it is still a folder.
+        return if r.eax & 0xFFFF == 18 { Some(v) } else { None };
+    }
+    loop {
+        let mut d = [0u8; 43];
+        read_real(real(seg, IO_DTA), &mut d);
+        let name = name_of(&d[30..43]);
+        if name != "." {
+            let time = u16::from_le_bytes([d[22], d[23]]);
+            let date = u16::from_le_bytes([d[24], d[25]]);
+            v.push(FileEntry {
+                name,
+                size: u32::from_le_bytes([d[26], d[27], d[28], d[29]]),
+                date: (1980 + (date >> 9), ((date >> 5) & 15) as u8, (date & 31) as u8, (time >> 11) as u8, ((time >> 5) & 63) as u8),
+                attrs: d[21],
+            });
+        }
+        let mut n = RealRegs { eax: 0x4F00, ..Default::default() };
+        real_int(0x21, &mut n);
+        if n.flags & 1 != 0 {
+            break;
+        }
+    }
+    Some(v)
+}
+
+/// A file's or folder's DOS attributes; `None` if there is no such thing.
+pub fn file_attr(path: &str) -> Option<u8> {
+    let seg = io_block()?;
+    put_path(seg, path);
+    let mut r = RealRegs { eax: 0x4300, edx: IO_PATH as u32, ds: seg, ..Default::default() };
+    real_int(0x21, &mut r);
+    if r.flags & 1 != 0 {
+        None
+    } else {
+        Some((r.ecx & 0xFF) as u8)
+    }
+}
+
+/// Up to `max` bytes of a file, and its whole size; `None` if DOS cannot
+/// open it.
+pub fn read_file(path: &str, max: usize) -> Option<(Vec<u8>, u32)> {
+    let seg = io_block()?;
+    put_path(seg, path);
+    let mut o = RealRegs { eax: 0x3D00, edx: IO_PATH as u32, ds: seg, ..Default::default() };
+    real_int(0x21, &mut o);
+    if o.flags & 1 != 0 {
+        return None;
+    }
+    let handle = o.eax & 0xFFFF;
+    let mut data = Vec::new();
+    while data.len() < max {
+        let want = (max - data.len()).min(IO_DATA_SIZE);
+        let mut r = RealRegs { eax: 0x3F00, ebx: handle, ecx: want as u32, edx: IO_DATA as u32, ds: seg, ..Default::default() };
+        real_int(0x21, &mut r);
+        let got = if r.flags & 1 != 0 { 0 } else { (r.eax & 0xFFFF) as usize };
+        if got == 0 {
+            break;
+        }
+        let at = data.len();
+        data.resize(at + got, 0);
+        read_real(real(seg, IO_DATA), &mut data[at..]);
+    }
+    let mut end = RealRegs { eax: 0x4202, ebx: handle, ..Default::default() };
+    real_int(0x21, &mut end);
+    let size = ((end.edx & 0xFFFF) << 16) | (end.eax & 0xFFFF);
+    let mut c = RealRegs { eax: 0x3E00, ebx: handle, ..Default::default() };
+    real_int(0x21, &mut c);
+    Some((data, size))
 }

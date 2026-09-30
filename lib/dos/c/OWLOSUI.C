@@ -156,6 +156,17 @@ owl_id owl_end(void) { return send_id(); }
 /* ---- changing things ---- */
 
 void owl_set_text(owl_id id, const char *text) { owl_begin(0x2B); owl_u16(id); owl_str(text); owl_send(); }
+
+void owl_editor(owl_id text, unsigned char offers, unsigned char state)
+{
+    owl_begin(0x5D); owl_u16(text); owl_u8(offers); owl_u8(state); owl_send();
+}
+
+unsigned char owl_editor_state(owl_id text)
+{
+    owl_begin(0x5E); owl_u16(text); owl_send();
+    return owl_reply()[1];
+}
 void owl_close(owl_id id)    { with_id(0x20, id); }
 void owl_activate(owl_id id) { with_id(0x27, id); }
 owl_id owl_active(void)      { owl_begin(0x2A); return send_id(); }
