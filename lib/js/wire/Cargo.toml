@@ -1,0 +1,14 @@
+[package]
+name = "owlosui-wire"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The wire server (lib/serve) inside a WebAssembly module: what lib/js/owlosui.js talks to in a browser or in Node."
+
+# A module the page loads: three exported functions and the server's
+# memory, nothing else. No wasm-bindgen.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+owlosui-serve = { path = "../../serve" }

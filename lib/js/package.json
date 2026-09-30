@@ -1,0 +1,8 @@
+{
+  "name": "owlosui",
+  "version": "0.1.0",
+  "description": "The OWLOSUI core in WebAssembly, and its JavaScript client: owlosui.js.",
+  "type": "module",
+  "main": "owlosui.js",
+  "license": "MIT OR Apache-2.0"
+}

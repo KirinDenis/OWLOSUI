@@ -9,13 +9,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp", "csharp", "{7AFF42
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Owlosui", "lib\csharp\Owlosui.csproj", "{EC400CB6-280D-4189-AEE9-C6EED238C7A0}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HelloWorld", "Examples\CSharp\01-HelloWorld\HelloWorld.csproj", "{C2FF9F52-D16A-4FB9-B906-B7C1508A584F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HelloWorld", "Examples\Desktop\CSharp\01-HelloWorld\HelloWorld.csproj", "{C2FF9F52-D16A-4FB9-B906-B7C1508A584F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Notes", "Examples\CSharp\02-Notes\Notes.csproj", "{CEAB1653-5B31-4AF5-85A5-0958A83CDA24}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Notes", "Examples\Desktop\CSharp\02-Notes\Notes.csproj", "{CEAB1653-5B31-4AF5-85A5-0958A83CDA24}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Commander", "Examples\CSharp\03-Commander\Commander.csproj", "{33CE36E6-7BF5-44DC-B423-BE1AEFA2C588}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Commander", "Examples\Desktop\CSharp\03-Commander\Commander.csproj", "{33CE36E6-7BF5-44DC-B423-BE1AEFA2C588}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tests", "Examples\CSharp\Tests\Tests.csproj", "{E3633C3E-2072-4093-B20B-7D8002F31EE4}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tests", "Examples\Desktop\CSharp\Tests\Tests.csproj", "{E3633C3E-2072-4093-B20B-7D8002F31EE4}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Examples", "Examples", "{B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}"
 EndProject
@@ -23,11 +23,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "CSharp", "CSharp", "{06E8C8
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "04-Basez-Sokoban", "04-Basez-Sokoban", "{1F56DD2A-3B2B-9998-F6CD-1CE4BD7CA66E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BaseZ47", "Examples\CSharp\04-Basez-Sokoban\BaseZ47.csproj", "{99734E05-1BB8-4C40-A983-E1D2A13AF58A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BaseZ47", "Examples\Desktop\CSharp\04-Basez-Sokoban\BaseZ47.csproj", "{99734E05-1BB8-4C40-A983-E1D2A13AF58A}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "05-OwlosDemo", "05-OwlosDemo", "{7F26B2B4-C6C3-D6E3-CB2F-F00A41986310}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OwlosDemo", "Examples\CSharp\05-OwlosDemo\OwlosDemo.csproj", "{B70707D8-5FDC-49BE-BF17-E128EFC2C7C7}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OwlosDemo", "Examples\Desktop\CSharp\05-OwlosDemo\OwlosDemo.csproj", "{B70707D8-5FDC-49BE-BF17-E128EFC2C7C7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DemoWindow", "Examples\Desktop\CSharp\06-Window\DemoWindow.csproj", "{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -123,6 +125,18 @@ Global
 		{B70707D8-5FDC-49BE-BF17-E128EFC2C7C7}.Release|x64.Build.0 = Release|Any CPU
 		{B70707D8-5FDC-49BE-BF17-E128EFC2C7C7}.Release|x86.ActiveCfg = Release|Any CPU
 		{B70707D8-5FDC-49BE-BF17-E128EFC2C7C7}.Release|x86.Build.0 = Release|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Debug|x64.Build.0 = Debug|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Debug|x86.Build.0 = Debug|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Release|x64.ActiveCfg = Release|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Release|x64.Build.0 = Release|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Release|x86.ActiveCfg = Release|Any CPU
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -139,5 +153,6 @@ Global
 		{99734E05-1BB8-4C40-A983-E1D2A13AF58A} = {1F56DD2A-3B2B-9998-F6CD-1CE4BD7CA66E}
 		{7F26B2B4-C6C3-D6E3-CB2F-F00A41986310} = {06E8C8A7-A0E8-98DE-8946-9CF52B15DA27}
 		{B70707D8-5FDC-49BE-BF17-E128EFC2C7C7} = {7F26B2B4-C6C3-D6E3-CB2F-F00A41986310}
+		{9CF6A342-B54E-4F59-847A-97ACF1B9EC67} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 	EndGlobalSection
 EndGlobal

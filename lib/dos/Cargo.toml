@@ -1,0 +1,37 @@
+[package]
+name = "owlosui-dos"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "OWLOSUI on DOS: the machine layer for a flat 32-bit program under DPMI, and OWLOSRES, the toolkit behind INT 60h for programs in any language."
+
+# Its own workspace, because it is built for a target nothing else here
+# is: see .cargo/config.toml and i386-owlos-none.json.
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "owlosres"
+path = "src/owlosres.rs"
+test = false
+bench = false
+
+[dependencies]
+# The `dos` feature makes a glyph a byte, so a cell is the two bytes the
+# card wants; no `std`, because there is none.
+owlosui-core = { path = "../core", default-features = false, features = ["dos"] }
+owlosui-serve = { path = "../serve", default-features = false }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+
+[profile.dev]
+panic = "abort"

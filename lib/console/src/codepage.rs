@@ -23,8 +23,9 @@
 //! string of glyph indices: every `char` is in `0..=Glyph::MAX` and is the
 //! index itself. `Buffer::text` writes such a char as that glyph.
 
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use alloc::collections::BTreeMap;
+#[allow(unused_imports)]
+use alloc::{string::String, vec::Vec};
 
 use owlosui_core::{Glyph, GLYPH_MAX};
 
@@ -35,14 +36,14 @@ pub struct Font {
     pub number: u16,
     /// Glyph index to character. The first 256 are the code page.
     pub table: Vec<char>,
-    reverse: HashMap<char, Glyph>,
+    reverse: BTreeMap<char, Glyph>,
     /// Whether new characters may be added, or must become `?`.
     pub growing: bool,
 }
 
 impl Font {
     fn new(number: u16, page: [char; 256], growing: bool) -> Self {
-        let mut reverse = HashMap::with_capacity(256);
+        let mut reverse = BTreeMap::new();
         // Skip 0x00..0x20: those positions hold pictures (☺, ♦, ↑), and
         // matching them would turn a stray arrow in a document into a
         // control code. Later entries win over earlier ones, so a glyph
@@ -111,6 +112,24 @@ impl Font {
         })
     }
 
+    /// A character for a cell of a canvas, where a picture is a picture.
+    /// Text never maps to the positions below 0x20 (a stray arrow in a
+    /// document must not become a control code), but a canvas cell is
+    /// not text: ☺ asked for there is glyph 1, the face the card draws.
+    /// That is how an ASCII table shows every glyph on a fixed font, where
+    /// growing past 255 is not possible.
+    pub fn cell_glyph(&mut self, c: char) -> Glyph {
+        if let Some(g) = self.lookup(c) {
+            return g;
+        }
+        if let Some(i) = self.table.iter().take(0x20).position(|&t| t == c) {
+            if i > 0 {
+                return i as Glyph;
+            }
+        }
+        self.from_char(c)
+    }
+
     pub fn encode(&mut self, s: &str) -> Vec<Glyph> {
         s.chars().map(|c| self.from_char(c)).collect()
     }
@@ -144,8 +163,9 @@ impl Font {
 /// The font this process draws with, from `OWLOSUI_CODEPAGE`; 437 unless
 /// told otherwise. Fixed, because the terminal backend draws for one
 /// console with one code page - the DOS case, on a bigger machine.
+#[cfg(feature = "std")]
 pub fn current() -> &'static Font {
-    static CP: OnceLock<Font> = OnceLock::new();
+    static CP: std::sync::OnceLock<Font> = std::sync::OnceLock::new();
     CP.get_or_init(|| {
         std::env::var("OWLOSUI_CODEPAGE")
             .ok()

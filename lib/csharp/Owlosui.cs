@@ -64,6 +64,10 @@ public sealed class Owlosui : IDisposable
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // The server needs no console: its stdio is these pipes. Without
+            // this a program built as a Windows application would start it
+            // with a black console window of its own.
+            CreateNoWindow = true,
         };
         proc = Process.Start(psi) ?? throw new InvalidOperationException($"could not start {path}");
         proc.ErrorDataReceived += (_, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
@@ -1004,6 +1008,11 @@ public sealed class Owlosui : IDisposable
     /// </summary>
     public void Run(Func<ushort, bool> onCommand, Action? afterInput)
     {
+        if (InWindow)
+        {
+            RunWindow(onCommand, afterInput);
+            return;
+        }
         var enc = Console.OutputEncoding;
         Console.OutputEncoding = Encoding.UTF8;
         Console.CursorVisible = false;
@@ -1059,6 +1068,49 @@ public sealed class Owlosui : IDisposable
             Console.Clear();
             Console.CursorVisible = true;
             Console.OutputEncoding = enc;
+        }
+    }
+
+    // ---------------------------------------------------------- the window
+
+    /// <summary>Whether <see cref="OpenWindow"/> has moved the desktop into a window.</summary>
+    public bool InWindow { get; private set; }
+
+    /// <summary>
+    /// Show the desktop in a native window instead of the console. The
+    /// window is the server's: it draws the cells and reads the keys and
+    /// the mouse itself (lib/window, the same code a Rust program links),
+    /// so this program draws nothing. Call it once, before
+    /// <see cref="Run(Func{ushort, bool}, Action?)"/>; everything else - windows,
+    /// buttons, commands - is unchanged. Build the program as
+    /// <c>&lt;OutputType&gt;WinExe&lt;/OutputType&gt;</c> and there is no
+    /// console at all. Windows only.
+    /// </summary>
+    /// <param name="activate">False opens it without taking the focus: for a
+    /// test or an agent, so a person typing elsewhere keeps typing there.</param>
+    public void OpenWindow(string title = "OWLOSUI", bool activate = true)
+    {
+        Call(Op.OpenWindow, W.Str(title), new[] { (byte)(activate ? 0 : 1) });
+        InWindow = true;
+    }
+
+    /// <summary>
+    /// Run's loop when the window is the screen: nothing to draw, and WAIT
+    /// in place of reading the console. WAIT answers after one key or click
+    /// has been through the core, with what it caused and the desktop's
+    /// size - the person may have resized the window.
+    /// </summary>
+    private void RunWindow(Func<ushort, bool> onCommand, Action? afterInput)
+    {
+        while (true)
+        {
+            var r = Call(Op.Wait);
+            ushort pressed = R.U16(r, 0), command = R.U16(r, 2);
+            Width = R.I16(r, 4);
+            Height = R.I16(r, 6);
+            if (pressed != 0 && !onCommand(pressed)) return;
+            if (command != 0 && !onCommand(command)) return;
+            afterInput?.Invoke();
         }
     }
 
@@ -1398,6 +1450,7 @@ public sealed class Owlosui : IDisposable
         public const byte SetHistory = 0x4F, GetHistory = 0x50, Palette = 0x51, SetColor = 0x52, AddFiles = 0x5A;
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
         public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59;
+        public const byte OpenWindow = 0x5B, Wait = 0x5C;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;
     }

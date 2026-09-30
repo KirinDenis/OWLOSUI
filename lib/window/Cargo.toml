@@ -1,0 +1,11 @@
+[package]
+name = "owlosui-window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The core's screen in a native Windows window: CreateWindow and GDI, the cells drawn by hand."
+
+# No crates: the dozen Win32 functions this needs are declared by hand in
+# src/win32.rs. On any other system the crate compiles to nothing.
+[dependencies]
+owlosui-core = { path = "../core" }

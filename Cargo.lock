@@ -109,11 +109,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "owlosui-httpd"
+version = "0.1.0"
+
+[[package]]
 name = "owlosui-serve"
 version = "0.1.0"
 dependencies = [
  "owlosui-console",
  "owlosui-core",
+ "owlosui-window",
 ]
 
 [[package]]
@@ -128,6 +133,21 @@ name = "owlosui-win"
 version = "0.1.0"
 dependencies = [
  "owlosui-core",
+ "owlosui-window",
+]
+
+[[package]]
+name = "owlosui-window"
+version = "0.1.0"
+dependencies = [
+ "owlosui-core",
+]
+
+[[package]]
+name = "owlosui-wire"
+version = "0.1.0"
+dependencies = [
+ "owlosui-serve",
 ]
 
 [[package]]

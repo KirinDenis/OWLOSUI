@@ -1,9 +1,11 @@
 # The wire
 
 One protocol, several transports. On Windows it runs over a pipe to
-`owlosui-serve`; in a browser it will be a WebSocket; on DOS it will be a
-software interrupt with the same numbers in `AH` and the same bytes at
-`DS:SI`. Nothing in here depends on which.
+`owlosui-serve`; in a browser the same server is a WebAssembly module and
+a request is copied into its memory; on DOS it is INT 60h, answered by
+OWLOSRES (`lib/dos`), with the request at `DS:SI` and room for the reply
+at `ES:DI`. The bytes are the same in all three, and nothing in here
+depends on which.
 
 The client never renders on its own and the server never draws: the client
 sends what happened, asks for the frame, and puts the cells on whatever it
@@ -288,7 +290,20 @@ card unchanged; `System.ConsoleColor` happens to use the same order.
 menu command that was chosen, or `0` for neither. Ask after every event.
 There are no callbacks — a callback cannot cross an interrupt.
 
-## Not yet
+## A window of its own
 
-Hex view and trees have no ops yet. They exist in the core; the wire will grow to them one at a time, as
-an example needs them.
+| op   | name        | payload | reply |
+|------|-------------|---------|-------|
+| 0x5B | OPEN_WINDOW | `title:str [flags:u8]` | OK — then the desktop is shown in a native window, which reads the keys and the mouse itself. `flags` bit 0: open without taking the focus (for a test or an agent). After INIT; Windows only |
+| 0x5C | WAIT        | —       | `pressed:u16 command:u16 w:i16 h:i16` — after one key or click in the window has been through the core: what it caused, as TAKE, and the desktop's size now |
+
+Only the stdio server answers these; a host with no window of its own - the
+WebAssembly module, say - replies with an error. On DOS, OWLOSRES answers
+WAIT from the start and refuses OPEN_WINDOW: the screen is always its own,
+so a DOS program never asks for it. After OPEN_WINDOW every
+other request works as before and the client draws nothing: `FRAME` still
+answers, for a test that wants to read the screen. WAIT takes the place of
+reading the console. Input that arrives while the client is busy is queued
+and handed over one event per WAIT, as a console's input buffer would, and
+a pressed button is shown down for its moment before the WAIT that reports
+it returns. The window's close box arrives as Alt+X.

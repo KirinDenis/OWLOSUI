@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OWLOSUI on the web</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0000aa; color: #ffff55; font: 18px/1.5 "Cascadia Mono", Consolas, monospace; }
+  main { max-width: 52rem; margin: 2rem auto; padding: 1rem 1.5rem; background: #aaaaaa; color: #000; box-shadow: 1rem 1rem 0 #000; }
+  h1 { font-size: 1.2rem; margin: 0 0 1rem; }
+  a { color: #0000aa; }
+  li { margin: .4rem 0; }
+  code { background: #00aaaa; padding: 0 .3rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>OWLOSUI - the web ladder</h1>
+<p>Five programs in JavaScript. Each page loads the OWLOSUI core, a Rust
+program compiled to WebAssembly, and draws what it says on a canvas.</p>
+<ol style="list-style: none; padding: 0">
+  <li><a href="01-HelloWorld/">1. Hello, world</a> - A window, words, a button: the whole shape of a program.</li>
+  <li><a href="02-Notes/">2. Notes</a> - An editor that keeps its text, finds and replaces, and asks before leaving.</li>
+  <li><a href="03-Calculator/">3. Calculator</a> - A keypad of real buttons, modes, and the arithmetic kept apart.</li>
+  <li><a href="04-Sokoban/">4. BASE-Z 47</a> - A game: sixty warehouses drawn cell by cell on a canvas.</li>
+  <li><a href="05-Demo/">5. OWLOS UI Demo</a> - Everything the kit has, in one program, with a menu bar.</li>
+</ol>
+<p>The same ladder in C# is in <code>Examples/Desktop/CSharp</code>; the
+client these pages use is <code>lib/js/owlosui.js</code>.</p>
+</main>
+</body>
+</html>

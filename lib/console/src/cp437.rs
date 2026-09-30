@@ -7,6 +7,9 @@
 //! Swap this table and the same core renders CP866 Cyrillic or anything else;
 //! nothing above it changes.
 
+#[allow(unused_imports)]
+use alloc::vec::Vec;
+
 pub const TABLE: [char; 256] = [
     // 0x00
     ' ', '☺', '☻', '♥', '♦', '♣', '♠', '•', '◘', '○', '◙', '♂', '♀', '♪', '♫', '☼',

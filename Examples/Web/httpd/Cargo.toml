@@ -1,0 +1,10 @@
+[package]
+name = "owlosui-httpd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The web examples' server: the repository's files on localhost, and the browser opened on a page."
+publish = false
+
+# The standard library only.
+[dependencies]

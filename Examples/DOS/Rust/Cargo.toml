@@ -1,0 +1,33 @@
+[package]
+name = "owlosui-dos-example"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The shared application on DOS, the core linked in: a flat 32-bit binary the loader OWLOS.COM puts in extended memory under DPMI."
+
+# Its own workspace, because it is built for a target nothing else here
+# is: see .cargo/config.toml and i386-owlos-none.json.
+[workspace]
+
+[[bin]]
+name = "owlos"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+# The `dos` feature makes a glyph a byte, so a cell is the two bytes the
+# card wants; no `std`, because there is none.
+owlosui-core = { path = "../../../lib/core", default-features = false, features = ["dos"] }
+# The machine: memory, screen, keyboard, mouse, heap - shared with the resident.
+owlosui-dos = { path = "../../../lib/dos" }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+
+[profile.dev]
+panic = "abort"

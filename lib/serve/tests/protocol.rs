@@ -1316,3 +1316,16 @@ fn mistakes_are_replies_not_crashes() {
     let f = frame(&mut c);
     assert_eq!((f.w, f.h), (40, 12));
 }
+
+/// OPEN_WINDOW and WAIT belong to a window, and a server without one says
+/// so rather than hanging a client that asks. (The window itself is opened
+/// by the C# tests, which can post it a key; this suite stays headless.)
+#[test]
+fn a_window_is_asked_for_in_order() {
+    let mut c = Client::start();
+    let e = c.err(0x5B, &s("too early"));
+    assert!(e.contains("INIT"), "OPEN_WINDOW before INIT said: {e}");
+    c.ok(0x01, &[i16(40), i16(12), u16(437)].concat());
+    let e = c.err(0x5C, &[]);
+    assert!(e.contains("OPEN_WINDOW"), "WAIT with no window said: {e}");
+}

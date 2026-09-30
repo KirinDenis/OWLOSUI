@@ -15,10 +15,23 @@ path = "src/lib.rs"
 [[bin]]
 name = "owlosui-match"
 path = "src/bin/match.rs"
+required-features = ["term"]
+
+# The terminal itself (raw mode, key decoding, mouse capture) is the one
+# part that needs crossterm, and the one part a WebAssembly build of the
+# wire server has no use for: it only wants the code pages. Off with
+# `default-features = false`.
+[features]
+default = ["std", "term"]
+# Without `std` the crate is the code pages alone, `no_std` plus `alloc`:
+# what the DOS resident links (lib/dos). Everything else here reads files,
+# the environment or the terminal.
+std = ["owlosui-core/std"]
+term = ["std", "dep:crossterm"]
 
 [dependencies]
-owlosui-core = { path = "../core" }
+owlosui-core = { path = "../core", default-features = false }
 # Only the platform layer is allowed dependencies, and only for the things
 # that are genuinely the platform's: raw mode, key decoding, mouse capture.
 # Drawing is ours — see term.rs.
-crossterm = "0.28"
+crossterm = { version = "0.28", optional = true }

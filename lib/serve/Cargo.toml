@@ -5,11 +5,26 @@ edition.workspace = true
 license.workspace = true
 description = "The core behind a pipe: speaks PROTOCOL.md on stdin/stdout so any language can be a client."
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "owlosui-serve"
 path = "src/main.rs"
+required-features = ["std"]
+
+[features]
+default = ["std"]
+# Without `std` the library - `Server` - is `no_std` plus `alloc`, and the
+# DOS resident (lib/dos) answers its interrupt with it.
+std = ["owlosui-core/std", "owlosui-console/std"]
 
 [dependencies]
-owlosui-core = { path = "../core" }
+owlosui-core = { path = "../core", default-features = false }
 # For the CP437 translation only. Nothing here touches a terminal.
-owlosui-console = { path = "../console" }
+owlosui-console = { path = "../console", default-features = false }
+
+# OPEN_WINDOW: the desktop in a native window (src/window.rs). Only the
+# stdio program uses it; the library - the browser's core too - does not.
+[target.'cfg(windows)'.dependencies]
+owlosui-window = { path = "../window" }

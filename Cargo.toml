@@ -4,13 +4,16 @@ members = [
     "lib/core",
     "lib/console",
     "lib/serve",
-    "Examples/Rust/01-Demo",
-    "Examples/Rust/02-Window",
-    "Examples/Rust/03-Browser",
+    "lib/window",
+    "lib/js/wire",
+    "Examples/Desktop/Rust/01-Terminal",
+    "Examples/Desktop/Rust/02-Window",
+    "Examples/Web/Rust/01-Linked",
+    "Examples/Web/httpd",
 ]
 # The DOS build is its own workspace: a different target, a nightly
-# toolchain and build-std. `cd Examples/Rust/04-DOS && cargo +nightly build --release`.
-exclude = ["Examples/Rust/04-DOS"]
+# toolchain and build-std. `cd Examples/DOS/Rust && cargo +nightly build --release`.
+exclude = ["Examples/DOS/Rust"]
 
 # The browser module: small and honest. Profiles only count here, in the
 # workspace root, so the wasm crate's wishes live here too. They apply to

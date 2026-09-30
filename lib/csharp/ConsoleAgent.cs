@@ -13,7 +13,7 @@
 // One process may be attached to one console at a time, and attaching needs
 // the process to have none of its own. So an agent runs in a process whose
 // stdout is a pipe, never in one that is talking to a console - see
-// Examples/CSharp/Tests, which spawns itself with `--agent` for the purpose.
+// Examples/Desktop/CSharp/Tests, which spawns itself with `--agent` for the purpose.
 //
 // Windows only, by nature. Elsewhere `Start` throws, and a test suite
 // should say "skipped" rather than fail.

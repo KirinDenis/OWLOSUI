@@ -77,3 +77,14 @@ fn an_unknown_page_is_refused() {
     assert!(Font::fixed(1251).is_none());
     assert!(Font::growing(0).is_none());
 }
+
+/// A canvas asks for pictures: on a fixed font ☺ and ♥ are glyphs 1 and 3,
+/// where text would have had to turn them into `?`.
+#[test]
+fn a_canvas_cell_reaches_the_pictures_below_0x20() {
+    let mut f = owlosui_console::codepage::Font::fixed(437).unwrap();
+    assert_eq!(f.cell_glyph('\u{263A}'), 1);
+    assert_eq!(f.cell_glyph('\u{2665}'), 3);
+    assert_eq!(f.cell_glyph('A'), b'A' as owlosui_core::Glyph);
+    assert_eq!(f.encode("\u{263A}"), vec![b'?' as owlosui_core::Glyph]);
+}

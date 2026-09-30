@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BASE-Z 47 - OWLOSUI</title>
+<link rel="stylesheet" href="../page.css">
+</head>
+<body>
+<canvas id="screen"></canvas>
+<script type="module">
+  // The whole page: the core (lib/js/owlosui-wire.wasm, found beside
+  // owlosui.js), a canvas, and the program in app.js.
+  import { run } from '../../../../lib/js/owlosui.js';
+  import { App } from './app.js';
+  run(document.getElementById('screen'), owl => new App(owl)).catch(e => {
+    document.body.textContent = String(e) + ' - was lib\\js\\build.cmd run?';
+  });
+</script>
+</body>
+</html>

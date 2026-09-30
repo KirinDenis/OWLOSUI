@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    WinExe: a Windows application, so no console opens with it. The screen
+    is the window the server opens (Owlosui.OpenWindow); the program
+    itself is step 5's, referenced as it is.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DemoWindow</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\lib\csharp\Owlosui.csproj" />
+    <ProjectReference Include="..\05-OwlosDemo\OwlosDemo.csproj" />
+  </ItemGroup>
+
+</Project>

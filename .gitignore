@@ -1,20 +1,49 @@
 /target
-/.vs
-**/bin/
-**/obj/
+.vs/
+# .NET's build folders - only where there are C# projects: a Rust crate's
+# src/bin holds sources (lib/console/src/bin/match.rs was lost to a
+# broader rule here, never committed).
+lib/csharp/bin/
+lib/csharp/obj/
+Examples/Desktop/CSharp/**/bin/
+Examples/Desktop/CSharp/**/obj/
 
-# The browser module is a build artefact: Examples/Rust/03-Browser/build.cmd makes it.
-Examples/Rust/03-Browser/web/*.wasm
+# The browser module is a build artefact: Examples/Web/Rust/01-Linked/build.cmd makes it.
+Examples/Web/Rust/01-Linked/web/*.wasm
 
 # The DOS build: the flat binary and what a run leaves behind. The two
 # .COM files are tracked, like the sources they come from; the .BIN is
-# the Rust build, made by Examples/Rust/04-DOS/build.cmd.
-Examples/Rust/04-DOS/target/
-Examples/Rust/04-DOS/OWLOS.BIN
-Examples/Rust/04-DOS/*.LOG
-Examples/Rust/04-DOS/OWLOS.OUT
-Examples/Rust/04-DOS/TRACE.TXT
-Examples/Rust/04-DOS/SHOT.BIN
-Examples/Rust/04-DOS/SCREEN.BIN
-Examples/Rust/04-DOS/AUTOTYPE.TXT
-Examples/Rust/04-DOS/dbx.log
+# the Rust build, made by Examples/DOS/Rust/build.cmd.
+Examples/DOS/Rust/target/
+Examples/DOS/Rust/OWLOS.BIN
+Examples/DOS/Rust/*.LOG
+Examples/DOS/Rust/OWLOS.OUT
+Examples/DOS/Rust/TRACE.TXT
+Examples/DOS/Rust/SHOT.BIN
+Examples/DOS/Rust/SCREEN.BIN
+Examples/DOS/Rust/AUTOTYPE.TXT
+Examples/DOS/Rust/dbx.log
+
+# What a DOS run or build leaves behind, in any of the DOS folders: the
+# screens F12 wrote, what RUN.BAT and MAKE.BAT saw, a compiler's leftovers.
+# The programs themselves (.COM, .EXE) are tracked, like their sources, so
+# a DOS machine can run them without the compilers.
+Examples/DOS/*/SHOT.TXT
+Examples/DOS/*/SHOTS.TXT
+Examples/DOS/*/SHOT.BIN
+Examples/DOS/*/RUN.OUT
+Examples/DOS/*/MAKE.OUT
+Examples/DOS/*/AUTOTYPE.TXT
+Examples/DOS/*/TRACE.TXT
+Examples/DOS/*/*.OBJ
+Examples/DOS/*/*.TPU
+
+# The resident's Rust build. OWLOSRES.BIN and OWLOSRES.COM, which it
+# makes, are tracked: a program in assembler, Pascal or C needs them and
+# should not need a nightly Rust to get them.
+lib/dos/target/
+lib/dos/*.LOG
+lib/dos/TRACE.TXT
+
+# The core for JavaScript: lib/js/build.cmd makes it.
+lib/js/owlosui-wire.wasm
