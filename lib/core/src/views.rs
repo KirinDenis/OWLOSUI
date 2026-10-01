@@ -30,8 +30,8 @@ impl Default for Desktop {
 /// A framed, movable, resizable window.
 ///
 /// The frame is not decoration: its four edges carry the close box, the title,
-/// the zoom box, both scrollbars, a footer slot and the resize grip. Turbo
-/// Vision got more use out of one character of border than most toolkits get
+/// the zoom box, both scrollbars, a footer slot and the resize grip. The
+/// classic windows got more use out of one character of border than most toolkits get
 /// out of a title bar.
 pub struct Window {
     pub title: String,
@@ -311,8 +311,8 @@ pub enum Kind {
 /// Where a child sits inside its parent.
 ///
 /// This is the whole layout system so far, and it is enough for a dialog: one
-/// view fills what is left and the rest are strips against an edge. Turbo
-/// Vision had nothing like it - every dialog worked out its own rectangles by
+/// view fills what is left and the rest are strips against an edge. The
+/// classic toolkits had nothing like it - every dialog worked out its own rectangles by
 /// hand - which is precisely why resizing one was not something you did.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Dock {

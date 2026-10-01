@@ -41,7 +41,7 @@ of its folders.
 | key | does |
 |---|---|
 | Tab | the other side |
-| Enter | into a folder; `..` back out; on a file, what DOS knows about it. In the folder the cursor starts on its first name - on `..` only when there is nothing else |
+| Enter | into a folder; `..` back out; on a `.COM`, `.EXE` or `.BAT`, it runs, in its own folder (see below); on any other file, what DOS knows about it. In the folder the cursor starts on its first name - on `..` only when there is nothing else |
 | Insert | mark a file, and move down |
 | F1 | help - with buttons for what needs Alt |
 | F3 | view the file under the cursor |
@@ -52,6 +52,7 @@ of its folders.
 | F10 | quit; in the viewer or the editor, close it |
 | Alt+F1, Alt+F2 | a drive for the left or the right side |
 | Alt+F10 | the drive as a tree of folders; the other side follows the cursor |
+| Ctrl+R | both folders read again - for files another program put there, such as the web page this commander runs in, in the live demo's DOS PC |
 
 Copy, move and delete ask first, and **No** is the answer Enter gives:
 doing something to files is chosen on purpose, with the arrow key and
@@ -64,6 +65,15 @@ text is coloured as the language its name says, `.PAS`, `.BAT`, `.ASM`.
 
 ## What to know
 
+* **How a program runs.** A toolkit program - the demos, HELLO - runs from
+  inside the commander: the panels are put aside whole while it has the
+  screen, and come back after it. Any other program gets the whole of
+  DOS's memory, as from the prompt: the commander steps out of memory,
+  `RUN.BAT` runs the program and starts the commander again in the same
+  folders. A game like OWL FLY III needs that - it lays its buffers out
+  at fixed distances above itself, and loaded higher it would write past
+  640K into the video card. Started without `RUN.BAT` (no `/STEP`), the
+  commander runs every program from inside.
 * **The editor takes a whole file or nothing.** A file too big for one
   request to the resident (about 30 KB of text) is refused, and F3 shows
   its beginning, with the title saying how much. Half a file in an editor

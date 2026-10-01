@@ -6,8 +6,8 @@
 //!
 //! Check boxes and radio buttons are **one view with two modes**, because the
 //! difference between them is one rule — how many may be on at once — and
-//! everything else, the walking, the marking, the hotkeys, is the same. Turbo
-//! Vision had them as two descendants of one class for the same reason. Two
+//! everything else, the walking, the marking, the hotkeys, is the same. The
+//! classic toolkits had them as two descendants of one class for the same reason. Two
 //! separate controls would be two copies of the keyboard handling, and the
 //! second copy is where the bugs would be.
 

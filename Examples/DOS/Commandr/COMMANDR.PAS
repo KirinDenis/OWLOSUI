@@ -8,10 +8,12 @@
   the bottom say what they do.
 
       Tab       the other side          Enter   into a folder, .. back out;
-      Insert    mark a file                     on a file, what DOS knows of it
+      Insert    mark a file                     on a program, it runs; on any other
+                                                file, what DOS knows of it
       F1 Help   F3 View   F4 Edit   F5 Copy   F6 Move   F7 MkDir   F8 Del
       F10 Quit  Alt+F1, Alt+F2 a drive for the left or right side
                 Alt+F10 the drive as a tree, and the other side follows it
+                Ctrl+R  both folders read again
 
   F5, F6 and F8 work on the marked files, or on the one under the cursor
   when none are marked - the classic rule. Copy and move go to the other side.
@@ -26,7 +28,10 @@
 
 program Commandr;
 
-{$M 32768,0,655360}                     { stack for copying folders inside folders }
+{ A deep stack, for copying folders inside folders; and a heap of 128K -
+  the viewer's buffer and an editor's text - so the rest of DOS's memory is
+  free for a program Enter runs. }
+{$M 32768,0,131072}
 
 uses Dos, OwlosUI;
 
@@ -35,11 +40,15 @@ const
   CmHelp = 1;       CmView = 3;       CmEdit = 4;       CmCopy = 5;
   CmMove = 6;       CmMkdir = 7;      CmDelete = 8;     CmQuit = 9;
   CmSwitch = 10;    CmTree = 11;      CmDriveLeft = 12; CmDriveRight = 13;
+  CmReread = 14;
   { What the dialogs answer. }
   CmNo = 20;        CmYes = 21;       CmMkdirOk = 22;   CmSave = 23;
   CmCloseEdit = 24; CmCloseView = 25; CmDriveOk = 26;
 
-  PanelFlags = FilesMarks or FilesNoPathLine;   { marks, and no "*.*" on top }
+  { Marks; no "*.*" on top; and at the bottom only what the cursor is on -
+    the folder is in the window's title. }
+  PanelFlags = FilesMarks or FilesNoPathLine or FilesDetails;
+  TitleRoom = 26;                       { what a 40-column window's title can hold }
   MaxItems = 200;                       { names at once: marked, or folders in a tree }
   BufSize = 32000;                      { a file read for the viewer or the editor }
 
@@ -69,6 +78,11 @@ var
   EditorPath: string;
   Failure: string;                      { the first thing that went wrong, said once }
   Buf: ^TBuf;
+  Home: string;                         { where RUNPROG.BAT and COMMANDR.SAV go: the folder this
+                                          started in, where its batch file looks for them }
+  StartedIn: string;                    { the folder DOS was in when this started }
+  CanStep: Boolean;                     { /STEP: the batch file that started this runs RUNPROG.BAT }
+  Stepped: Boolean;                     { stepping out now, for a program to run }
 
 { ---- words ---------------------------------------------------------------- }
 
@@ -238,15 +252,15 @@ begin
   CloseBox;
   Box := OwlWindow(0, -1, -1, 66, 18, OwlDialog or OwlModal, 'Help', CmNo);
   OwlStatic(Box, 2, 1, 60, 3,
-    'Two folders side by side; Tab goes to the other. Enter opens a folder, and ' +
-    '.. goes back up. Enter on a file shows what DOS knows about it. Insert marks files.');
+    'Tab goes to the other side. Enter opens a folder, .. goes back up; Enter on a ' +
+    '.COM, .EXE or .BAT runs it, on any other file says what DOS knows. Insert marks.');
   OwlStatic(Box, 2, 5, 60, 3,
     'F3 shows a file and F4 edits it; F2 saves. F5 copies and F6 moves to the other ' +
     'side - the marked files, or the one under the cursor. F7 makes a folder, F8 deletes.');
   OwlStatic(Box, 2, 9, 60, 3,
     'Alt+F1 and Alt+F2 choose a drive for the left and the right side. Alt+F10 shows ' +
     'the drive as a tree, and the other side follows it. The buttons below do the same.');
-  OwlStatic(Box, 2, 13, 60, 1, 'F10 quits.');
+  OwlStatic(Box, 2, 13, 60, 1, 'Ctrl+R reads both folders again. F10 quits.');
   OwlButtons(Box, 4);
   OwlButton(CmNo, OwlDefault, '~O~K');
   OwlButton(CmTree, 0, '~T~ree');
@@ -257,21 +271,34 @@ end;
 
 { ---- the panels ----------------------------------------------------------- }
 
-procedure OpenPanel(var P: TPanel; X, W: Integer; const Title, Dir: string);
+{ A path for a window's title: whole if it fits, or its end - the end is the
+  part that says where you are. }
+function Fit(const Path: string): string;
+begin
+  if Length(Path) <= TitleRoom then Fit := Path
+  else Fit := '...' + Copy(Path, Length(Path) - TitleRoom + 4, TitleRoom - 3);
+end;
+
+procedure OpenPanel(var P: TPanel; X, W: Integer; const Dir: string);
 begin
   P.Dir := Dir;
   P.Tree := 0;
-  { No shadow: the two windows tile the screen. Closing either quits. }
-  P.Win := OwlWindow(0, X, 0, W, 24, OwlBlue or OwlNoShadow, Title, CmQuit);
+  { No shadow: the two windows tile the screen. Closing either quits. The
+    title is the folder the side shows. }
+  P.Win := OwlWindow(0, X, 0, W, 24, OwlBlue or OwlNoShadow, Fit(Dir), CmQuit);
   P.Files := OwlFilesEx(P.Win, 0, PanelFlags, Dir);
 end;
 
-{ Another folder in a panel - or, if DOS cannot read it, a word why, and
-  the old listing stays. }
+{ Another folder in a panel, and its path in the title - or, if DOS cannot
+  read it, a word why, and the old listing stays. }
 procedure Go(var P: TPanel; const Dir: string);
 begin
   if P.Tree <> 0 then Exit;
-  if OwlSetFiles(P.Files, Dir) then P.Dir := Dir
+  if OwlSetFiles(P.Files, Dir) then
+  begin
+    P.Dir := Dir;
+    OwlSetText(P.Win, Fit(Dir));
+  end
   else OwlFilesError(P.Files, 'Cannot read ' + Dir);
 end;
 
@@ -393,6 +420,7 @@ begin
     SendNames;
     P.Tree := OwlEnd;
     P.TreeDir := '';
+    OwlSetText(P.Win, 'Tree of ' + P.TreeRoot);
   end
   else
   begin
@@ -893,7 +921,7 @@ end;
 
 procedure BuildStatus;
 begin
-  OwlStatus(12);
+  OwlStatus(13);
   OwlKey('~F1~ Help', CmHelp, KeyF, 1, 0);
   OwlKey('~F3~ View', CmView, KeyF, 3, 0);
   OwlKey('~F4~ Edit', CmEdit, KeyF, 4, 0);
@@ -907,6 +935,7 @@ begin
   OwlKey('', CmDriveLeft, KeyF, 1, ModAlt);
   OwlKey('', CmDriveRight, KeyF, 2, ModAlt);
   OwlKey('', CmTree, KeyF, 10, ModAlt);
+  OwlKey('', CmReread, KeyChar, Ord('r'), ModCtrl);
   OwlEnd;
 end;
 
@@ -1024,12 +1053,130 @@ begin
     CmDriveOk: DriveChosen;
     CmCloseView: CloseViewer;
     CmCloseEdit: CloseEditor;
+    { Ctrl+R, Volkov's re-read: both folders read again, for files that
+      came from somewhere other than this program - another program, or
+      the web page a browser's DOSBox is in. }
+    CmReread: Refresh;
   else
     case Side of
       1: FileCommand(Cmd, Left, Right);
       2: FileCommand(Cmd, Right, Left);
     end;
   end;
+end;
+
+{ A name DOS can run: a program, or a batch file. }
+function Runnable(const Name: string): Boolean;
+var
+  E: string[4];
+begin
+  E := Upper(Copy(Name, Length(Name) - 3, 4));
+  Runnable := (E = '.COM') or (E = '.EXE') or (E = '.BAT');
+end;
+
+{ Whether a program draws with this toolkit: each one says, in its own
+  bytes, that it wants OWLOSRES - the message it gives when started
+  without it. }
+function UsesToolkit(const Path: string): Boolean;
+const
+  Sig: array[0..7] of Char = 'OWLOSRES';
+var
+  F: file;
+  At, Size: LongInt;
+  N, I, J: Word;
+  Hit: Boolean;
+begin
+  UsesToolkit := False;
+  Assign(F, Path);
+  FileMode := 0;
+  {$I-} Reset(F, 1); {$I+}
+  FileMode := 2;
+  if IOResult <> 0 then Exit;
+  Size := FileSize(F);
+  At := 0;
+  while (At < Size) and (At < 262144) do
+  begin
+    Seek(F, At);
+    BlockRead(F, Buf^, BufSize, N);
+    if N < 8 then Break;
+    for I := 0 to N - 8 do
+      if Buf^[I] = Ord('O') then
+      begin
+        Hit := True;
+        for J := 1 to 7 do
+          if Buf^[I + J] <> Ord(Sig[J]) then Hit := False;
+        if Hit then
+        begin
+          UsesToolkit := True;
+          Close(F);
+          Exit;
+        end;
+      end;
+    Inc(At, N - 7);                     { a name across two reads is still found }
+  end;
+  Close(F);
+end;
+
+{ Step out: what the batch file that started this one runs next - the
+  program, in its own folder, and then back to the folder it started in -
+  and where both sides were, for the commander it starts again. }
+procedure StepOut(var P: TPanel; const Name: string);
+var
+  T: Text;
+  E: string[4];
+begin
+  E := Upper(Copy(Name, Length(Name) - 3, 4));
+  Assign(T, Home + 'RUNPROG.BAT');
+  Rewrite(T);
+  WriteLn(T, '@echo off');
+  WriteLn(T, Copy(P.Dir, 1, 2));
+  if IsRoot(P.Dir) then WriteLn(T, 'cd \') else WriteLn(T, 'cd ', Copy(P.Dir, 3, 255));
+  if E = '.BAT' then WriteLn(T, 'call ', Name) else WriteLn(T, Name);
+  WriteLn(T, 'pause');
+  WriteLn(T, Copy(StartedIn, 1, 2));
+  if IsRoot(StartedIn) then WriteLn(T, 'cd \') else WriteLn(T, 'cd ', Copy(StartedIn, 3, 255));
+  Close(T);
+  Assign(T, Home + 'COMMANDR.SAV');
+  Rewrite(T);
+  WriteLn(T, Left.Dir);
+  WriteLn(T, Right.Dir);
+  WriteLn(T, Side);
+  Close(T);
+  Stepped := True;
+end;
+
+{ Enter on a program: it runs, in its own folder - a game finds its data
+  beside itself.
+
+  A toolkit program runs from in here, the panels put aside meanwhile: it
+  needs the toolkit, which is here, and it is small. Any other program gets
+  the whole of DOS's memory, as it would from the prompt - when the batch
+  file that started this one said it can (/STEP), the commander steps out
+  of memory altogether and is started again afterwards in the same
+  folders. A program that takes for granted it was loaded low - OWL FLY III
+  lays its buffers out at fixed distances above itself and never asks DOS
+  - would otherwise write past the end of memory, into the video card.
+
+  Then the panels again, read afresh: it may have made or deleted files. }
+procedure RunProgram(var P: TPanel; const Name: string);
+var
+  Was: string;
+  Code: Integer;
+begin
+  if CanStep and not UsesToolkit(Join(P.Dir, Name)) then
+  begin
+    StepOut(P, Name);
+    Exit;
+  end;
+  GetDir(0, Was);
+  {$I-} ChDir(P.Dir); {$I+}
+  if IOResult <> 0 then ;
+  Code := OwlRun(Join(P.Dir, Name), '', True);
+  {$I-} ChDir(Was); {$I+}
+  if IOResult <> 0 then ;
+  Refresh;
+  if Code = 8 then Tell('There is not enough memory to run ' + Name + '.')
+  else if Code <> 0 then Tell('DOS would not run ' + Name + ': ' + DosText(Code) + '.');
 end;
 
 { What a panel says that is not a command: a name Enter was pressed on. }
@@ -1045,16 +1192,17 @@ begin
   if OwlTakeFiles(P.Files, Text) <> 1 then Exit;
   if Text = '..' then Go(P, ParentOf(P.Dir))
   else if IsFolder(Join(P.Dir, Text)) then Go(P, Join(P.Dir, Text))
+  else if Exists(Join(P.Dir, Text)) and Runnable(Text) then RunProgram(P, Text)
   else if Exists(Join(P.Dir, Text)) then Properties(P.Dir, Text);
 end;
 
 { A folder named on the command line, or the one DOS is in. }
-function StartDir(N: Integer): string;
+function StartDir(const Arg: string): string;
 var
   S: string;
 begin
   S := '';
-  if ParamCount >= N then S := Normal(ParamStr(N));
+  if Arg <> '' then S := Normal(Arg);
   if (S = '') or not IsFolder(S) then
   begin
     GetDir(0, S);
@@ -1063,21 +1211,61 @@ begin
   StartDir := S;
 end;
 
+{ Where the two sides were when the commander stepped out for a program:
+  COMMANDR.SAV, read once and gone. }
+function Resumed(var L, R: string; var Front: Integer): Boolean;
+var
+  T: Text;
+begin
+  Resumed := False;
+  Assign(T, Home + 'COMMANDR.SAV');
+  {$I-} Reset(T); {$I+}
+  if IOResult <> 0 then Exit;
+  ReadLn(T, L);
+  ReadLn(T, R);
+  ReadLn(T, Front);
+  Close(T);
+  Erase(T);
+  if not IsFolder(L) then L := StartDir('');
+  if not IsFolder(R) then R := L;
+  Resumed := True;
+end;
+
 var
   Pressed, Chosen: Word;
   Running: Boolean;
   L, R: string;
+  Args: array[1..2] of string;
+  NArgs, I, Front: Integer;
 
 begin
   if not OwlCheck then Halt(1);
   New(Buf);
-  L := StartDir(1);
-  if ParamCount >= 2 then R := StartDir(2) else R := L;
+  { The folders for the two sides, and /STEP anywhere among them. }
+  NArgs := 0;
+  Args[1] := '';
+  Args[2] := '';
+  for I := 1 to ParamCount do
+    if Upper(ParamStr(I)) = '/STEP' then CanStep := True
+    else if NArgs < 2 then
+    begin
+      Inc(NArgs);
+      Args[NArgs] := ParamStr(I);
+    end;
+  GetDir(0, StartedIn);
+  Home := StartedIn;
+  if Home[Length(Home)] <> '\' then Home := Home + '\';
+  Front := 1;
+  if not (CanStep and Resumed(L, R, Front)) then
+  begin
+    L := StartDir(Args[1]);
+    if NArgs >= 2 then R := StartDir(Args[2]) else R := L;
+  end;
   OwlInit;
   BuildStatus;
-  OpenPanel(Left, 0, 40, 'Left', L);
-  OpenPanel(Right, 40, 40, 'Right', R);
-  OwlActivate(Left.Win);
+  OpenPanel(Left, 0, 40, L);
+  OpenPanel(Right, 40, 40, R);
+  if Front = 2 then OwlActivate(Right.Win) else OwlActivate(Left.Win);
   Running := True;
   while Running do
   begin
@@ -1089,6 +1277,7 @@ begin
       PollPanel(Left, Right);           { and a name entered in a panel }
       PollPanel(Right, Left);
     end;
+    if Stepped then Running := False;  { out of memory, for RUNPROG.BAT }
   end;
   OwlQuit;
 end.

@@ -535,8 +535,8 @@ fn open_help(ui: &mut Ui) {
     let r = Rect::new(8, 2, 60, 18);
     let mut win = Window::new("Help");
     win.number = Some(9);
-    // Help is cyan, frame included — that is a whole window family in Turbo
-    // Vision, not a colour for the body.
+    // Help is cyan, frame included — that is a whole window family in the
+    // classic DOS style, not a colour for the body.
     win.palette = owlosui_core::WinPalette::Cyan;
     let wid = ui.insert(root, r, Kind::Window(win));
     ui.insert(wid, Rect::default(), Kind::Html(Html::new(help::INDEX)));

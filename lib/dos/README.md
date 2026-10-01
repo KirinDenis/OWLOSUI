@@ -84,6 +84,18 @@ F12 is the resident's own key: the screen into `SHOT.BIN` and `SHOT.TXT`,
 and onto the end of `SHOTS.TXT`, in the current folder. That is how the
 tests look at a program.
 
+## Running another program from one
+
+A program may run another - the commander does, on Enter - and the other
+one may be a toolkit program with windows of its own. SUSPEND (0x63) puts
+the first program's session aside, every window whole, and gives the screen
+to DOS in text mode; then the program runs the other through DOS's EXEC,
+which finds the resident still there; then RESUME (0x64) brings text mode
+back - a game may have left graphics - and the first session, drawn. Asked
+to, RESUME first leaves what a plain DOS program printed on the screen until
+a key. In Pascal, `OwlRun(Path, Args, Pause)` is all of it; the program's
+`$M` must leave DOS the memory the other program needs.
+
 ## How it works
 
 The resident is a DPMI client: LOADER.INC put it in extended memory. It

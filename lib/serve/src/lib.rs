@@ -119,6 +119,12 @@ pub mod op {
     pub const SYNTAX: u8 = 0x5F;
     pub const SYNTAX_DEFINE: u8 = 0x60;
     pub const UNMARK: u8 = 0x61;
+    pub const PLACE: u8 = 0x62;
+    /// Answered by OWLOSRES alone, never by `call`: the program's session
+    /// put aside and the screen given to DOS, while it runs another
+    /// program; and its session back. See lib/dos/src/owlosres.rs.
+    pub const SUSPEND: u8 = 0x63;
+    pub const RESUME: u8 = 0x64;
 }
 
 type Res<T> = Result<T, String>;
@@ -926,6 +932,12 @@ impl Server {
                 if flags & 4 != 0 {
                     f.path_line = false;
                 }
+                // A one-row foot of what the cursor is on - size, date,
+                // attributes - with no path and no name: a commander's
+                // window title says where it is.
+                if flags & 8 != 0 {
+                    f.details_only = true;
+                }
                 f.focus = owlosui_core::files::Focus::List;
                 let ui = self.ui()?;
                 // The panel fills the window; `rect.y` is how many rows to
@@ -992,6 +1004,23 @@ impl Server {
                     Kind::Files(f) => f.clear_marks(),
                     _ => return Err(format!("view {} is not a file panel", id.raw())),
                 }
+            }
+
+            op::PLACE => {
+                // Where a window's inside is, in cells from the screen's
+                // top left, and whether anything is drawn over it - for a
+                // program laying a picture of its own over the window.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let (rect, covered) = self
+                    .ui()?
+                    .place(id)
+                    .ok_or_else(|| format!("view {} is not a window", id.raw()))?;
+                out.i16(rect.x);
+                out.i16(rect.y);
+                out.i16(rect.w);
+                out.i16(rect.h);
+                out.u8(covered as u8);
             }
 
             op::SET_FILES_ERROR => {
@@ -1129,6 +1158,20 @@ impl Server {
                     c.mode = Choice::One;
                     for (i, on) in c.on.iter_mut().enumerate() {
                         *on = i == 0;
+                    }
+                }
+                // Optionally, which are on to begin with: a settings dialog
+                // opens on the settings there are, not on the first of each.
+                let states = r.rest();
+                if states.len() >= n as usize {
+                    for (on, &s) in c.on.iter_mut().zip(states) {
+                        *on = s != 0;
+                    }
+                    if single && !c.on.iter().any(|&o| o) {
+                        c.on[0] = true;
+                    }
+                    if single {
+                        c.current = c.on.iter().position(|&o| o).unwrap_or(0);
                     }
                 }
                 let ui = self.ui()?;
@@ -1347,6 +1390,9 @@ impl Server {
                 match self.ui()?.kind_mut(id) {
                     Kind::Static(t) => t.text = core,
                     Kind::Input(i) => i.set_text(&core),
+                    // A window's title: a commander's panel says in it which
+                    // folder it is showing, and changes it as it goes.
+                    Kind::Window(w) => w.title = core,
                     // New contents, the same editor: what it offers, its
                     // wrap, keys and language are kept.
                     Kind::Text(t) => t.set_lines(lines),

@@ -57,3 +57,11 @@ Examples/Web/files/*
 
 # The core for JavaScript: lib/js/build.cmd makes it.
 lib/js/owlosui-wire.wasm
+
+# The live demo site, as Examples/Web/site/build.mjs makes it.
+_site/
+
+# What the DOS commander leaves for its batch file when it steps out to run
+# a program; gone again once the program has run.
+Examples/DOS/Commandr/RUNPROG.BAT
+Examples/DOS/Commandr/COMMANDR.SAV

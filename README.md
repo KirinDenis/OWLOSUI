@@ -1,5 +1,9 @@
 # OWLOSUI
 
+**[Live demo: Rust, WebAssembly and DOS in one page](https://kirindenis.github.io/OWLOSUI/)** -
+the toolkit in your browser, and a DOS PC beside it, in DOSBox, running the
+same core: the two share a floppy, and the PC plays a DOS game over the network.
+
 A text mode UI toolkit in the classic DOS style, with one portable core.
 
 Windows you can drag and resize, menus, dialogs, an editor with syntax
@@ -9,10 +13,16 @@ JavaScript, Rust, Pascal, C and assembler use that core, and the same
 windows appear on a Windows console, in a window of their own, in a
 browser and on DOS.
 
+Free and open source, under the [MIT licence](LICENSE).
+
 ## See it
 
-| On DOS: the demo | On DOS: the file manager |
+| The live demo: what to see first | The live demo: a DOS PC in a window |
 |---|---|
+| ![The demo's first window: a list of what to see, a few words on each](Examples/screens/browser_welcome.png) | ![DOSBox in an OWLOSUI window, running the file manager on DOS](Examples/screens/browser_dos.png) |
+| **One floppy, two worlds: the browser's files beside DOS** | **DOS on the network: every packet, as the page sees it** |
+| ![The browser's files on the left, DOS on the right, a file copied between them](Examples/screens/browser_floppy.png) | ![The network monitor: bytes, a graph and the IPX packets of a DOS game](Examples/screens/browser_network.png) |
+| **On DOS: the demo** | **On DOS: the file manager** |
 | ![The demo on DOS: calculator, calendar, ASCII table, puzzle](Examples/screens/dos_demo.png) | ![A two-panel file manager on DOS, three files marked, asking before it copies](Examples/screens/dos_commander.png) |
 | **On DOS: the editor, coloured as Pascal** | **On Windows: a window of its own** |
 | ![The file manager's editor showing Pascal source in colour](Examples/screens/dos_editor.png) | ![The C# demo in a native Windows window, a dialog of controls](Examples/screens/window.png) |
@@ -23,7 +33,9 @@ browser and on DOS.
 
 ## Try it
 
-Double-click one of these in the repository's folder - or type its name
+Or nothing to install: the [live demo](https://kirindenis.github.io/OWLOSUI/)
+is the browser one, with its DOS PC. To run things on your own machine,
+double-click one of these in the repository's folder - or type its name
 in a console there. Each one checks that what it needs is installed, and
 says where to get it if not. The first run of a C#, Rust or browser one
 builds first, which takes a minute or two.
@@ -308,6 +320,16 @@ programs can share one.
 
 ## Licence
 
-MIT OR Apache-2.0. Nothing here is derived from any other toolkit's
-source; the design is reconstructed from published documentation and from the
-behaviour of the original programs.
+**MIT** - see [LICENSE](LICENSE). Use it, change it, sell what you build
+with it; keep the copyright notice.
+
+Nothing here is derived from any other toolkit's source; the design is
+reconstructed from published documentation and from the behaviour of the
+original programs.
+
+A few files are not this project's and not under MIT, each in a folder of
+its own and listed in [THIRD-PARTY.md](THIRD-PARTY.md): js-dos - DOSBox
+compiled to WebAssembly, GPL-2.0 - in `lib/js/jsdos`, which the live demo's
+DOS PC runs on; `CWSDPMI.EXE`, the DPMI host the DOS programs start with,
+which is Charles W. Sandmann's and comes with its own terms; and a small
+MIT service worker the demo needs on a static host.

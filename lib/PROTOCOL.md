@@ -49,8 +49,8 @@ refers past what it holds. What comes back out (`GET_TEXT`, `TAKE_FILES`,
 `MARKED_NAMES`) is decoded through the same font, so text goes round
 unchanged.
 
-Command numbers (`cmd`) are the application's own `u16`s, as in Turbo
-Vision. **`0` means "no command"** and must not be used for a button.
+Command numbers (`cmd`) are the application's own `u16`s, as in the
+classic DOS toolkits. **`0` means "no command"** and must not be used for a button.
 
 ## Session
 
@@ -82,14 +82,14 @@ that size.
 | 0x13 | INPUT       | `parent:id rect max:u16 label:str text:str` | `id` |
 | 0x14 | BUTTONS     | `parent:id n:u8` then `n ×` (`cmd:u16 flags:u8 label:str`) | `id` |
 | 0x15 | MESSAGE_BOX | `title:str text:str n:u8` then `n ×` (`cmd:u16 flags:u8 label:str`) | `id` |
-| 0x16 | STATUS      | `n:u8` then `n ×` (`cmd:u16 key:key text:str`) | `id` |
+| 0x16 | STATUS      | `n:u8` then `n ×` (`cmd:u16 key:key text:str`) | `id` | An item with empty text is a key and nothing to see: bound, and taking no room on the line.
 | 0x17 | LABEL       | `parent:id rect target:id text:str` | `id` |
 | 0x18 | PROGRESS    | `parent:id rect max:u32 flags:u8` | `id` |
 | 0x19 | LIST        | `parent:id rect flags:u8 n:u16` then `n × str` | `id` |
 | 0x1A | FILES       | `parent:id rect flags:u8 mask:str path:str entries` | `id` | The panel fills its window; `rect.y` is the number of rows left free above it.
 | 0x1B | CANVAS      | `parent:id rect` | `id` |
 | 0x1C | MENU_BAR    | `items` | `id` | — each item is `flags:u8 cmd:u16 text:str shortcut:str hint:str` then its sub-items; the hint shows on the status line while the item is under the cursor
-| 0x1D | CLUSTER     | `parent:id rect kind:u8 n:u8` then `n × str` | `id` |
+| 0x1D | CLUSTER     | `parent:id rect kind:u8 n:u8` then `n × str`, then optionally `n × u8` (which are on to begin with) | `id` |
 | 0x57 | FIND        | `id flags:u8 pattern:str` | `found:u8` — the next match after the caret is selected; flags bit 0 case-sensitive, bit 1 whole words; no wrapping |
 | 0x58 | REPLACE     | `id flags:u8 pattern:str replacement:str` | `replaced:u8 found:u8` — the selected match replaced, and the next one found |
 | 0x59 | REPLACE_ALL | `id flags:u8 pattern:str replacement:str` | `count:u16` |
@@ -165,8 +165,8 @@ multiple-choice, where Insert marks the item under the cursor and moves
 down, the way the classic file managers marked files. `GET_MARKED` and
 `GET_CURRENT` read it back.
 
-`CANVAS` is a rectangle of cells the program draws itself - Turbo
-Vision's "a view with its own `draw`", over a wire. `BLIT` puts a block
+`CANVAS` is a rectangle of cells the program draws itself - the
+classic "a view with its own `draw`", over a wire. `BLIT` puts a block
 of cells into it: `id x:i16 y:i16 w:i16 h:i16` then `w×h ×` (`ch:u16
 attr:u8`), `ch` a Unicode code point that the font turns into a glyph. The
 cells are shown as they are: clipped, moved with the window, covered by
@@ -197,7 +197,10 @@ somewhere else, which `TAKE_FILES` reports. `flags` bit 0 allows marks;
 bit 1 leaves the `Path:` word off the path line, for a panel that is
 nothing but paths; bit 2 leaves the path line out altogether, for a
 commander's panel, where the names start at the top and the foot says
-where you are.
+where you are; bit 3 makes the foot one row of what the cursor is on -
+size or `<DIR>`, date and time, attributes - without the path or the
+name, for a commander that puts the folder in its window's title
+(`SET_TEXT` on the window).
 
 ## Changing
 
@@ -214,9 +217,10 @@ where you are.
 | 0x28 | MARKED_NAMES | `id`      | `n:u16` then `n × str` — a `FILES` panel's marked names, or the one under the cursor if none are |
 | 0x29 | SET_FILES_ERROR | `id text:str` | OK — show a message in the panel's pane, e.g. a folder that could not be read |
 | 0x61 | UNMARK | `id` | OK — a `FILES` panel's marks all taken off: what a commander does after copying, moving or deleting the marked files. Marks are kept on their names through `SET_FILES` of the same folder, and dropped by one of another |
+| 0x62 | PLACE | `id` (a window) | `x:i16 y:i16 w:i16 h:i16 covered:u8` — the window's inside, in cells from the screen's top left, as the last frame laid it out; `covered` is 1 while anything is drawn over any of it: a window above it, that window's shadow, an open menu. For a program that lays something of its own over a window - a web page's emulator picture - and must hide it while the window is covered |
 | 0x5A | ADD_FILES | `id` then entries as in FILES | OK — more names for a panel: a listing bigger than one request (64K) is sent as FILES or SET_FILES with the first part and ADD_FILES with the rest |
 | 0x2A | ACTIVE       | —         | `id` — the active window, or `0` |
-| 0x2B | SET_TEXT     | `id text:str` | OK — new words for a `STATIC` (keeps its place and width), an `INPUT` (keeps its label) or a `TEXT` (starts over) |
+| 0x2B | SET_TEXT     | `id text:str` | OK — new words for a `STATIC` (keeps its place and width), an `INPUT` (keeps its label), a `TEXT` (starts over, keeping what it offers and its language) or a `WINDOW` (its title) |
 | 0x2C | BLIT         | `id x:i16 y:i16 w:i16 h:i16` then `w×h ×` (`ch:u16 attr:u8`) | OK — cells into a `CANVAS` |
 | 0x2D | MENU_CHECK   | `cmd:u16 on:u8` | OK — tick or untick the menu item that sends `cmd` |
 | 0x2E | GET_CLUSTER  | `id`      | `n:u8` then `n × u8` (on or off) then `current:u8` |
@@ -264,7 +268,7 @@ is the client's, and about 90 ms is long enough to be seen.
 | 0x4C | WINDOW_LIST | — | OK — the list of windows, a modal dialog; Enter brings the chosen one to the front (Alt+0) |
 | 0x4D | CYCLE_BACK | — | OK — the window at the back comes to the front (Shift+F6) |
 | 0x4E | SIZE_MOVE | — | OK — the active window is moved or resized from the keyboard until Enter or Escape (Ctrl+F5) |
-| 0x4A | WINDOW_STATUS | `id` then the items of STATUS | OK — the keys the window carries: on the status line, and bound, only while it is the active window |
+| 0x4A | WINDOW_STATUS | `id` then the items of STATUS | OK — the keys the window carries: on the status line, and bound, only while it is the active window; a key the program's own line also has is the window's while it is in front, and the program's item steps aside |
 | 0x4B | WINDOW_MENU | `id` then the items of MENU_BAR | OK — the window's menus, merged into the bar while it is active: a submenu named like one on the bar goes into it after a line, any other goes on the end |
 | 0x49 | SET_READONLY | `id on:u8` | OK — a text view becomes a viewer (`[view]` in its title) or an editor again |
 | 0x5D | EDITOR | `id offers:u8 state:u8` | OK — what a text view offers, and how it is set; see below |
@@ -329,6 +333,14 @@ There are no callbacks — a callback cannot cross an interrupt.
 |------|-------------|---------|-------|
 | 0x5B | OPEN_WINDOW | `title:str [flags:u8]` | OK — then the desktop is shown in a native window, which reads the keys and the mouse itself. `flags` bit 0: open without taking the focus (for a test or an agent). After INIT; Windows only |
 | 0x5C | WAIT        | —       | `pressed:u16 command:u16 w:i16 h:i16` — after one key or click in the window has been through the core: what it caused, as TAKE, and the desktop's size now |
+
+On DOS, OWLOSRES answers two more, for a program that runs another - a
+commander, on Enter:
+
+| op   | name        | payload | reply |
+|------|-------------|---------|-------|
+| 0x63 | SUSPEND     | —       | OK — the session, every window, put aside whole; the screen goes back to DOS in 80 by 25 text. What runs next may be a toolkit program with a session of its own |
+| 0x64 | RESUME      | `pause:u8` | OK — text mode again (a game may have left graphics), the session put aside last back, and drawn. `pause` 1: first, if the program that ran printed to the text screen rather than drawing with the toolkit, the bottom row says *Press a key to go back* and waits for one |
 
 Only the stdio server answers these; a host with no window of its own - the
 WebAssembly module, say - replies with an error. On DOS, OWLOSRES answers

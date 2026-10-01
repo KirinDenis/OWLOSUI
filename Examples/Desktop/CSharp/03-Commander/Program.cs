@@ -7,7 +7,8 @@
 // the file under the cursor, F4 edits it, F5 copies the marked files (or the
 // one under the cursor) to the other panel, F6 moves them, F7 makes a
 // folder, F8 deletes, F10 quits. Enter on a folder goes into it and `..`
-// comes back out; Enter on a file views it.
+// comes back out; Enter on a program runs it, on any other file says what
+// it is.
 //
 // What this shows that Notes did not:
 //
@@ -75,6 +76,8 @@ public sealed class App
         public string TreeRoot = "";
         /// <summary>The folder the tree's cursor was on, so the other panel is sent there once.</summary>
         public string TreeDir = "";
+        /// <summary>How much of the folder's path the window's title can hold.</summary>
+        public int TitleRoom;
     }
 
     public Panel Left { get; }
@@ -135,13 +138,18 @@ public sealed class App
         var p = new Panel { Dir = dir };
         // No shadow: the two panels tile the screen, and a shadow from the
         // left one would fall onto the right one for no reason.
-        p.Window = owl.Window(Fit(dir, w - 12), w, h, x, y, closeCmd: CmQuit, shadow: false);
+        // The title is the folder the side shows, and follows it.
+        // The frame keeps the close box, the number and the zoom box, and a
+        // space either side of the title: fourteen columns.
+        p.TitleRoom = w - 14;
+        p.Window = owl.Window(Fit(dir, p.TitleRoom), w, h, x, y, closeCmd: CmQuit, shadow: false);
         // The panel fills the window and marks are allowed: that is what
-        // makes it a file manager rather than an Open dialog. And no path
-        // line above the names: people who grew up on DOS file managers read a `*.*`
-        // at the top of a panel as something gone wrong. They navigate by
-        // Enter, and the foot of the panel says where they are.
-        p.Files = owl.Files(p.Window, dir, Owlosui.ReadDirectory(dir), p.Mask, multi: true, pathLine: false);
+        // makes it a file manager rather than an Open dialog. No path line
+        // above the names: people who grew up on DOS file managers read a
+        // `*.*` at the top of a panel as something gone wrong. And at the
+        // foot only what the cursor is on - size, date, attributes: the
+        // name is on the cursor and the folder in the title.
+        p.Files = owl.Files(p.Window, dir, Owlosui.ReadDirectory(dir), p.Mask, multi: true, pathLine: false, detailsOnly: true);
         return p;
     }
 
@@ -183,7 +191,7 @@ public sealed class App
             }
 
             case CmHelp:
-                Tell("Enter opens the folder under the cursor, or shows the file's properties; F3 views, F4 edits. Insert marks. " +
+                Tell("Enter opens the folder under the cursor, runs a program, or shows a file's properties; F3 views, F4 edits. Insert marks. " +
                      "Alt+F1 and Alt+F2 choose a drive for the left and the right panel; Alt+F10 shows the drive as a tree of folders, and the other panel follows the cursor. " +
                      "F5, F6 and F8 use the marks, or the cursor if there are none; copy and move go " +
                      "to the other panel. Tab or a click changes panel. F10 quits.");
@@ -311,10 +319,12 @@ public sealed class App
                         break;
                     }
                     // Enter, or a double click, on a name: a folder is
-                    // entered, a file shows its properties. Viewing is F3
-                    // and editing F4, as they were in the commanders.
+                    // entered, a program runs, any other file shows its
+                    // properties. Viewing is F3 and editing F4, as they were
+                    // in the commanders.
                     var full = Path.Combine(p.Dir, text);
                     if (Directory.Exists(full)) Go(p, full, p.Mask);
+                    else if (File.Exists(full) && IsProgram(full)) Run(p, full);
                     else if (File.Exists(full)) ShowProperties(full);
                     break;
                 }
@@ -354,13 +364,14 @@ public sealed class App
             owl.Close(p.Files);
             p.Files = 0;
             p.Tree = owl.Tree(p.Window, new Owlosui.TreeNode(p.TreeRoot.TrimEnd('\\'), Subfolders(p.TreeRoot), Open: true));
+            owl.SetText(p.Window, "Tree of " + p.TreeRoot);
             p.TreeDir = "";
             return;
         }
         var dir = TreeDir(p, owl.TreePath(p.Tree));
         owl.Close(p.Tree);
         p.Tree = 0;
-        p.Files = owl.Files(p.Window, p.Dir, Owlosui.ReadDirectory(p.Dir), p.Mask, multi: true, pathLine: false);
+        p.Files = owl.Files(p.Window, p.Dir, Owlosui.ReadDirectory(p.Dir), p.Mask, multi: true, pathLine: false, detailsOnly: true);
         Go(p, dir, p.Mask);
     }
 
@@ -429,6 +440,7 @@ public sealed class App
             p.Dir = dir;
             p.Mask = mask;
             owl.SetFiles(p.Files, dir, entries, mask);
+            owl.SetText(p.Window, Fit(dir, p.TitleRoom));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -589,6 +601,33 @@ public sealed class App
     /// What a double click on a file name opens: where it is, how big it
     /// is, its three dates and its attributes, in a modal dialog.
     /// </summary>
+    private static bool IsProgram(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() is ".exe" or ".com" or ".bat" or ".cmd";
+
+    /// <summary>
+    /// Enter on a program: Windows runs it, in a window of its own, in its
+    /// own folder - a program finds its files beside itself. A DOS program
+    /// is one Windows no longer runs; it is said so, and where it does run.
+    /// </summary>
+    private void Run(Panel p, string path)
+    {
+        try
+        {
+            using var started = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+            {
+                UseShellExecute = true,
+                WorkingDirectory = p.Dir,
+            });
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or PlatformNotSupportedException)
+        {
+            var dos = Path.GetExtension(path).Equals(".com", StringComparison.OrdinalIgnoreCase);
+            Tell(dos
+                ? $"{Path.GetFileName(path)} is a DOS program, and Windows no longer runs those. DOS_Commander.cmd runs this commander on DOS, in DOSBox-X, where Enter runs it."
+                : $"Windows would not run {Path.GetFileName(path)}: {e.Message}");
+        }
+    }
+
     private void ShowProperties(string path)
     {
         CloseBox();

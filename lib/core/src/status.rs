@@ -76,18 +76,22 @@ impl StatusLine {
 
     /// Where the items end.
     pub fn items_end(&self) -> i16 {
-        match self.items.len() {
-            0 => 0,
-            n => self.item_x(n - 1) + self.items[n - 1].width(),
+        match (0..self.items.len()).rev().find(|&i| self.items[i].width() > 0) {
+            None => 0,
+            Some(i) => self.item_x(i) + self.items[i].width(),
         }
     }
 
     /// Where an item starts. One column in from the left, two between items
     /// - the spacing the hand-drawn status line had before this existed.
+    /// An item with no label is a key and nothing to see - Tab in a file
+    /// manager, which everybody knows - and takes no room at all.
     pub fn item_x(&self, ix: usize) -> i16 {
         let mut x = 1;
         for it in &self.items[..ix] {
-            x += it.width() + 2;
+            if it.width() > 0 {
+                x += it.width() + 2;
+            }
         }
         x
     }
@@ -106,5 +110,23 @@ impl StatusLine {
             .iter()
             .find(|it| it.enabled && it.cmd != 0 && it.key == Some(k))
             .map(|it| it.cmd)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_item_with_no_label_is_bound_and_takes_no_room() {
+        let tab = Key::new(crate::event::KeyCode::Tab, crate::event::Mods::NONE);
+        let s = StatusLine::new(vec![
+            StatusItem::new("~F3~ View", None, 1),
+            StatusItem::new("", Some(tab), 2),
+            StatusItem::new("~F5~ Copy", None, 3),
+        ]);
+        assert_eq!(s.item_x(2), s.item_x(0) + "F3 View".len() as i16 + 2);
+        assert_eq!(s.items_end(), s.item_x(2) + "F5 Copy".len() as i16);
+        assert_eq!(s.command_for(tab), Some(2));
     }
 }

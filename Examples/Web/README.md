@@ -2,7 +2,9 @@
 
 Programs in a browser page.
 
-**Quickest:** double-click `Web_Demo.cmd` in the repository's root. It
+**Quickest of all:** the [live demo](https://kirindenis.github.io/OWLOSUI/) -
+this folder's demo, published by [site/build.mjs](site/build.mjs) on every
+push. **On your own machine:** double-click `Web_Demo.cmd` in the repository's root. It
 needs [Rust](https://rustup.rs) and, once, Rust's WebAssembly target, and
 says how to add it if it is missing.
 
@@ -43,6 +45,8 @@ three places (see [Files](#files)).
 RUN.CMD             build, serve, open
 httpd/              the server RUN.CMD starts
 files/              the folder the demo's File menu opens on the server
+dos/                OWL FLY III, which the demo's DOS PC carries
+site/build.mjs      the live demo as a static site, for GitHub Pages
 JavaScript/
     01-HelloWorld   a window, words, a button
     02-Notes        an editor that keeps its text, finds, replaces, asks before leaving
@@ -103,15 +107,18 @@ for each website, called OPFS (the Origin Private File System). It lives
 inside the browser's own data on this computer: nothing is uploaded, it
 works without a network, and no other website can see it. You will not
 find it in Explorer - only this page sees it, and clearing the site's data
-in the browser's settings erases it. The first time it is empty, so the
-demo puts a `WELCOME.TXT` there to open. A file made with File > New is
-saved here too.
+in the browser's settings erases it. The first time, the demo puts a
+`WELCOME.TXT` there, and a few of this project's own files to try things
+on: the DOS demo in Pascal, C and assembler, a DOS program, the C# hello
+world, a launcher and a screenshot. A file made with File > New is saved
+here too.
 
 **The server's folder.** [files/](files/) on the computer running
 `RUN.CMD`. The page asks `httpd` for it over plain HTTP: `GET
 /files/NAME` reads a file, `PUT /files/NAME` saves one, and `GET
-/files/?list` lists a folder. Change the file in the demo, press F2, and
-the file on the disk changes.
+/files/?list` lists a folder; `DELETE`, `MKCOL` (make a folder), `MOVE`
+and `COPY` change it, the same verbs WebDAV uses. Change the file in the
+demo, press F2, and the file on the disk changes.
 
 **A WebDAV folder.** WebDAV is the protocol a NAS box, Nextcloud and many
 servers use to share folders over the web. `httpd` shares the same
@@ -129,14 +136,101 @@ cargo run --release -p owlosui-httpd -- . /Examples/Web/JavaScript/05-Demo/ --fi
 ```
 
 The three places are [lib/js/files/](../../lib/js/files/), one small file
-each, and all three answer the same three calls: `list(dir)`, `read(path)`
-and `write(path, text)`. The file panel only draws. The program reads a
+each, and all three answer the same calls: `list(dir)`, `read(path)`,
+`readBytes(path)`, `write(path, text or bytes)`, `remove(path)`,
+`mkdir(path)` and `rename(from, to)`. A fourth,
+[repository.js](../../lib/js/files/repository.js), is this project's own
+`Examples` folder as the server shows it, and it is read-only. The file
+panel only draws. The program reads a
 folder from a place, hands the names to the panel, and hears back which
 one was chosen. So a fourth place, such as Dropbox, is one more file of
 the same shape.
 
 Files from DOS and Windows end their lines with CR LF. The demo keeps
 that: it takes the CRs off to edit and puts them back on Save.
+
+### Tools > Commander
+
+The same two-panel file manager as the desktop and DOS ones, over the
+places above: [05-Demo/commander.js](JavaScript/05-Demo/commander.js). A
+"drive" is a place: Alt+F1 and Alt+F2 choose what the left and the right
+side show, as a drive letter did on DOS. The keys are Volkov
+Commander's:
+
+| Key | What it does |
+|---|---|
+| Enter | into a folder; on a file, what its extension says - a text opens in the editor, a picture or a PDF in the browser, a DOS program runs on the demo's DOS PC - from the floppy, or copied onto it with the files beside it; other bytes open as hex |
+| F3 / F4 | view (read-only, or hex) / edit; F2 in the editor saves back where the file came from |
+| F5 / F6 | copy / rename or move, to the line the dialog offers - the other side's folder, or a new name |
+| F7 / F8 | make a folder / delete, asking first, No the default |
+| Insert, Tab | mark a file, go to the other side |
+| Ctrl+U, Ctrl+R | swap the sides, read both folders again |
+| F2 | this computer: **upload** files into the side in front, or **download** the marked ones; dropping files on the page uploads them too |
+
+Copying works between any two places, folders with everything in them.
+The examples are read-only, so they are a good side to copy from.
+
+## DOS, in the page
+
+The demo's DOS menu switches on a DOS PC in a window: DOSBox, compiled to
+WebAssembly ([lib/js/jsdos](../../lib/js/jsdos/NOTICE.md), js-dos 8.3.20),
+put together in the page ([05-Demo/dos.js](JavaScript/05-Demo/dos.js)):
+
+| On the PC | What it is |
+|---|---|
+| `C:\OWLOS` | OWLOSRES: the same Rust core as the page, built for DOS, resident behind INT 60h |
+| `C:\DEMO` | the DOS examples - the commander, the demo in Pascal, C and assembler - with their sources |
+| `C:\GAMES\OWLFLY3` | OWL FLY III, a DOS flight game played over the network ([dos/](dos/README.md)) |
+| `A:` | a floppy the page shares with DOS: the commander's drive `dos-a:` |
+
+Each disk is built from this repository's own files when the PC is switched
+on; nothing is a disk image. What it runs first is a line of its AUTOEXEC.
+
+**The picture is laid over the window.** The core draws every cell; DOSBox's
+picture is an element of the page put exactly over the window's inside - the
+core says where (`owl.place`) - and taken away while a menu or another window
+is over it. Click the picture, or press Enter on the window, and the keyboard
+is DOS's; **Right Ctrl** gives it back, as in a virtual machine.
+
+**The floppy.** DOSBox remembers what a hard disk's folder held, so a file the
+page writes there stays out of DOS's sight; a floppy it reads afresh every
+time. So A: is the disk the two share. The page's commander copies onto it,
+and presses Ctrl+R in DOS's commander for you; DOS writes to it, and the
+page's commander sees it within two seconds
+([lib/js/files/dosdrive.js](../../lib/js/files/dosdrive.js)).
+
+**The network.** DOSBox's IPX card, in a browser, is a WebSocket to a relay
+that hands each packet to every machine in the same room. The page owns that
+WebSocket, so it counts it: **DOS > Network monitor** shows the bytes, a
+graph of the last minute and the packets themselves, with their IPX
+addresses ([lib/js/dosbox/nettap.js](../../lib/js/dosbox/nettap.js)).
+**DOS > Machine monitor** shows what js-dos counts in the emulator: cycles a
+second, how busy it is, its disks. DOS's own memory and programs it does not
+show the page, so neither does the monitor.
+
+**DOS > Settings** is DOSBox's own: video card, memory, CPU core, type and
+speed, sound cards, XMS, EMS and UMB, what to start, the network card and
+the relay. It writes the `dosbox.conf` the PC boots with, and shows it.
+
+DOSBox runs on threads that share memory, which a browser allows a page only
+when it is isolated from other sites. RUN.CMD's server and GitHub Pages
+cannot say so in headers, so [coi-serviceworker.js](JavaScript/05-Demo/coi-serviceworker.js)
+does, and the page reloads itself once on the first visit.
+
+## The live demo
+
+[site/build.mjs](site/build.mjs) makes the static site GitHub Pages serves:
+the repository's own layout, cut to what a browser fetches, so every path in
+the pages stays true. A static host answers no `?list`, so it also writes
+`Examples/listing.json` for the commander's examples drive; the server's
+folder and WebDAV are left out of the drives there, having nothing to answer
+them. [.github/workflows/pages.yml](../../.github/workflows/pages.yml) builds
+the core and the site on every push to main.
+
+```
+lib\js\build.cmd
+node Examples\Web\site\build.mjs _site
+```
 
 ## Rust
 

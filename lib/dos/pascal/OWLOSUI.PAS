@@ -75,6 +75,8 @@ const
   FilesMarks      = $01;                { Insert marks names }
   FilesNoPathWord = $02;                { the path line without its "Path:" }
   FilesNoPathLine = $04;                { no path line: a commander's panel }
+  FilesDetails    = $08;                { a one-row foot: size, date, attributes of the
+                                          entry under the cursor - no path, no name }
 
   { a tree node's flags (OwlNode) }
   NodeOpen = $01;                       { shown open }
@@ -98,6 +100,13 @@ procedure OwlInit;                      { the desktop: 80 by 25 }
 procedure OwlQuit;
 procedure OwlWait(var Pressed, Command: Word);
 procedure OwlDraw;                      { the screen drawn now, between waits: a progress bar }
+procedure OwlSuspend;                   { the windows put aside, the screen DOS's: before another program }
+procedure OwlResume;                    { the windows back, drawn: after it }
+function  OwlRun(const Path, Args: string; Pause: Boolean): Integer;
+                                        { another program - .COM, .EXE, or through COMMAND.COM
+                                          a .BAT - with the windows put aside while it runs; DOS's
+                                          error, 0 if it ran. Pause: a key to come back. The
+                                          program's $M must leave DOS memory to run it in. }
 
 { views }
 function  OwlWindow(Parent: Word; X, Y, W, H: Integer; Flags: Byte;
@@ -329,6 +338,46 @@ var
 begin
   OwlBegin($40);
   SendInto(Head, SizeOf(Head));
+end;
+
+{ SUSPEND and RESUME are the resident's own: the session - every window -
+  kept whole while another program has the screen, which may be a toolkit
+  program with a session of its own. }
+procedure OwlSuspend;
+begin
+  Simple($63);
+end;
+
+procedure OwlResume;
+begin
+  OwlBegin($64); OwlU8(0);
+  OwlSend;
+end;
+
+function OwlRun(const Path, Args: string; Pause: Boolean): Integer;
+var
+  Ext: string[4];
+  Shell: string;
+begin
+  Ext := Copy(Path, Length(Path) - 3, 4);
+  if (Ext = '.BAT') or (Ext = '.bat') then
+  begin
+    { A batch file is COMMAND.COM's to run, not DOS's EXEC's. }
+    Shell := GetEnv('COMSPEC');
+    if Shell = '' then Shell := 'C:\COMMAND.COM';
+  end
+  else Shell := '';
+  OwlSuspend;
+  SwapVectors;
+  if Shell <> '' then Exec(Shell, '/C ' + Path + ' ' + Args)
+  else Exec(Path, Args);
+  SwapVectors;
+  OwlRun := DosError;
+  { Pause: what a program printed stays until a key. The resident decides
+    whether there is anything to read - not after a toolkit program, whose
+    windows were its answer. }
+  OwlBegin($64); OwlU8(Ord(Pause and (DosError = 0)));
+  OwlSend;
 end;
 
 { ---- views ---- }

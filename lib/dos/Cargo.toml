@@ -2,7 +2,7 @@
 name = "owlosui-dos"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "OWLOSUI on DOS: the machine layer for a flat 32-bit program under DPMI, and OWLOSRES, the toolkit behind INT 60h for programs in any language."
 
 # Its own workspace, because it is built for a target nothing else here

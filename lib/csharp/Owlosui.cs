@@ -637,10 +637,14 @@ public sealed class Owlosui : IDisposable
     /// <see cref="TakeFiles"/>.
     /// </summary>
     public ushort Files(ushort parent, string path, IEnumerable<FileEntry> entries, string mask = "*.*",
-                        bool multi = false, bool pathLabel = true, bool pathLine = true, int top = 0)
+                        bool multi = false, bool pathLabel = true, bool pathLine = true, int top = 0,
+                        bool detailsOnly = false)
     {
         // The panel fills the window; `top` rows are left free above it.
-        var flags = (byte)((multi ? 1 : 0) | (pathLabel ? 0 : 2) | (pathLine ? 0 : 4));
+        // detailsOnly: a one-row foot of what the cursor is on - size, date,
+        // attributes - without the path or the name, for a commander that
+        // puts the folder in its window's title (SetText on the window).
+        var flags = (byte)((multi ? 1 : 0) | (pathLabel ? 0 : 2) | (pathLine ? 0 : 4) | (detailsOnly ? 8 : 0));
         var parts = W.EntryChunks(entries);
         var r = Call(Op.Files, W.U16(parent), W.Rect(0, top, 0, 0), new[] { flags },
                      W.Str(mask), W.Str(Path.Combine(path, mask)), parts[0]);

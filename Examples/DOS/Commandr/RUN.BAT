@@ -9,13 +9,21 @@ rem
 rem CWSDPMI, with no arguments, stays for exactly one program - OWLOSRES -
 rem and OWLOSRES stays for exactly one program: the one it is given, whose
 rem arguments follow it. Both live in lib\dos, three folders up.
+rem
+rem /STEP lets the commander step out of memory to run a program - Enter on
+rem one writes its lines into RUNPROG.BAT here - and it is started again
+rem afterwards, in the same folders. The program gets all of DOS's memory.
 rem From Windows this starts DOSBox-X and runs itself in there (RUNWIN.BAT).
 if "%OS%"=="Windows_NT" goto windows
 if "%1"=="TEST" goto test
 if "%1"=="test" goto test
+:again
 ..\..\..\lib\dos\CWSDPMI.EXE
-..\..\..\lib\dos\OWLOSRES.COM COMMANDR.EXE %1 %2
-goto end
+..\..\..\lib\dos\OWLOSRES.COM COMMANDR.EXE /STEP %1 %2
+if not exist RUNPROG.BAT goto end
+call RUNPROG.BAT
+del RUNPROG.BAT
+goto again
 :test
 rem The test's keys, pressed one at a time from two seconds on. F12 is the
 rem resident's own: a picture of the screen onto SHOTS.TXT. AUTOTYPE cannot

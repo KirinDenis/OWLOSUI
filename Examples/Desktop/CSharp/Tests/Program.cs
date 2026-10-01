@@ -508,17 +508,26 @@ internal static class Tests
             Check(app.Left.Dir == l, $"`..` did not come back out: {app.Left.Dir}");
         });
 
-        Case("Commander: no path line above the names, and the foot says where you are", () =>
+        Case("Commander: the folder in the title, and only what the cursor is on at the foot", () =>
         {
             var (l, r) = TempTree();
             using var owl = Owl();
-            _ = new CommanderApp(owl, l, r);
+            var app = new CommanderApp(owl, l, r);
             var f = owl.GetFrame();
             // Row 1 is the first row inside the left window: a name, not `*.*`.
             Check(!f.Row(1).Contains("*.*"), "a commander's panel should not show the mask line", f);
             Check(f.Row(1).Contains(".."), "the names should start on the first row", f);
-            var foot = string.Join("\n", Enumerable.Range(0, f.H).Select(y => f.Row(y).Substring(0, 40)));
-            Check(foot.Contains(Path.GetFileName(l)), "the foot does not say where the panel is", f);
+            Check(f.Row(0).Substring(0, 40).Contains(Path.GetFileName(l)), "the left window's title is not its folder", f);
+            var left = string.Join("\n", Enumerable.Range(0, f.H).Select(y => f.Row(y).Substring(0, 40)));
+            Check(!left.Contains("*.*"), "a path with its mask is still at the foot", f);
+            // Into `sub`: the title follows, and the foot is the cursor's date, not a name.
+            owl.Press(ConsoleKey.DownArrow);
+            owl.Press(ConsoleKey.Enter);
+            app.Poll();
+            var g = owl.GetFrame();
+            Check(g.Row(0).Substring(0, 40).Contains("sub"), "the title did not follow into sub", g);
+            var foot = g.Row(g.H - 3).Substring(0, 40);
+            Check(!foot.Contains("inner.txt") && foot.Any(char.IsDigit), $"the foot should hold only the details: '{foot}'", g);
         });
 
         Case("Files: a panel with a path line goes where the path says, and filters by its mask", () =>

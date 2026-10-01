@@ -1430,3 +1430,23 @@ fn another_folder_starts_on_its_first_name_and_drops_the_marks() {
     c.ok(0x25, &[u16(files).to_vec(), s(r"C:\A\SUB\DEEP\*.*"), s("*.*"), list(&[("..", 0x10)])].concat());
     assert_eq!(current(&mut c, files), "..");
 }
+
+#[test]
+fn a_commanders_panel_says_its_folder_in_the_title_and_only_details_at_the_foot() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 40, 24), vec![0], s("Left")].concat()));
+    let entry = [s("ONE.TXT"), 1234u32.to_le_bytes().to_vec(), u16(2026).to_vec(), vec![9, 30, 21, 55, 0x20]].concat();
+    let entries = [u16(1).to_vec(), entry].concat();
+    // Flags: marks, no path line, details only.
+    c.ok(0x1A, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![1 | 4 | 8], s("*.*"), s(r"C:\A\*.*"), entries].concat());
+    // SET_TEXT on the window: its title.
+    c.ok(0x2B, &[u16(win).to_vec(), s(r"C:\A")].concat());
+    let f = frame(&mut c);
+    assert!(f.row(0).contains(r" C:\A "), "the folder is the title: {}", picture(&f));
+    assert!(!f.row(0).contains("Left"), "the old title is gone");
+    // The foot is one row, above the frame: size, date, time - no name, no path.
+    let foot = f.row(22);
+    assert!(foot.contains("1234") && foot.contains("30-09-2026 21:55"), "{foot:?}");
+    assert!(!foot.contains("ONE.TXT") && !picture(&f).contains(r"C:\A\*.*"), "{}", picture(&f));
+}

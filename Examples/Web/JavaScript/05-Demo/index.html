@@ -4,16 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OWLOS UI Demo - OWLOSUI</title>
+<meta name="description" content="OWLOSUI: a text-mode toolkit with one Rust core, in WebAssembly in this page and on DOS in DOSBox beside it.">
 <link rel="stylesheet" href="../page.css">
 </head>
 <body>
 <canvas id="screen"></canvas>
+<!-- DOSBox runs its emulator on threads that share memory, which a browser
+     allows only to a page isolated from other sites. A static host such as
+     GitHub Pages cannot send the two headers that say so; this service
+     worker adds them, and reloads the page once on the first visit. -->
+<script src="coi-serviceworker.js"></script>
 <script type="module">
   // The whole page: the core (lib/js/owlosui-wire.wasm, found beside
-  // owlosui.js), a canvas, and the program in app.js.
+  // owlosui.js), a canvas, and the program in app.js - which opens on
+  // What to see, so a first visit knows where to start.
   import { run } from '../../../../lib/js/owlosui.js';
   import { App } from './app.js';
-  run(document.getElementById('screen'), owl => new App(owl)).catch(e => {
+  run(document.getElementById('screen'), owl => {
+    const app = new App(owl);
+    window.demo = app;          // for the browser's console
+    app.welcome.show();
+    return app;
+  }).catch(e => {
     document.body.textContent = String(e) + ' - was lib\\js\\build.cmd run?';
   });
 </script>

@@ -31,8 +31,8 @@ pub struct Button {
     /// With the hotkey between tildes: `~O~pen`.
     pub text: String,
     pub cmd: u16,
-    /// The one Enter presses when nothing else has claimed the key. Turbo
-    /// Vision called this `bfDefault` and it is the whole of the bargain
+    /// The one Enter presses when nothing else has claimed the key. The
+    /// classic toolkits called this the default button, and it is the whole of the bargain
     /// between "Enter confirms" and "Enter does whatever I am standing on".
     pub default: bool,
     /// The one Escape presses, wherever its row is: Cancel in a dialog,
@@ -98,8 +98,8 @@ impl Button {
 /// Where the row sits in the space it was given.
 ///
 /// Bottom right by default, which is where thirty years of desktop dialogs
-/// have put them and therefore where the hand goes without being told. Turbo
-/// Vision centred its own; we are not copying that one.
+/// have put them and therefore where the hand goes without being told. The
+/// classic dialogs centred their own; we are not copying that one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Align {
     Right,

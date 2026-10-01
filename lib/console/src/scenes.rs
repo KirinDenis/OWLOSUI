@@ -45,8 +45,8 @@ pub fn build(name: &str) -> Option<Ui> {
             ui.insert(root, Rect::new(18, 8, 54, 13), Kind::Window(b));
         }
 
-        // REF03 - a window whose content scrolls in both directions. Turbo
-        // Vision was given the scrollbar positions directly; we get them by
+        // REF03 - a window whose content scrolls in both directions. The
+        // reference was given the scrollbar positions directly; we get them by
         // giving the view more content than fits, which is the same thing
         // arrived at from the other end.
         //

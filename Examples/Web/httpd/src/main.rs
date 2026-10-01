@@ -14,11 +14,18 @@
 //!
 //!  * `/...` - the repository's files, read-only, with the MIME types the
 //!    pages use (the browser insists on `application/wasm` for a module);
+//!    a folder with `?list` gives its names as JSON, so a page can browse
+//!    the examples' sources;
 //!  * `/files/...` - the `--files` folder the plain way: `GET` a file, `PUT`
 //!    one to save it, `GET` a folder with `?list` for its names as JSON;
 //!  * `/dav/...` - the same folder over WebDAV (`OPTIONS`, `PROPFIND`,
 //!    `GET`, `PUT`), the protocol NAS boxes and Nextcloud share folders
 //!    with. The demo's File menu reaches the folder both ways.
+//!
+//! Both ways into the folder also take WebDAV's four verbs for changing
+//! it - `DELETE` a file or a folder, `MKCOL` a new folder, `MOVE` and
+//! `COPY` to the place a `Destination` header names - which is what the
+//! demo's file manager does to it.
 //!
 //! Nothing outside the `--files` folder can be written, and nothing outside
 //! the root can be read: every piece of a path must be a plain name.
@@ -160,19 +167,118 @@ fn serve(mut stream: TcpStream, site: &Site) -> std::io::Result<()> {
         let r = rel.strip_prefix(prefix).ok()?;
         site.files.as_ref().map(|f| f.join(r))
     };
-    if req.path == "/files" || req.path.starts_with("/files/") {
-        match area("files") {
-            Some(file) => files(&mut stream, &req, &file),
-            None => reply(&mut stream, "404 Not Found", "text/plain", b"no --files folder\n", true),
+    let in_files = req.path == "/files" || req.path.starts_with("/files/");
+    let in_dav = req.path == "/dav" || req.path.starts_with("/dav/");
+    if in_files || in_dav {
+        let Some(file) = area(if in_files { "files" } else { "dav" }) else {
+            return reply(&mut stream, "404 Not Found", "text/plain", b"no --files folder\n", true);
+        };
+        if matches!(req.method.as_str(), "DELETE" | "MKCOL" | "MOVE" | "COPY") {
+            return change(&mut stream, &req, &file, site);
         }
-    } else if req.path == "/dav" || req.path.starts_with("/dav/") {
-        match area("dav") {
-            Some(file) => dav(&mut stream, &req, &file),
-            None => reply(&mut stream, "404 Not Found", "text/plain", b"no --files folder\n", true),
-        }
+        if in_files { files(&mut stream, &req, &file) } else { dav(&mut stream, &req, &file) }
     } else {
         statics(&mut stream, &req, &site.root.join(&rel))
     }
+}
+
+/// `DELETE`, `MKCOL`, `MOVE`, `COPY` on the files folder: WebDAV's verbs
+/// for changing it, taken on `/files/` too. A `Destination` is a URL or a
+/// path into the same folder, by either name; nothing outside it.
+fn change(stream: &mut TcpStream, req: &Request, path: &Path, site: &Site) -> std::io::Result<()> {
+    let top = site.files.as_ref().expect("checked by the caller");
+    if path == top.as_path() {
+        return reply(stream, "403 Forbidden", "text/plain", b"not the folder itself\n", true);
+    }
+    let done = |s: &mut TcpStream, r: std::io::Result<()>, ok: &str| match r {
+        Ok(()) => reply(s, ok, "text/plain", b"", true),
+        Err(e) => reply(s, "409 Conflict", "text/plain", format!("{e}\n").as_bytes(), true),
+    };
+    match req.method.as_str() {
+        "DELETE" => {
+            if !path.exists() {
+                return reply(stream, "404 Not Found", "text/plain", b"no such file\n", true);
+            }
+            let r = if path.is_dir() { std::fs::remove_dir_all(path) } else { std::fs::remove_file(path) };
+            done(stream, r, "204 No Content")
+        }
+        "MKCOL" => {
+            if path.exists() {
+                return reply(stream, "405 Method Not Allowed", "text/plain", b"it is there already\n", true);
+            }
+            done(stream, std::fs::create_dir(path), "201 Created")
+        }
+        _ => {
+            let Some(to) = destination(req, top) else {
+                return reply(stream, "400 Bad Request", "text/plain", b"a Destination into the folder, please\n", true);
+            };
+            if !path.exists() {
+                return reply(stream, "404 Not Found", "text/plain", b"no such file\n", true);
+            }
+            if to.starts_with(path) {
+                return reply(stream, "409 Conflict", "text/plain", b"a folder cannot go inside itself\n", true);
+            }
+            let overwrite = req.headers.get("overwrite").map_or(true, |v| v != "F");
+            if to.exists() {
+                if !overwrite {
+                    return reply(stream, "412 Precondition Failed", "text/plain", b"it is there already\n", true);
+                }
+                let _ = if to.is_dir() { std::fs::remove_dir_all(&to) } else { std::fs::remove_file(&to) };
+            }
+            let r = if req.method == "MOVE" { std::fs::rename(path, &to) } else { copy_all(path, &to) };
+            done(stream, r, "201 Created")
+        }
+    }
+}
+
+/// Where a MOVE or COPY goes: the `Destination` header's path, under
+/// `/files/` or `/dav/`, as a path in the folder.
+fn destination(req: &Request, top: &Path) -> Option<PathBuf> {
+    let d = req.headers.get("destination")?;
+    // An absolute URL loses its scheme and host; a path stays as it is.
+    let path = match d.find("://") {
+        Some(i) => &d[i + 3..][d[i + 3..].find('/')?..],
+        None => d.as_str(),
+    };
+    let path = decode(path.split('?').next()?);
+    let rel = path.strip_prefix("/files/").or_else(|| path.strip_prefix("/dav/"))?;
+    let rel = PathBuf::from(rel.trim_end_matches('/'));
+    if rel.as_os_str().is_empty() || rel.components().any(|c| !matches!(c, Component::Normal(_))) {
+        return None;
+    }
+    Some(top.join(rel))
+}
+
+fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+    if from.is_dir() {
+        std::fs::create_dir_all(to)?;
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            copy_all(&e.path(), &to.join(e.file_name()))?;
+        }
+        Ok(())
+    } else {
+        std::fs::copy(from, to).map(|_| ())
+    }
+}
+
+/// A folder's names as JSON: `[{"name","size","modified","dir"}]`.
+fn listing(dir: &Path) -> String {
+    let mut json = String::from("[");
+    for (i, e) in entries(dir).iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!(
+            "{{\"name\":\"{}\",\"size\":{},\"modified\":{},\"dir\":{}}}",
+            json_escape(&e.name),
+            e.size,
+            e.modified,
+            e.dir
+        ));
+    }
+    json.push(']');
+    json
 }
 
 /// The repository, read-only.
@@ -181,6 +287,11 @@ fn statics(stream: &mut TcpStream, req: &Request, file: &Path) -> std::io::Resul
         return reply(stream, "405 Method Not Allowed", "text/plain", b"GET only\n", true);
     }
     let mut file = file.to_path_buf();
+    // A folder of the repository with ?list: its names, for a page that
+    // browses the examples. Still read-only.
+    if file.is_dir() && req.query.split('&').any(|q| q == "list") {
+        return reply(stream, "200 OK", "application/json", listing(&file).as_bytes(), req.method == "GET");
+    }
     if file.is_dir() {
         if !req.path.ends_with('/') {
             // `/Examples/Web` must become `/Examples/Web/`, or the page's
@@ -206,21 +317,7 @@ fn files(stream: &mut TcpStream, req: &Request, path: &Path) -> std::io::Result<
             if !req.query.split('&').any(|q| q == "list") {
                 return reply(stream, "400 Bad Request", "text/plain", b"a folder: ask with ?list\n", true);
             }
-            let mut json = String::from("[");
-            for (i, e) in entries(path).iter().enumerate() {
-                if i > 0 {
-                    json.push(',');
-                }
-                json.push_str(&format!(
-                    "{{\"name\":\"{}\",\"size\":{},\"modified\":{},\"dir\":{}}}",
-                    json_escape(&e.name),
-                    e.size,
-                    e.modified,
-                    e.dir
-                ));
-            }
-            json.push(']');
-            reply(stream, "200 OK", "application/json", json.as_bytes(), req.method == "GET")
+            reply(stream, "200 OK", "application/json", listing(path).as_bytes(), req.method == "GET")
         }
         "GET" | "HEAD" => match std::fs::read(path) {
             Ok(body) => reply(stream, "200 OK", mime(path), &body, req.method == "GET"),
@@ -236,7 +333,7 @@ fn files(stream: &mut TcpStream, req: &Request, path: &Path) -> std::io::Result<
 fn dav(stream: &mut TcpStream, req: &Request, path: &Path) -> std::io::Result<()> {
     match req.method.as_str() {
         "OPTIONS" => {
-            let head = "HTTP/1.1 200 OK\r\nDAV: 1\r\nAllow: OPTIONS, PROPFIND, GET, HEAD, PUT\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            let head = "HTTP/1.1 200 OK\r\nDAV: 1\r\nAllow: OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             stream.write_all(head.as_bytes())
         }
         "PROPFIND" => {

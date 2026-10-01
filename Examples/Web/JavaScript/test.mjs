@@ -184,7 +184,7 @@ await test('Demo: menu bar, hints, and every tool opens', async () => {
   check(f.row(0).includes('File') && f.row(0).includes('Tools') && f.row(24).includes('F1 Help'), 'no bars', f);
   o.press('t', { alt: true });
   f = o.frame();
-  check(f.find('Calculator') && f.row(24).includes('Arithmetic, trigonometry'), 'Tools did not open with its hint', f);
+  check(f.find('Calculator') && f.find('Commander') && f.row(24).includes('Two panels of files'), 'Tools did not open with its hint', f);
   o.press('Escape');
   // A tool opens in front, so its title is on the screen the moment it opens.
   const tools = [[Demo.CmCalc, 'Calculator'], [Demo.CmCalendar, 'Calendar'], [Demo.CmAscii, 'ASCII table'], [Demo.CmPuzzle, 'Puzzle']];
@@ -271,7 +271,7 @@ await test('Demo: Colors recolours the desktop live, and Cancel puts it back', a
 // equivalent, so only its message for a browser without one is checked.
 
 const { spawn } = await import('node:child_process');
-const { mkdtempSync, writeFileSync, mkdirSync, readFileSync: readText, rmSync } = await import('node:fs');
+const { mkdtempSync, writeFileSync, mkdirSync, readFileSync: readText, rmSync, readdirSync } = await import('node:fs');
 const { tmpdir } = await import('node:os');
 const { join } = await import('node:path');
 const { fileURLToPath } = await import('node:url');
@@ -363,6 +363,115 @@ await test('Demo: a CR LF file opens without a glyph for CR and is saved with CR
   await app.pending;
   const disk = readText(join(folder, 'DOS.TXT'), 'utf8');
   check(disk === 'Xline one\r\nline two\r\n', `saved as ${JSON.stringify(disk)}`);
+});
+
+const { Repository } = await import('../../../lib/js/files/repository.js');
+
+for (const [what, source] of [["the server's folder", new ServerFolder(`${origin}/files`)], ['WebDAV', new WebDavFolder(`${origin}/dav/`)]]) {
+  await test(`Files: ${what} makes a folder, renames, writes bytes and deletes`, async () => {
+    const tag = what.length;
+    await source.mkdir(`/MADE${tag}/`);
+    await source.write(`/MADE${tag}/B.BIN`, new Uint8Array([0, 1, 2, 255]));
+    check(Buffer.compare(readFileSync(join(folder, `MADE${tag}`, 'B.BIN')), Buffer.from([0, 1, 2, 255])) === 0, 'the bytes changed on the way');
+    check((await source.readBytes(`/MADE${tag}/B.BIN`))[3] === 255, 'read back other bytes');
+    await source.rename(`/MADE${tag}/B.BIN`, `/MADE${tag}/C.BIN`);
+    const names = (await source.list(`/MADE${tag}/`)).map(e => e.name);
+    check(names.join() === 'C.BIN', `after the rename: ${names}`);
+    await source.remove(`/MADE${tag}/`);
+    check(!(await source.list('/')).some(e => e.name === `MADE${tag}`), 'the folder is still there');
+  });
+}
+
+await test("Files: the examples are listed, read, and refuse to change", async () => {
+  const repo = new Repository(`${origin}/Examples`);
+  const top = await repo.list('/');
+  check(top.some(e => e.name === 'DOS' && e.dir) && top.some(e => e.name === 'README.md' && !e.dir), `listed ${top.map(e => e.name)}`);
+  check((await repo.read('/DOS/Pascal/DEMO.PAS')).includes('program'), 'DEMO.PAS did not read');
+  let said = '';
+  try { await repo.write('/X.TXT', 'x'); } catch (e) { said = e.message; }
+  check(/read-only/.test(said), `a write said: ${said}`);
+  const r = await fetch(`${origin}/Examples/X.TXT`, { method: 'PUT', body: 'x' });
+  check(!r.ok, `the server let a PUT into the repository: ${r.status}`);
+});
+
+await test('Commander: two panels, the examples and the server; F5 copies, F6 renames, F7, F8, F3 hex', async () => {
+  const o = await owl(100, 30);
+  const app = new Demo.App(o);
+  const c = app.commander;
+  c.sources = [new Repository(`${origin}/Examples`), new ServerFolder(`${origin}/files`), new WebDavFolder(`${origin}/dav/`)];
+  app.onCommand(Demo.CmCommander);
+  await c.settled;
+  let f = o.frame();
+  check(f.find('examples:/') && f.find('server:/'), 'the titles do not say where the sides are', f);
+  check(f.find('Desktop') && f.find('WELCOME.TXT'), 'the folders are not in the panels', f);
+  check(f.find('F5 Copy') && f.find('F8 Delete') && !f.find('F5 Zoom'), "the panel's keys are not on the status line", f);
+
+  // Into DOS/Asm on the left, and HELLO.COM over to the server.
+  c.enter(c.left, 'DOS'); await c.settled;
+  c.enter(c.left, 'Asm'); await c.settled;
+  check(o.frame().find('examples:/DOS/Asm/'), 'the title did not follow', o.frame());
+  key(o, app, 'h');
+  check(o.markedNames(c.left.files)[0] === 'HELLO.ASM', `the cursor is on ${o.markedNames(c.left.files)}`);
+  key(o, app, 'ArrowDown');
+  key(o, app, 'F5');
+  f = o.frame();
+  check(f.find('Copy "HELLO.COM" to') && f.find('server:/'), 'no Copy dialog aimed at the other side', f);
+  key(o, app, 'Enter');
+  await c.settled;
+  const disk = readFileSync(join(folder, 'HELLO.COM'));
+  check(Buffer.compare(disk, readFileSync(new URL('../../DOS/Asm/HELLO.COM', import.meta.url))) === 0, 'the copy is not the same bytes');
+
+  // F3 on a program: its bytes.
+  key(o, app, 'F3');
+  await c.settled;
+  check(o.frame().find('HELLO.COM - ') && o.frame().find('00000000'), 'no hex view', o.frame());
+  key(o, app, 'F3', { alt: true });
+  // Enter on a program: it goes to the DOS PC to run (the PC itself is a
+  // browser's; here only the hand-over is seen).
+  let ran = null;
+  app.dos.runProgram = async (source, dir, name) => { ran = `${source.prefix}${dir}${name}`; };
+  c.enter(c.left, 'HELLO.COM');
+  await c.settled;
+  check(ran === 'examples:/DOS/Asm/HELLO.COM', `Enter on a program ran ${ran}`);
+
+  // Over to the server's side: a folder, the copy renamed, then deleted.
+  key(o, app, 'Tab');
+  check(o.active() === c.right.win, 'Tab did not go to the other side');
+  key(o, app, 'F7');
+  o.type('BOX');
+  key(o, app, 'Enter');
+  await c.settled;
+  check(readdirSync(folder).includes('BOX'), 'no BOX folder on disk');
+  key(o, app, 'h');
+  check(o.markedNames(c.right.files)[0] === 'HELLO.COM', `the cursor is on ${o.markedNames(c.right.files)}`);
+  key(o, app, 'F6');
+  check(o.frame().find('examples:/DOS/Asm/'), 'the target does not start as the other side', o.frame());
+  for (let i = 0; i < 40; i++) key(o, app, 'Backspace');
+  o.type('HI.COM');
+  key(o, app, 'Enter');
+  await c.settled;
+  check(readdirSync(folder).includes('HI.COM') && !readdirSync(folder).includes('HELLO.COM'), `renamed to ${readdirSync(folder)}`);
+  key(o, app, 'h');
+  key(o, app, 'F8');
+  check(o.frame().find('Delete "HI.COM"'), 'no question before deleting', o.frame());
+  key(o, app, 'Enter');
+  await c.settled;
+  check(readdirSync(folder).includes('HI.COM'), 'Enter deleted it: No must be the default');
+  key(o, app, 'F8');
+  check(o.frame().find('Delete "HI.COM"'), 'the second F8 asked nothing', o.frame());
+  key(o, app, 'y', { alt: true });
+  await c.settled;
+  check(!readdirSync(folder).includes('HI.COM'), 'Yes did not delete it');
+
+  // Ctrl+U: the sides change places.
+  key(o, app, 'u', { ctrl: true });
+  await c.settled;
+  check(c.left.source instanceof ServerFolder && c.right.dir === '/DOS/Asm/', 'the sides did not swap');
+
+  // Alt+F3 on a panel closes the commander, both sides.
+  key(o, app, 'F3', { alt: true });
+  check(!c.left && !o.frame().find('server:/'), 'the commander is still up', o.frame());
+  rmSync(join(folder, 'BOX'), { recursive: true, force: true });
 });
 
 server.kill();

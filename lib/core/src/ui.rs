@@ -273,8 +273,8 @@ pub struct Ui {
     pub palette: Palette,
     /// Which arrangement of keys is in force. Data, not code.
     pub keymap: Keymap,
-    /// One clipboard for the whole tree, so text moves between views. Turbo
-    /// Vision used a hidden editor for this; a list of lines does the same job
+    /// One clipboard for the whole tree, so text moves between views. The
+    /// classic toolkits used a hidden editor for this; a list of lines does the same job
     /// without the machinery.
     pub clipboard: Vec<Vec<Glyph>>,
     /// A command chosen from a menu, waiting to be collected.
@@ -506,6 +506,44 @@ impl Ui {
             }
         }
         r
+    }
+
+    /// Where a window's inside is on the screen, and whether anything is
+    /// drawn over any of it: a window above it, that window's shadow, an
+    /// open menu.
+    ///
+    /// For a program that puts something of its own where the window is -
+    /// a web page laying an emulator's picture over a window's inside. The
+    /// picture is not drawn by us, so it cannot be clipped by us either; the
+    /// program shows it while nothing covers the window and hides it while
+    /// something does, and a menu dropped over it is still a menu you can
+    /// read.
+    pub fn place(&self, id: ViewId) -> Option<(Rect, bool)> {
+        if !self.is_alive(id) || !matches!(self.nodes[id.ix()].kind, Kind::Window(_)) {
+            return None;
+        }
+        let inside = self.client_abs(id);
+        let mut order: Vec<ViewId> = self.nodes[self.root.ix()].children.clone();
+        order.sort_by_key(|c| self.nodes[c.ix()].kind.layer());
+        let at = order.iter().position(|&c| c == id)?;
+        let covered = order[at + 1..].iter().any(|&c| {
+            let mut r = self.abs_rect(c);
+            match &self.nodes[c.ix()].kind {
+                Kind::Window(w) => {
+                    if w.shadow {
+                        r.w += 2;
+                        r.h += 1;
+                    }
+                }
+                Kind::MenuBox(_) => {
+                    r.w += 2;
+                    r.h += 1;
+                }
+                _ => return false,
+            }
+            !r.intersect(&inside).is_empty()
+        });
+        Some((inside, covered))
     }
 
     /// The area inside a view that its children may use.
@@ -1494,7 +1532,15 @@ impl Ui {
         }
         if let Some(sid) = self.status_id() {
             if let Kind::Status(s) = &mut self.nodes[sid.ix()].kind {
-                s.items = s.base.clone();
+                // A key the window carries takes the place of the program's
+                // own on the same key while the window is in front: in a file
+                // manager's window F3 is View, whatever F3 is elsewhere.
+                s.items = s
+                    .base
+                    .iter()
+                    .filter(|b| b.key.is_none() || !status.iter().any(|w| w.key == b.key))
+                    .cloned()
+                    .collect();
                 s.items.extend(status);
                 s.right = right;
             }
@@ -2354,8 +2400,8 @@ impl Ui {
             p.frame_passive
         };
 
-        // Active windows wear a double frame, inactive a single one. Turbo
-        // Vision's trick: you can tell which window has focus with the colours
+        // Active windows wear a double frame, inactive a single one. The
+        // classic trick: you can tell which window has focus with the colours
         // turned off. A window being dragged drops to a single frame too —
         // it is in flight, not settled.
         let (h, v, tl, tr, bl, br) = if active && !dragging {
@@ -2970,6 +3016,10 @@ impl Ui {
                     buf.text(foot.x, foot.y + i as i16, line, error, clip);
                 }
             }
+            None if f.details_only => {
+                buf.fill(foot, b' ', info, clip);
+                buf.text(foot.x, foot.y, &trim(&f.details(), w as usize), info, clip);
+            }
             None => {
                 buf.fill(foot, b' ', info, clip);
                 buf.text(foot.x, foot.y, &trim(f.path_text(), w as usize), info, clip);
@@ -3234,8 +3284,8 @@ impl Ui {
         let p = &self.palette;
         buf.fill(abs, b' ', p.status, clip);
         // While a menu item with a hint is under the cursor, the line says
-        // what the item does instead of what the keys do - as Turbo
-        // Vision's did. The keys come back the moment the menu closes.
+        // what the item does instead of what the keys do - as the
+        // classic menus did. The keys come back the moment the menu closes.
         if let Some(hint) = self.menu_hint() {
             buf.text(abs.x + 1, abs.y, &hint, p.status, clip);
             return;

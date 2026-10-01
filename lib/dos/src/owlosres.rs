@@ -70,6 +70,9 @@ struct Host {
     buf: Buffer,
     /// INIT has been answered: the screen is ours until the program ends.
     screen: bool,
+    /// Sessions put aside by SUSPEND, newest last, with whether each had
+    /// the screen: a commander's, while the program it ran has one of its own.
+    saved: Vec<(Server, bool)>,
 }
 
 static mut HOST: Option<Host> = None;
@@ -96,6 +99,44 @@ impl Host {
                 None => error("INIT first"),
             },
             op::OPEN_WINDOW => error("on DOS the screen is already the program's window"),
+            // A program about to run another - a commander, on Enter. Its
+            // windows go aside, whole, and the screen goes back to DOS in
+            // text mode, so what runs next starts on a clean screen - and
+            // may be a toolkit program itself, with a session of its own.
+            op::SUSPEND => {
+                let server = core::mem::replace(&mut self.server, Server::new());
+                self.saved.push((server, self.screen));
+                self.screen = false;
+                self.queue.clear();
+                text_mode();
+                (0, Vec::new())
+            }
+            // The other program has ended: the screen to text mode again -
+            // a game may have left it in graphics - the windows back as
+            // they were, and drawn.
+            op::RESUME => match self.saved.pop() {
+                Some((server, screen)) => {
+                    // Asked to pause (payload 1): a program that printed its
+                    // answer to the screen keeps it there until a key. Not one
+                    // that drew with the toolkit - its windows were its answer,
+                    // already read - nor one that left a graphics mode, whose
+                    // screen a line of text would not even show on.
+                    let mode = peek8(real(0x40, 0x49));
+                    if payload.first() == Some(&1) && !self.screen && matches!(mode, 2 | 3 | 7) {
+                        press_a_key();
+                    }
+                    self.server = server;
+                    self.screen = screen;
+                    self.queue.clear();
+                    text_mode();
+                    if screen {
+                        self.mouse = Some(MouseState::detect());
+                        self.draw();
+                    }
+                    (0, Vec::new())
+                }
+                None => error("nothing was suspended"),
+            },
             // A frame, asked for between WAITs: the screen is drawn now -
             // what a program busy copying files wants its progress bar to
             // do - and the frame's bytes come back as they do on any wire,
@@ -151,6 +192,26 @@ impl Host {
         body
     }
 }
+
+/// 80 by 25 text, through the BIOS: the screen cleared, the cursor home and
+/// showing. What a program that ran another comes back to.
+fn text_mode() {
+    let mut r = RealRegs { eax: 0x0003, ..Default::default() };
+    real_int(0x10, &mut r);
+}
+
+/// The bottom row says so, and the BIOS waits for the key.
+fn press_a_key() {
+    let text = b" Press a key to go back. ";
+    let at = VIDEO + 24 * 160;
+    for (i, &c) in text.iter().enumerate() {
+        poke8(at + i as u32 * 2, c);
+        poke8(at + i as u32 * 2 + 1, 0x70);
+    }
+    let mut r = RealRegs { eax: 0x0000, ..Default::default() };
+    real_int(0x16, &mut r);
+}
+
 
 fn error(what: &str) -> (u8, Vec<u8>) {
     let mut body = (what.len() as u16).to_le_bytes().to_vec();
@@ -382,6 +443,7 @@ Usage: OWLOSRES PROGRAM.EXE [arguments]\r\n$");
             mouse: None,
             buf: Buffer::new(80, 25),
             screen: false,
+            saved: Vec::new(),
         });
     }
     let (old_seg, old_off) = get_vector(VECTOR);

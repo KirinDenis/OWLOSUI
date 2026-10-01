@@ -131,3 +131,30 @@ fn a_menu_with_a_new_name_goes_on_the_end_of_the_bar() {
     let game = bar.find("Game").unwrap();
     assert!(game > file, "{bar:?}");
 }
+
+#[test]
+fn a_windows_key_takes_the_place_of_the_programs_same_key() {
+    // The program binds F3 to New; a file manager's window binds F3 to View.
+    let f3 = Key { code: KeyCode::F(3), mods: Mods::default() };
+    let mut ui = Ui::new(80, 25);
+    let root = ui.root();
+    ui.insert(
+        root,
+        Rect::new(0, 24, 80, 1),
+        Kind::Status(StatusLine::new(vec![StatusItem::new("~F3~ New", Some(f3), CM_OPEN)])),
+    );
+    let mut w = Window::new("Panel");
+    w.status = vec![StatusItem::new("~F3~ View", Some(f3), CM_EDIT)];
+    let win = ui.insert(root, Rect::new(2, 2, 40, 10), Kind::Window(w));
+    ui.activate(win);
+    let row = status_row(&mut ui);
+    assert!(row.contains("F3 View") && !row.contains("F3 New"), "{row:?}");
+    ui.handle(Event::Key(f3));
+    assert_eq!(ui.take_command(), Some(CM_EDIT), "F3 is View while the window is in front");
+    // Another window in front: F3 is New again.
+    let other = ui.insert(root, Rect::new(30, 5, 20, 6), Kind::Window(Window::new("Other")));
+    ui.activate(other);
+    assert!(status_row(&mut ui).contains("F3 New"));
+    ui.handle(Event::Key(f3));
+    assert_eq!(ui.take_command(), Some(CM_OPEN));
+}

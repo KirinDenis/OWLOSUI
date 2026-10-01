@@ -12,13 +12,21 @@
 //             Exit.
 //   Edit      Only while an editor is in front, and not written here: the
 //             editor brings it (owl.editor), and the core answers it.
-//   Tools     Calculator (step 3's, imported as it is), Calendar, ASCII
-//             table, Puzzle - tools.js, one class each.
+//   Tools     Commander - two panels over every place above and this
+//             project's own examples, Volkov Commander's keys, upload and
+//             download (commander.js). Calculator (step 3's, imported as it
+//             is), Calendar, ASCII table, Puzzle - tools.js, one class each.
 //   Options   A dialog of check boxes and radio buttons; the colour dialog,
 //             every role of the palette changed live; a ticked item.
 //   Window    Size/Move, Zoom, Next, Previous, Close, List, Cascade, Tile:
 //             the desktop's own verbs. Alt+1..9 reach numbered windows.
-//   Help      About.
+//   DOS       A DOS PC in a window: DOSBox in WebAssembly, its disk made
+//             of this repository's DOS examples on the same Rust core, a
+//             floppy shared with the page, OWL FLY III on the network,
+//             settings, a network monitor and a machine monitor (dos.js,
+//             monitors.js; the machine is lib/js/dosbox/).
+//   Help      What to see - the window a first visit opens on
+//             (welcome.js) - and About.
 //
 // Every tool owns a range of command numbers and answers handles(cmd), so
 // this file only routes: a menu command opens a tool, a tool's own buttons
@@ -30,12 +38,33 @@ import { CalendarWindow, AsciiTableWindow, PuzzleWindow, ColorsWindow } from './
 import { BrowserStorage, split } from '../../../../lib/js/files/browser.js';
 import { ServerFolder } from '../../../../lib/js/files/server.js';
 import { WebDavFolder } from '../../../../lib/js/files/webdav.js';
+import { Repository } from '../../../../lib/js/files/repository.js';
+import { CommanderTool } from './commander.js';
+import { DosTool, DosCm } from './dos.js';
+import { Welcome } from './welcome.js';
 
 export const CmNew = 1, CmExit = 2;
-export const CmCalc = 10, CmCalendar = 11, CmAscii = 12, CmPuzzle = 13;
+export const CmCalc = 10, CmCalendar = 11, CmAscii = 12, CmPuzzle = 13, CmCommander = 14;
+
+/**
+ * What this browser's storage starts with, the first time it is opened:
+ * the demos' own sources for DOS and for Windows, a DOS program and a
+ * picture - something real to view, copy, edit and download. Paths from
+ * the repository's root, which the page's server serves.
+ */
+const ROOT = new URL('../../../../', import.meta.url);
+const SAMPLES = [
+  ['/DOS/DEMO.PAS', 'Examples/DOS/Pascal/DEMO.PAS'],
+  ['/DOS/DEMO.C', 'Examples/DOS/C/DEMO.C'],
+  ['/DOS/DEMO.ASM', 'Examples/DOS/Asm/DEMO.ASM'],
+  ['/DOS/HELLO.COM', 'Examples/DOS/Asm/HELLO.COM'],
+  ['/WINDOWS/Program.cs', 'Examples/Desktop/CSharp/01-HelloWorld/Program.cs'],
+  ['/WINDOWS/CS_Demo.cmd', 'CS_Demo.cmd'],
+  ['/dos_demo.png', 'Examples/screens/dos_demo.png'],
+].map(([to, from]) => [to, new URL(from, ROOT).href]);
 export const CmOptions = 20, CmClock = 21, CmColors = 22;
 export const CmNext = 30, CmZoom = 31, CmClose = 32, CmCascade = 33, CmTile = 34, CmPrevious = 35, CmList = 36, CmSizeMove = 37;
-export const CmAbout = 40, CmHelp = 41;
+export const CmAbout = 40, CmHelp = 41, CmWelcome = 42;
 export const CmOk = 60, CmCancel = 61, CmDismiss = 62;
 export const CmOpenBrowser = 50, CmOpenServer = 51, CmOpenDav = 52, CmSave = 53;
 export const CmFileOpen = 54, CmFileCancel = 55, CmDavConnect = 56, CmDavCancel = 57;
@@ -53,7 +82,31 @@ export class App {
     this.docs = new Map();            // window -> { text, source, path, name }
     this.open = null;                 // the Open dialog, while it is up
     this.dav = null;                  // the WebDAV address dialog, likewise
-    this.browser = new BrowserStorage();
+    this.browser = new BrowserStorage({ samples: SAMPLES });
+    // The commander's drives: every place a page can keep files, and the
+    // examples themselves to copy from.
+    const origin = globalThis.location?.origin ?? 'http://localhost:8765';
+    this.commander = new CommanderTool(owl, {
+      sources: [new Repository(), this.browser, new ServerFolder(), new WebDavFolder(`${origin}/dav/`)],
+      // A file opened from the commander fills the desktop, as a
+      // commander's editor always has; F5 puts it back to a window.
+      open: (name, text, source, path, options) => owl.zoom(this.addDoc(name, text, source, path, options)),
+      closeCmd: CmClose,
+      quietKeys: [{ cmd: CmHelp, key: 'F1' }, { cmd: CmClose, key: 'F3', alt: true }, { cmd: CmExit, key: 'x', alt: true }],
+      // Enter on a DOS program: it runs on the DOS PC, in its window.
+      run: (source, dir, name) => this.dos.runProgram(source, dir, name),
+    });
+    this.tools.push(this.commander);
+    // The DOS PC, and its floppy as one more drive for the commander.
+    this.dos = new DosTool(owl, {
+      commander: this.commander,
+      open: (name, text, source, path, options) => this.addDoc(name, text, source, path, options),
+    });
+    this.commander.sources.push(this.dos.floppy);
+    this.tools.push(this.dos);
+    this.welcome = new Welcome(owl, this.choices());
+    this.tools.push(this.welcome);
+    this.dropServerIfAbsent();
     this.options = 0;
     this.box = 0;
     this.clock = true;
@@ -74,10 +127,13 @@ export class App {
         line(),
         { label: 'E~x~it', cmd: CmExit, shortcut: 'Alt+X', hint: 'Leave the program' }),
       sub('~T~ools',
+        { label: 'Co~m~mander', cmd: CmCommander, hint: 'Two panels of files: the examples, this browser, the server, WebDAV; F2 uploads and downloads' },
+        line(),
         { label: '~C~alculator', cmd: CmCalc, hint: 'Arithmetic, trigonometry, hex and binary' },
         { label: 'Ca~l~endar', cmd: CmCalendar, hint: 'A month at a time; click a day' },
         { label: '~A~SCII table', cmd: CmAscii, hint: 'Every glyph of the font, by its number' },
         { label: '~P~uzzle', cmd: CmPuzzle, hint: 'The fifteen puzzle' }),
+      sub('~D~OS', ...this.dos.menu()),
       sub('~O~ptions',
         { label: '~M~ouse...', cmd: CmOptions, hint: 'Check boxes and radio buttons, read back on OK' },
         { label: 'Co~l~ors...', cmd: CmColors, hint: "Every role's colour, changed live" },
@@ -93,6 +149,7 @@ export class App {
         { label: 'C~a~scade', cmd: CmCascade, hint: 'The windows along the diagonal, every title showing' },
         { label: '~T~ile', cmd: CmTile, hint: 'The windows share the desktop with no overlap' }),
       sub('~H~elp',
+        { label: '~W~hat to see...', cmd: CmWelcome, hint: 'The window this page opened with: what there is, and Enter to see it' },
         { label: '~A~bout', cmd: CmAbout, hint: 'What this program is and what draws it' }),
     );
     owl.statusLine(
@@ -104,6 +161,55 @@ export class App {
       { label: '~Alt-F3~ Close', cmd: CmClose, key: 'F3', alt: true },
       { label: '~Alt-X~ Exit', cmd: CmExit, key: 'x', alt: true },
     );
+  }
+
+  /** What the What to see window offers, and what each one does. */
+  choices() {
+    const show = (...cmds) => () => { for (const c of cmds) this.onCommand(c); };
+    return [
+      { label: 'Files, in this browser', about: "Tools > Commander: two panels, Volkov Commander's keys. This project's examples on one side, " +
+        "this browser's own storage on the other. F3 views, F4 edits, F5 copies, F2 uploads from your computer and downloads to it.",
+        go: () => this.commander.show({ left: this.commander.sources[0], right: this.browser }) },
+      { label: 'OWLOSUI on DOS, in DOSBox', about: 'A DOS PC in a window - DOSBox, compiled to WebAssembly - running the same commander, ' +
+        'written in Pascal, on the same Rust core, built for DOS. Click the picture for the keyboard; Right Ctrl gives it back.',
+        go: () => this.dos.run('commander') },
+      { label: 'One floppy, two worlds', about: "This browser's files on the left; the DOS PC on the right, its floppy A: open. " +
+        'F5 on the left copies a file onto the floppy and DOS sees it at once. What DOS writes to A:, the page sees.',
+        go: () => this.floppyDemo() },
+      { label: 'Play OWL FLY III', about: 'A DOS flight game over the network: each IPX packet goes in a WebSocket to a relay, to every ' +
+        'player in the room. DOS > Network monitor shows the traffic, packet by packet.',
+        go: () => this.dos.run('owlfly') },
+      { label: 'Calculator, calendar, puzzle', about: 'Small windows that each use one part of the kit: button rows, a canvas of cells, ' +
+        'check boxes. All of them are under Tools, and Window arranges them.',
+        go: show(CmCalc, CmCalendar, CmPuzzle) },
+      { label: 'DOSBox settings', about: 'Video card, CPU, sound, memory, network: a page each, written out as the dosbox.conf the ' +
+        'DOS PC starts with - the dialog shows it.',
+        go: show(DosCm.Settings) },
+      { label: 'Look around myself', about: 'F10 opens the menu bar; every item says on the status line what it does. ' +
+        'Help > What to see brings this window back.',
+        go: () => {} },
+    ];
+  }
+
+  /** The browser's files on the left, DOS over the right side with its floppy: F5 copies from one world into the other. */
+  floppyDemo() {
+    this.commander.show({ left: this.browser, right: this.dos.floppy });
+    const r = this.commander.rightRect();
+    this.dos.run('commander', { rect: r, grab: false }).then(() => {
+      if (this.commander.left) this.owl.activate(this.commander.left.win);
+      this.owl.refresh?.();
+    });
+  }
+
+  /**
+   * The server's folder and WebDAV are RUN.CMD's; a page served from
+   * anywhere else - GitHub Pages - has neither, and the commander does
+   * not offer drives that cannot answer.
+   */
+  async dropServerIfAbsent() {
+    if (typeof fetch === 'undefined' || typeof location === 'undefined') return;
+    const ok = await fetch(`${location.origin}/files/?list`).then(r => r.ok, () => false);
+    if (!ok) this.commander.sources = this.commander.sources.filter(s => !(s instanceof ServerFolder || s instanceof WebDavFolder));
   }
 
   tell(title, text) {
@@ -124,7 +230,7 @@ export class App {
   }
 
   /** An editor window for a file; `source` and `path` say where Save puts it back. */
-  addDoc(name, text, source, path) {
+  addDoc(name, text, source, path, { readOnly = false } = {}) {
     const n = this.editors.length + 1;
     const title = source ? `${name} - ${source.title}` : name;
     const w = this.owl.window(title, 60, 16, { x: 2 + (n % 8), y: 1 + (n % 8), closeCmd: CmClose });
@@ -136,13 +242,14 @@ export class App {
     // Everything the editor has, on an Edit menu of its own while this
     // window is in front: Find, Replace, Word wrap, Read only, Hex view,
     // Classic keys. The core runs all of it; nothing comes back here.
-    this.owl.editor(t, Offer.All);
+    this.owl.editor(t, Offer.All, { readOnly });
     // Coloured as its language, which its name says: DEMO.PAS is Pascal.
     // A name no language answers to stays plain, and Edit > Syntax can
     // still choose one.
     this.owl.syntax(t, name);
     this.editors.push(w);
     this.docs.set(w, { text: t, source, path, name, crlf });
+    return w;
   }
 
   // ---------------------------------------------------------------- files
@@ -295,6 +402,7 @@ export class App {
   closeActive() {
     const owl = this.owl, a = owl.active();
     if (!a) return;
+    for (const t of [this.commander, this.dos, this.welcome]) if (t.owns(a)) { t.closeWindow(a); return; }
     const tool = this.tools.find(t => t.id === a);
     owl.close(a);
     if (tool) tool.closed();
@@ -310,6 +418,7 @@ export class App {
     switch (cmd) {
       case CmExit: return false;
       case CmHelp:
+      case CmWelcome: this.welcome.show(); return true;
       case CmAbout:
         this.tell('OWLOS UI Demo', 'A text mode toolkit in the classic DOS style, with one portable core: this page is JavaScript, ' +
           'every window in it is drawn by a Rust core compiled to WebAssembly, and the same core runs on a ' +
@@ -330,6 +439,7 @@ export class App {
         if (name) this.chosen(name);
         return true;
       }
+      case CmCommander: this.commander.show(); return true;
       case CmCalc: this.calc.show(); return true;
       case CmCalendar: this.calendar.show(); return true;
       case CmAscii: this.ascii.show(); return true;

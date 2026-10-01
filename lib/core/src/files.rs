@@ -190,6 +190,13 @@ pub struct FileList {
     /// navigate by Enter, not by typing. Without it the names start on the
     /// first row and the foot still says where you are.
     pub path_line: bool,
+    /// A foot of one row that says only what the entry under the cursor is -
+    /// its size or `<DIR>`, its date and time, its attributes - without the
+    /// path, the mask or the name. A commander's panel wants this: its name
+    /// is on the cursor already and its folder is in the window's title, and
+    /// saying either again at the bottom is two lines of the panel spent on
+    /// nothing new.
+    pub details_only: bool,
 
     /// The line at the top: a directory and a mask together, the way an open
     /// dialog has shown them since before any of us were typing. Editing it is
@@ -233,6 +240,7 @@ impl FileList {
             multi: false,
             marked: Vec::new(),
             path_line: true,
+            details_only: false,
             path: crate::input::InputLine::new("Path:", ""),
             focus: Focus::List,
             pending_path: None,
@@ -350,6 +358,7 @@ impl FileList {
         let width = (r.w - 2 - self.foot_taken).max(8);
         self.foot = match &self.error {
             Some(msg) => (wrap(msg, width).len() as i16).clamp(2, 3),
+            None if self.details_only => 1,
             None => 2,
         };
         self.rows = (r.h - 1 - self.top() - self.foot).max(1);
@@ -627,6 +636,15 @@ impl FileList {
     /// cursor is on. Volkov showed this and it is the reason its file panel
     /// needs no second window.
     pub fn info(&self) -> String {
+        match self.selected() {
+            Some(e) => format!("{} {}", trim_to(&e.name, 12), self.details()),
+            None => String::new(),
+        }
+    }
+
+    /// `info` without the name - size, date and time, attributes: what a
+    /// `details_only` foot shows.
+    pub fn details(&self) -> String {
         let Some(e) = self.selected() else {
             return String::new();
         };
@@ -644,13 +662,7 @@ impl FileList {
         } else {
             format!("{:02}-{:02}-{:04} {:02}:{:02}", d, mo, y, h, mi)
         };
-        format!(
-            "{} {} {} {}",
-            trim_to(&e.name, 12),
-            size,
-            when,
-            e.attr_string()
-        )
+        format!("{} {} {}", size, when, e.attr_string())
     }
 }
 

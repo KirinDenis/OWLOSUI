@@ -31,6 +31,10 @@ findstr /c:"errorlevel" RUN.OUT >nul && (echo FAIL: it did not leave with code 0
 for %%S in ("ONE.TXT" "Hello from ONE." "Copy 1 file(s)" "Delete 1 file(s): GONE.TXT" "TWO.PAS" "Attributes" "Alt+F10" "EXAMPLES" "Left side: drive") do (
   findstr /c:%%S SHOTS.TXT >nul || (echo FAIL: %%~S was never on the screen & exit /b 1)
 )
+findstr /c:"Tree of C:" SHOTS.TXT >nul || (echo FAIL: the tree's window did not say so in its title & exit /b 1)
+rem The folder is in each window's title now, and the foot says only what
+rem the cursor is on: no path with a mask left anywhere on the screen.
+findstr /l /c:"*.*" SHOTS.TXT >nul && (echo FAIL: a path with its mask is still at the foot of a panel & exit /b 1)
 echo ok: the two sides, the viewer, the questions, the editor, properties, the tree and the drives were shown
 if not exist PLAY\B\ONE.TXT (echo FAIL: F5 did not copy ONE.TXT & exit /b 1)
 if not exist PLAY\A\ONE.TXT (echo FAIL: the copy took ONE.TXT away & exit /b 1)

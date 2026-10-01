@@ -2,7 +2,7 @@
 name = "owlosui-dos-example"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "The shared application on DOS, the core linked in: a flat 32-bit binary the loader OWLOS.COM puts in extended memory under DPMI."
 
 # Its own workspace, because it is built for a target nothing else here
