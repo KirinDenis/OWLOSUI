@@ -1,12 +1,12 @@
 //! Menus.
 //!
-//! Two views, as Turbo Vision had: the bar across the top, and the panel that
+//! Two views, as the classic DOS toolkits had: the bar across the top, and the panel that
 //! drops out of it. The panel is not part of the bar — it is an ordinary view
 //! that can be put on the desktop by itself, which is exactly what a local or
-//! context menu is. Borland's own IDE opened one with Alt+F10 and it was the
+//! context menu is. The classic DOS IDEs opened one with Alt+F10 and it was the
 //! same object that dropped from the File menu.
 //!
-//! Everything here was measured off a real Turbo Vision screen rather than
+//! Everything here was measured off a real classic DOS screen rather than
 //! guessed:
 //!
 //! ```text
@@ -41,7 +41,7 @@ pub struct MenuItem {
     /// it, not the menu's.
     pub checked: bool,
     /// One line about the item, shown on the status line while the cursor
-    /// stands on it. Turbo Vision's `getHint`, kept with the item instead
+    /// stands on it. The classic hint line, kept with the item instead
     /// of in a table beside it.
     pub hint: String,
 }

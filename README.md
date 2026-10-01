@@ -1,17 +1,74 @@
 # OWLOSUI
 
-A Turbo Vision-shaped text mode UI toolkit with one portable core.
+A text mode UI toolkit in the classic DOS style, with one portable core.
 
-One core draws the same windows on a terminal, in a native Windows window,
-in a browser and on DOS. Nothing above the platform layer knows which of
-those it is running on, and a program in any language can use it without
-linking to it.
+Windows you can drag and resize, menus, dialogs, an editor with syntax
+colours, a two-panel file manager - all drawn with characters, the way DOS
+programs were. One core, written in Rust, draws all of it. Programs in C#,
+JavaScript, Rust, Pascal, C and assembler use that core, and the same
+windows appear on a Windows console, in a window of their own, in a
+browser and on DOS.
 
-| A native Windows window | A browser | DOS |
+## See it
+
+| On DOS: the demo | On DOS: the file manager |
+|---|---|
+| ![The demo on DOS: calculator, calendar, ASCII table, puzzle](Examples/screens/dos_demo.png) | ![A two-panel file manager on DOS, three files marked, asking before it copies](Examples/screens/dos_commander.png) |
+| **On DOS: the editor, coloured as Pascal** | **On Windows: a window of its own** |
+| ![The file manager's editor showing Pascal source in colour](Examples/screens/dos_editor.png) | ![The C# demo in a native Windows window, a dialog of controls](Examples/screens/window.png) |
+| **In a browser: opening a file from the server** | **In a browser: the same file in the editor** |
+| ![The browser demo's Open dialog, explaining where the files are](Examples/screens/browser_open.png) | ![Pascal source in the browser editor, in colour](Examples/screens/browser_code.png) |
+| **In a browser: the editor's own Edit menu** | **On DOS: the shared Rust application** |
+| ![The Edit menu: undo, find, replace, syntax, word wrap, hex view](Examples/screens/browser_menu.png) | ![The Rust application in DOSBox-X](Examples/screens/dos.png) |
+
+## Try it
+
+Double-click one of these in the repository's folder - or type its name
+in a console there. Each one checks that what it needs is installed, and
+says where to get it if not. The first run of a C#, Rust or browser one
+builds first, which takes a minute or two.
+
+| Double-click | What you see | Needs |
 |---|---|---|
-| ![window](Examples/screens/window.png) | ![browser](Examples/screens/browser.png) | ![dos](Examples/screens/dos.png) |
+| `CS_Demo.cmd` | the C# demo in the console: every tool and control | [.NET 8 SDK](https://dotnet.microsoft.com/download), [Rust](https://rustup.rs) |
+| `CS_Window.cmd` | the same demo in a window of its own | .NET 8 SDK, Rust |
+| `CS_Commander.cmd` | a two-panel file manager in C#, on real files | .NET 8 SDK, Rust |
+| `Rust_Terminal.cmd` | the Rust demo in the console | Rust |
+| `Rust_Window.cmd` | the Rust application in a window | Rust |
+| `Web_Demo.cmd` | the demo in your browser, at http://localhost:8765 | Rust, and once `rustup target add wasm32-unknown-unknown` |
+| `DOS_Pascal_Demo.cmd` | the demo on DOS, written in Pascal | [DOSBox-X](https://dosbox-x.com) |
+| `DOS_C_Demo.cmd` | the same demo, written in C | DOSBox-X |
+| `DOS_Asm_Demo.cmd` | the same demo, written in assembler | DOSBox-X |
+| `DOS_Rust_Demo.cmd` | the same demo, written in Rust | DOSBox-X |
+| `DOS_Commander.cmd` | the file manager on DOS, in Pascal | DOSBox-X |
 
-## Where to start
+The DOS programs are already built and in the repository, so the DOS ones
+need nothing but the emulator. In DOSBox-X the repository is drive C:.
+When a DOS program has ended, close DOSBox-X's window.
+
+In the demos **F10** opens the menu bar and **Alt+X** leaves; in the file
+managers the keys along the bottom say what they do, and **F10** quits.
+Everywhere **Tab** moves between the parts of a dialog, **F1** is help,
+and the mouse works.
+
+## What is where
+
+```
+CS_Demo.cmd ... DOS_Commander.cmd    the launchers above
+Examples/                            every program that uses the toolkit
+    Desktop/                         on Windows: C# (six steps), Rust
+    Web/                             in a browser: JavaScript (five steps), Rust
+    DOS/                             on DOS: assembler, C, Pascal, Rust,
+                                     and the file manager, Commandr
+    screens/                         the pictures on this page
+lib/                                 the toolkit itself
+```
+
+Every folder has a README that says what is in it and how to build and
+run it, and every program says in its first lines which step it is and
+where the next one is. Read on below for how the toolkit is built.
+
+## For programmers: where to start
 
 The toolkit is in [lib/](lib/README.md). Everything that uses it is in
 [Examples/](Examples/README.md), by where it runs and then by language:
@@ -55,7 +112,7 @@ translates — and the backend is the only thing that needs to.
 lib/                  the toolkit
     core/             no dependencies, ever. Cell grid, view tree, event dispatch.
     console/          the terminal screen, the code pages; owlosui-match, which
-                      checks scenes against real Turbo Vision
+                      checks scenes against reference DOS screens
     window/           the Windows window screen: CreateWindow and GDI
     serve/            the core behind a pipe, speaking PROTOCOL.md
     csharp/           the C# client of that pipe, the core carried inside it
@@ -74,7 +131,11 @@ Examples/             everything that uses it
                       HELLO and the demo, the same in each, through the resident
     DOS/Rust          HELLO and the demo with the core linked in, and the shared
                       application: flat binaries under DPMI
+    DOS/Commandr      a two-panel file manager in Pascal, through the resident
     shared/app.rs     the one Rust application the window, the web and DOS draw
+    screens/          the pictures in the READMEs
+
+*.cmd                 the launchers: CS_, Rust_, Web_ and DOS_ something
 ```
 
 ## A program
@@ -140,8 +201,8 @@ when it is one we have; the terminal demo reads the same variable.
 ## Checking against the real thing
 
 Several scenes exist twice: here, and in `TOOLS/REFGEN/REFGEN.PAS` in the
-wire-city repository, where they are built with the actual Borland Turbo
-Vision units and dumped straight out of video memory. Then:
+wire-city repository, where the same scenes are built with the classic DOS
+toolkit they follow and dumped straight out of video memory. Then:
 
 ```
 cargo run -p owlosui-console --bin owlosui-match -- one-window path/to/REF01.BIN --rows 1:23
@@ -178,7 +239,7 @@ window's fill.
   point.
 * **Keys are a table, not code.** The core exposes primitives (`toggle_zoom`,
   `cycle_windows`, `close`); which key invokes which belongs to the
-  application. Borland shipped four keymaps for one editor this way.
+  application. The classic DOS editors shipped four keymaps for one editor this way.
 * **No callbacks out of the core.** Results are collected — `take_pressed`,
   `take_command`, `pending` — never delivered. That is what lets the same
   core sit behind a pipe, an interrupt or a WebAssembly boundary unchanged.
@@ -186,7 +247,7 @@ window's fill.
 ## Editing
 
 The editor holds no key codes. It knows commands with names — `WordRight`,
-`DeleteLine` — and a table turns keys into them. That is how Borland shipped
+`DeleteLine` — and a table turns keys into them. That is how the classic DOS editors shipped
 four arrangements for one editor; here there are two, `Keymap::Classic` (the
 WordStar control diamond) and `Keymap::Modern` (Ctrl+C/V/Z), with the CUA
 clipboard keys in both because Ctrl+C is taken by the signal in a terminal.
@@ -232,9 +293,9 @@ native Windows window, a browser canvas and DOS; the pipe server, its C#
 client (published as one .exe with the core inside, on a console or in a
 window) and its JavaScript client (the server as WebAssembly); the
 resident, the same server behind INT 60h on DOS, with clients in
-assembler, C and Pascal; comparison against real Turbo Vision.
+assembler, C and Pascal; comparison against reference DOS screens.
 
-Also there, as Turbo Vision had them: numbered windows and Alt+1..9,
+Also there, as the classic DOS desktops had them: numbered windows and Alt+1..9,
 the window list on Alt+0, Shift+F6, Ctrl+F5 to move or resize from the
 keyboard, cascade and tile, double clicks, a hint per menu item on the
 status line, input-line history, a colour dialog over the palette, a tree
@@ -247,6 +308,6 @@ programs can share one.
 
 ## Licence
 
-MIT OR Apache-2.0. Nothing here is derived from Borland's or Free Vision's
+MIT OR Apache-2.0. Nothing here is derived from any other toolkit's
 source; the design is reconstructed from published documentation and from the
 behaviour of the original programs.

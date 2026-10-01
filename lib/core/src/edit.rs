@@ -1,7 +1,7 @@
 //! Editing.
 //!
 //! Two decisions shape this file, and both were taken by looking at how
-//! Borland did it.
+//! the classic DOS editors did it.
 //!
 //! **Every change to the text is one operation.** `splice` replaces a span
 //! with new lines and hands back what was there. Typing a character, pressing
@@ -11,7 +11,7 @@
 //! is the one that corrupts a file.
 //!
 //! **Commands are named and separate from keys.** The editor knows
-//! `Cmd::WordRight`; it does not know Ctrl+Right. That is how Borland shipped
+//! `Cmd::WordRight`; it does not know Ctrl+Right. That is how the classic DOS editors shipped
 //! four keymaps for one editor, it is how we can ship an authentic one and a
 //! modern one, and it is why a test can be a script of command names rather
 //! than a simulation of somebody's fingers.
@@ -41,7 +41,7 @@ pub mod offer {
     pub const READONLY: u8 = 16;
     /// Hex view: the same text as bytes.
     pub const HEX: u8 = 32;
-    /// Classic keys: Borland's WordStar arrangement, or the modern one.
+    /// Classic keys: the WordStar arrangement, or the modern one.
     pub const KEYS: u8 = 64;
     /// Syntax: the language the text is coloured as, chosen from a list.
     pub const SYNTAX: u8 = 128;
@@ -57,7 +57,7 @@ pub mod state {
     pub const WRAP: u8 = 1;
     /// A viewer: nothing typed changes the text.
     pub const READONLY: u8 = 2;
-    /// Borland's keys rather than the modern ones.
+    /// The WordStar keys rather than the modern ones.
     pub const CLASSIC: u8 = 4;
     /// Shown as bytes.
     pub const HEX: u8 = 8;

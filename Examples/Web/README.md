@@ -1,6 +1,16 @@
 # Web
 
-Programs in a browser page. Start here:
+Programs in a browser page.
+
+**Quickest:** double-click `Web_Demo.cmd` in the repository's root. It
+needs [Rust](https://rustup.rs) and, once, Rust's WebAssembly target, and
+says how to add it if it is missing.
+
+| Opening a file | The file in the editor |
+|---|---|
+| ![The browser demo's Open dialog](../screens/browser_open.png) | ![Pascal in colour in the browser editor](../screens/browser_code.png) |
+
+From a console, the same thing:
 
 ```
 Examples\Web\RUN.CMD

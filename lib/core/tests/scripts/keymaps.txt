@@ -5,7 +5,7 @@
 # editor: shipping an authentic keymap and a usable one costs a file, not a
 # fork.
 
-# --- Borland's -------------------------------------------------------------
+# --- Classic, WordStar's -----------------------------------------------------
 # Ctrl+E/S/D/X are a diamond under the left hand, and look arbitrary only if
 # you have not seen a WordStar keyboard.
 keymap  classic

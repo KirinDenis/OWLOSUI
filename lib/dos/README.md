@@ -38,7 +38,7 @@ this.
 
 It needs a 386 and 32-bit DPMI: a real machine with CWSDPMI, or DOSBox-X.
 Plain DOSBox has no 32-bit DPMI. The program it runs may be any real-mode
-DOS program: a `.COM` from FASM, an `.EXE` from Turbo Pascal or Watcom.
+DOS program: a `.COM` from FASM, an `.EXE` from a Pascal compiler or Watcom.
 
 ## The call
 

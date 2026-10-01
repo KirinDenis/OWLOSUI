@@ -179,13 +179,13 @@ pub struct FileList {
     /// Set when a file was chosen or a directory entered. The application
     /// takes it and decides what that means.
     pub chosen: Option<String>,
-    /// Insert marks the file under the cursor and moves on - Norton's way,
+    /// Insert marks the file under the cursor and moves on - the classic file managers' way,
     /// and the reason a two-panel file manager can be built on this. Marks
     /// belong to entries, not to rows, so a new mask does not lose them.
     pub multi: bool,
     marked: Vec<bool>,
     /// Show the path-and-mask line above the names. An Open dialog wants
-    /// it; a commander's panel does not - people who grew up on Norton read
+    /// it; a commander's panel does not - people who grew up on DOS file managers read
     /// a `*.*` at the top of a panel as something gone wrong, and they
     /// navigate by Enter, not by typing. Without it the names start on the
     /// first row and the foot still says where you are.
@@ -338,7 +338,7 @@ impl FileList {
     /// The gaps replace the rules we drew before. A coloured panel butted
     /// against the dialog's frame looks like a hole cut in the dialog; the
     /// same panel with a margin around it looks like something sitting on it,
-    /// which is what it is. Turbo Vision's own file dialog is built this way
+    /// which is what it is. The classic file dialogs were built this way
     /// and it is why a grey dialog holding a blue list reads as one object.
     /// `screen_w` is how wide the whole screen is, which is what decides how
     /// many columns the panel gets.
@@ -464,6 +464,16 @@ impl FileList {
             .and_then(|&e| self.marked.get(e))
             .copied()
             .unwrap_or(false)
+    }
+
+    /// The cursor on the first name in the folder that is not `..`: where
+    /// a person who has just gone into a folder, or up out of one, wants to
+    /// start. An empty folder has only `..`, and the cursor stays on it.
+    pub fn cursor_to_first_name(&mut self) {
+        self.current = (0..self.view.len())
+            .find(|&i| self.entries[self.view[i]].name != "..")
+            .unwrap_or(0);
+        self.reveal();
     }
 
     /// No marks at all: after the marked files were copied, moved or

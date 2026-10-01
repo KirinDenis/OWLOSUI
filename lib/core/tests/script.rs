@@ -16,7 +16,7 @@
 //! # anything                   a comment
 //! ```
 //!
-//! This is the shape Borland's editor had: a set of named primitives with the
+//! This is the shape the classic DOS editors had: a set of named primitives with the
 //! keyboard bolted on top as data. That made four keymaps possible for them,
 //! and it makes these tests possible for us — `cmd` drives the editor with no
 //! keyboard at all, and `keys` then checks that a particular arrangement of

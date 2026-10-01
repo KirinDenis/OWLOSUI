@@ -501,7 +501,7 @@ fn a_window_dragged_off_the_edge_stays_reachable() {
         mouse(&mut c, 2, x + 2 + dx, y + dy);
         mouse(&mut c, 1, x + 2 + dx, y + dy);
         let g = frame(&mut c);
-        // Turbo Vision let a window go all but one column off the side, and
+        // The classic desktops let a window go all but one column off the side, and
         // so does this. What matters is that the column left is part of the
         // title row, so the mouse can bring it back - which is the proof.
         let ty = (0..g.h)
@@ -1391,4 +1391,42 @@ fn a_window_is_asked_for_in_order() {
     c.ok(0x01, &[i16(40), i16(12), u16(437)].concat());
     let e = c.err(0x5C, &[]);
     assert!(e.contains("OPEN_WINDOW"), "WAIT with no window said: {e}");
+}
+
+#[test]
+fn another_folder_starts_on_its_first_name_and_drops_the_marks() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 80, 24), vec![0], s("Files")].concat()));
+    // name, size, date, attributes: 0x10 a folder.
+    let entry = |name: &str, attrs: u8| [s(name), 3u32.to_le_bytes().to_vec(), u16(2026).to_vec(), vec![9, 27, 12, 0, attrs]].concat();
+    let list = |names: &[(&str, u8)]| {
+        let mut p = u16(names.len() as u16).to_vec();
+        for (n, a) in names {
+            p.extend(entry(n, *a));
+        }
+        p
+    };
+    let current = |c: &mut Client, files: u16| {
+        let r = c.ok(0x28, &u16(files));
+        let n = u16::from_le_bytes([r[2], r[3]]) as usize;
+        String::from_utf8(r[4..4 + n].to_vec()).unwrap()
+    };
+    // A panel with marks, on C:\A: it starts on ..
+    let files = id_of(&c.ok(0x1A, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![1], s("*.*"), s(r"C:\A\*.*"),
+        list(&[("..", 0x10), ("ONE.TXT", 0)])].concat()));
+    assert_eq!(current(&mut c, files), "..");
+    // Down, Insert marks ONE.TXT.
+    c.ok(0x30, &[2, 12, 0, 0]);
+    c.ok(0x30, &[2, 6, 0, 0]);
+    // Into C:\A\SUB: the cursor on its first name, the mark gone.
+    c.ok(0x25, &[u16(files).to_vec(), s(r"C:\A\SUB\*.*"), s("*.*"), list(&[("..", 0x10), ("DEEP", 0x10), ("ONE.TXT", 0)])].concat());
+    assert_eq!(current(&mut c, files), "DEEP", "the first name, not ..");
+    // The same folder read again keeps the cursor where it is.
+    c.ok(0x30, &[2, 12, 0, 0]);
+    c.ok(0x25, &[u16(files).to_vec(), s(r"C:\A\SUB\*.*"), s("*.*"), list(&[("..", 0x10), ("DEEP", 0x10), ("ONE.TXT", 0)])].concat());
+    assert_eq!(current(&mut c, files), "ONE.TXT");
+    // An empty folder: only .., and the cursor on it.
+    c.ok(0x25, &[u16(files).to_vec(), s(r"C:\A\SUB\DEEP\*.*"), s("*.*"), list(&[("..", 0x10)])].concat());
+    assert_eq!(current(&mut c, files), "..");
 }

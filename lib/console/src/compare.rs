@@ -1,4 +1,4 @@
-//! Compare what we draw with what Turbo Vision drew.
+//! Compare what we draw with what the reference DOS program drew.
 //!
 //! A reference file is 4000 bytes — 2000 cells of glyph byte then attribute
 //! byte, straight out of video memory. We render the same scene and walk both

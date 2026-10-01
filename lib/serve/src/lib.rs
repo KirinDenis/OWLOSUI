@@ -946,13 +946,24 @@ impl Server {
                 match self.ui()?.kind_mut(id) {
                     Kind::Files(f) => {
                         // Another folder: its names are other files, and a
-                        // mark carried over by name would be on the wrong one.
-                        if f.path_text() != path {
+                        // mark carried over by name would be on the wrong
+                        // one. The cursor starts on its first name, not on
+                        // the `..` that leads back where the person was.
+                        let another = f.path_text() != path;
+                        if another {
                             f.clear_marks();
                         }
-                        f.set_mask(&mask);
+                        // A new mask starts the cursor over; the same one
+                        // must not, or a folder read again after a copy
+                        // throws the cursor back to the top.
+                        if f.mask != mask {
+                            f.set_mask(&mask);
+                        }
                         f.set_entries(entries);
                         f.set_path(&path);
+                        if another {
+                            f.cursor_to_first_name();
+                        }
                         f.error = None;
                     }
                     _ => return Err(format!("view {} is not a file panel", id.raw())),
@@ -1017,7 +1028,7 @@ impl Server {
 
             op::MARKED_NAMES => {
                 // The marked files - or, with none marked, the one under the
-                // cursor, which is what F5 in Norton Commander copied.
+                // cursor, which is what F5 in the classic file managers copied.
                 let id = r.id("id")?;
                 let id = self.alive(id)?;
                 let names = match self.ui()?.kind(id) {

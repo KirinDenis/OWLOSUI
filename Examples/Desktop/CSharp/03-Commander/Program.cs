@@ -1,7 +1,7 @@
 // Desktop, C# step 3 of 6 - a two-panel file manager: marks, copy, move, a tree of the drive.
 // Before: 02-Notes. Next: 04-Basez-Sokoban, a game on a canvas.
 //
-// A two-panel file manager, in the shape of Norton Commander.
+// A two-panel file manager, in the classic DOS shape.
 //
 // Two file panels side by side, Tab between them, Insert to mark. F3 views
 // the file under the cursor, F4 edits it, F5 copies the marked files (or the
@@ -138,7 +138,7 @@ public sealed class App
         p.Window = owl.Window(Fit(dir, w - 12), w, h, x, y, closeCmd: CmQuit, shadow: false);
         // The panel fills the window and marks are allowed: that is what
         // makes it a file manager rather than an Open dialog. And no path
-        // line above the names: people who grew up on Norton read a `*.*`
+        // line above the names: people who grew up on DOS file managers read a `*.*`
         // at the top of a panel as something gone wrong. They navigate by
         // Enter, and the foot of the panel says where they are.
         p.Files = owl.Files(p.Window, dir, Owlosui.ReadDirectory(dir), p.Mask, multi: true, pathLine: false);
@@ -246,7 +246,7 @@ public sealed class App
                 var act = onYes;
                 onYes = null;
                 // The marks are used up once their files are dealt with, as
-                // Norton's were; a failure leaves them, to try again.
+                // in the classic file managers; a failure leaves them, to try again.
                 var from = Active;
                 try
                 {
@@ -465,7 +465,7 @@ public sealed class App
 
     /// <summary>
     /// What F5, F6 and F8 act on: the marked names, or the one under the
-    /// cursor if none are marked - Norton's rule - as full paths. Never
+    /// cursor if none are marked - the classic rule - as full paths. Never
     /// `..`, and only things that still exist, since a listing can be older
     /// than the folder.
     /// </summary>

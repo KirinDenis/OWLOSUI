@@ -1,7 +1,7 @@
 //! Syntax colours.
 //!
 //! A language is a few lines of an INI file - its comments, its strings, its
-//! keywords - and not a grammar. That is all Borland's editors knew, and it
+//! keywords - and not a grammar. That is all the classic DOS editors knew, and it
 //! is enough for the eye: what matters when reading code on a 16-colour
 //! screen is which words are the language's, what is said to a person
 //! rather than to the machine, and where a string ends. It also fits: no

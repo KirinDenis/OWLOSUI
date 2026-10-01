@@ -1,7 +1,7 @@
 //! A window carries its keys and its menu items: they are on the status
 //! line and the bar, and bound, only while the window is the active one.
 //!
-//! Turbo Vision changed its status line by help context; here the window
+//! The classic toolkits changed the status line by help context; here the window
 //! simply says what it brings, and the desktop composes the bars before
 //! every event and every frame.
 

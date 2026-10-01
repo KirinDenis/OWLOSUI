@@ -2,8 +2,8 @@
 //!
 //! Each one here is built again, by hand, in `TOOLS/REFGEN/REFGEN.PAS` in the
 //! wire-city repository — same coordinates, same titles, same numbers — and
-//! compiled against the real Turbo Vision units. Running that produces a dump
-//! of what Turbo Vision actually drew; `--match` renders the scene of the same
+//! compiled against the classic DOS toolkit. Running that produces a dump
+//! of what that toolkit actually drew; `--match` renders the scene of the same
 //! name here and says which cells disagree.
 //!
 //! Keeping the two definitions in step is the price of the method, and it is
@@ -20,7 +20,7 @@ pub fn build(name: &str) -> Option<Ui> {
     let root = ui.root();
 
     // Every rectangle here is one row lower than the one in REFGEN.PAS, and
-    // deliberately so: Turbo Vision's coordinates are the desktop's, and the
+    // deliberately so: the reference's coordinates are the desktop's, and the
     // desktop begins below the menu bar. We have no menu bar yet, so our
     // desktop starts at row 0. When MenuBar becomes a real view this offset
     // comes back out — and the comparison will say so the moment it does.
@@ -51,7 +51,7 @@ pub fn build(name: &str) -> Option<Ui> {
         // arrived at from the other end.
         //
         // This scene does not reach zero, and the reason is worth keeping.
-        // The reference window is *empty* — Turbo Vision needs no content to
+        // The reference window is *empty* — the reference toolkit needs no content to
         // own a scrollbar — while ours must hold a view, because our window
         // asks its first child how far it has scrolled. So 728 cells of blank
         // content come out 0x1E where the reference has 0x1F. Both are blue on

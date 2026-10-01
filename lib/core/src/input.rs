@@ -29,7 +29,7 @@ pub struct InputLine {
     pub entered: bool,
     /// What has been entered here before, newest first. Down opens it as
     /// a list under the field, and so does the `▼` at the field's end.
-    /// Turbo Vision's `THistory`, without the separate view.
+    /// The classic history list, without the separate view.
     pub history: Vec<String>,
 }
 

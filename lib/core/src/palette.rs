@@ -6,16 +6,16 @@
 //! people will want to break. Do not give them a way to set a colour directly
 //! on an element; give them a different palette.
 //!
-//! Windows come in three families, as Turbo Vision's did: blue for documents,
+//! Windows come in three families, as the classic DOS toolkits had them: blue for documents,
 //! cyan for help, grey for dialogs. A window says which family it belongs to
 //! and everything in it — frame, body, scrollbar, text — follows. That is why
-//! a help window in Borland Pascal is cyan *including its frame*, and why
+//! a classic DOS help window is cyan *including its frame*, and why
 //! colouring only the body leaves you with the wrong window holding the right
 //! contents.
 //!
 //! The numbers were not chosen by eye. The blue set was read out of video
-//! memory while the real Turbo Vision was drawing; the cyan set is written
-//! down in `HELPFILE.PAS` as `CHelpColor`.
+//! memory while a classic DOS program was drawing; the cyan set is the one
+//! its help windows were defined with.
 
 // `no_std` needs these named; with `std` they are the prelude's.
 #[allow(unused_imports)]
@@ -80,7 +80,7 @@ pub struct Palette {
     /// A file list, coloured by what the extension says the file is for.
     ///
     /// These are ours, not measured. Volkov Commander's own palette we have
-    /// not read out of a running copy the way we did Turbo Vision's, and until
+    /// not read out of a running copy the way we did the classic desktop's, and until
     /// we do these are a choice and are marked as one.
     pub file_dir: u8,
     pub file_exe: u8,
@@ -150,7 +150,7 @@ pub struct Palette {
     pub label: u8,
     pub label_key: u8,
     pub label_active: u8,
-    /// A marked item in a list or a file panel - yellow, as Norton had it.
+    /// A marked item in a list or a file panel - yellow, as the classic file managers had it.
     pub list_marked: u8,
 
     /// Syntax colours, on a document's blue. In a window of another family
@@ -206,7 +206,7 @@ impl Palette {
             // quarter coverage this averages to the pale lavender everyone
             // remembers; inverting the nibbles gives a dark navy instead, and
             // that one swapped nibble is the whole difference between "looks
-            // like Turbo Vision" and "looks like something else".
+            // like the classic DOS desktop" and "looks like something else".
             desktop: attr(Color::Blue, Color::LightGray),
             shadow: attr(Color::DarkGray, Color::Black),
 
@@ -232,7 +232,7 @@ impl Palette {
                 link_focus: attr(Color::White, Color::Blue),
             },
 
-            // Help. This is `CHelpColor` from HELPFILE.PAS, unchanged:
+            // Help. The classic help colours, unchanged:
             //   37 3F 3A 13 13 30 3E 1E
             // Note the scrollbar — cyan on blue, the other way round from a
             // document window's. Nothing here is arbitrary: on a cyan body the
@@ -322,7 +322,7 @@ impl Palette {
             // should be read rather than recoiled from.
             file_error: attr(Color::Red, Color::LightGray),
 
-            // Green, as Turbo Vision's were, and brighter under the focus.
+            // Green, as the classic buttons were, and brighter under the focus.
             // Not measured: we have no reference screen with a focused button
             // on it, and these are marked a choice until we take one.
             button: attr(Color::Black, Color::Green),
@@ -365,7 +365,7 @@ impl Palette {
             label_active: attr(Color::White, Color::LightGray),
             list_marked: attr(Color::Yellow, Color::Blue),
 
-            // Chosen, not measured, in the spirit of Borland's IDEs: the
+            // Chosen, not measured, in the spirit of the classic DOS IDEs: the
             // text stays the editor's yellow, the language's own words are
             // white, and what is written for a person rather than for the
             // machine - a comment - steps back into grey.

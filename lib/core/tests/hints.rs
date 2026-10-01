@@ -1,5 +1,5 @@
 //! A menu item's hint on the status line, and an input line's history.
-//! Two small Turbo Vision things: `getHint`, and `THistory`.
+//! Two small classic things: a menu hint, and an input history.
 
 use owlosui_core::{
     Button, Event, InputLine, Key, KeyCode, Kind, MenuBar, MenuItem, Mods, Mouse, MouseKind, Rect, StatusItem,

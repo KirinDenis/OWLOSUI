@@ -311,7 +311,7 @@ export class App {
       case CmExit: return false;
       case CmHelp:
       case CmAbout:
-        this.tell('OWLOS UI Demo', 'A Turbo Vision-shaped toolkit with one portable core: this page is JavaScript, ' +
+        this.tell('OWLOS UI Demo', 'A text mode toolkit in the classic DOS style, with one portable core: this page is JavaScript, ' +
           'every window in it is drawn by a Rust core compiled to WebAssembly, and the same core runs on a ' +
           'terminal, in a Windows window and on DOS.');
         return true;

@@ -323,7 +323,7 @@ fn the_hex_view_stands_in_for_the_text_and_gives_it_back() {
 }
 
 #[test]
-fn classic_keys_from_the_menu_and_borlands_ctrl_q_f() {
+fn classic_keys_from_the_menu_and_the_ctrl_q_f_chord() {
     let mut ui = desk(true);
     let (_, t) = editor(&mut ui, "abc def", 40, 10);
     ui.set_editor(t, offer::KEYS | offer::FIND, 0);

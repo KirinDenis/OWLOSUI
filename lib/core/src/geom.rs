@@ -20,7 +20,7 @@ impl Point {
 
 /// A rectangle given by its top-left corner and its size.
 ///
-/// Turbo Vision stored two corners (`TRect.A` / `TRect.B`); we store origin
+/// The classic toolkits stored two corners; we store origin
 /// plus extent because every layout calculation we do is about sizes, and
 /// `w`/`h` are then never a subtraction away.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

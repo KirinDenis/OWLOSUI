@@ -195,7 +195,7 @@ public sealed class Owlosui : IDisposable
         Wrap = 8,        // Word wrap, ticked while on
         ReadOnly = 16,   // Read only, ticked while on
         Hex = 32,        // the same text as bytes
-        Keys = 64,       // Classic keys: Borland's WordStar arrangement
+        Keys = 64,       // Classic keys: the WordStar arrangement
         Syntax = 128,    // Syntax: the language the text is coloured as
         All = 255,
     }
@@ -737,7 +737,7 @@ public sealed class Owlosui : IDisposable
     /// <summary>Tick or untick the menu item that sends a command - an option that is on.</summary>
     public void MenuCheck(ushort cmd, bool on) => Call(Op.MenuCheck, W.U16(cmd), new[] { (byte)(on ? 1 : 0) });
 
-    /// <summary>The front window goes to the back: Turbo Vision's F6.</summary>
+    /// <summary>The front window goes to the back: the classic F6.</summary>
     public void NextWindow() => Call(Op.Cycle);
 
     /// <summary>The window at the back comes to the front: Shift+F6.</summary>
@@ -1094,7 +1094,7 @@ public sealed class Owlosui : IDisposable
                 {
                     // A button a key just pressed is on the screen, down.
                     // Leave it there long enough to be seen, then let it
-                    // happen. Turbo Vision did the same for a menu item.
+                    // happen. The classic menus did the same for an item.
                     Thread.Sleep(90);
                     Tick();
                     var (p, c) = Take();

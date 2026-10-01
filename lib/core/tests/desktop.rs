@@ -1,6 +1,6 @@
 //! Cascade and tile: the desktop arranging its windows.
 //!
-//! Turbo Vision put both on the desktop and not in the application, and
+//! The classic toolkits put both on the desktop and not in the application, and
 //! so does this: the desktop knows which windows there are, which may
 //! move and which one is modal.
 

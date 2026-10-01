@@ -4,7 +4,7 @@
       RUN               both sides on the folder you are in
       RUN C:\ D:\       the left side on C:\, the right side on D:\
 
-  Norton Commander's shape: two folders side by side, and the keys along
+  The classic DOS file manager's shape: two folders side by side, and the keys along
   the bottom say what they do.
 
       Tab       the other side          Enter   into a folder, .. back out;
@@ -14,7 +14,7 @@
                 Alt+F10 the drive as a tree, and the other side follows it
 
   F5, F6 and F8 work on the marked files, or on the one under the cursor
-  when none are marked - Norton's rule. Copy and move go to the other side.
+  when none are marked - the classic rule. Copy and move go to the other side.
 
   The same program is Examples\Desktop\CSharp\03-Commander, in C#. What is
   different here is who reads the disk: every folder, file and drive is
@@ -846,7 +846,7 @@ begin
     of the language its name says. }
   OwlEditor(EditorText, OfferAll, 0);
   OwlSyntax(EditorText, Name);
-  OwlWindowStatus(Editor, 1);           { F2 saves, as it did in Norton's editor }
+  OwlWindowStatus(Editor, 1);           { F2 saves, as it did in the classic editors }
   OwlKey('', CmSave, KeyF, 2, 0);
   OwlEnd;
   OwlButtons(Editor, 2);
@@ -1009,7 +1009,7 @@ begin
           CmDelete: DeleteItems;
         end;
         { The marks are used up once their files are dealt with, as
-          Norton's were; a failure leaves them, to try again. }
+          in the classic file managers; a failure leaves them, to try again. }
         if Failure = '' then
           case Side of
             1: if Left.Files <> 0 then OwlUnmark(Left.Files);

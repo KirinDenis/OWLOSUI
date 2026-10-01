@@ -152,7 +152,7 @@ public sealed class App
             case CmExit: return false;
             case CmHelp:
             case CmAbout:
-                Tell("OWLOS UI Demo", "A Turbo Vision-shaped toolkit with one portable core: this program is C#, " +
+                Tell("OWLOS UI Demo", "A text mode toolkit in the classic DOS style, with one portable core: this program is C#, " +
                      "every window in it is drawn by a Rust core behind a pipe, and the same core is " +
                      "meant for a terminal, a browser and a DOS machine.");
                 return true;

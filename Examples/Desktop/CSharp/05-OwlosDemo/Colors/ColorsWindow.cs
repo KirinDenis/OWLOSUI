@@ -18,7 +18,7 @@
 // first rule the toolkit keeps - and this is the dialog that rule makes
 // possible: pick a role on the left, click a colour on the right, and
 // everything that plays the role changes on the next frame, this dialog
-// included. Turbo Vision's demo had the same dialog for the same reason.
+// included. The classic toolkits' demos had the same dialog for the same reason.
 //
 // Cancel puts back what was there when the dialog opened; OK keeps it.
 // Nothing is written anywhere - a program that wants a theme kept reads

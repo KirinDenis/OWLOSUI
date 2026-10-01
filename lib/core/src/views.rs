@@ -14,7 +14,7 @@ use crate::status::StatusItem;
 
 /// The patterned background everything else sits on.
 pub struct Desktop {
-    /// The fill character. `░` is what Turbo Vision used; `▒` and `▓` are the
+    /// The fill character. `░` is what the classic DOS desktops used; `▒` and `▓` are the
     /// other two shades, and any glyph is legal.
     pub glyph: crate::cell::Glyph,
 }
@@ -50,7 +50,7 @@ pub struct Window {
     /// keys and clicks outside it do nothing at all, rather than quietly doing
     /// something in a window nobody is looking at.
     pub modal: bool,
-    /// Shown near the right end of the top edge. Borland numbered windows so
+    /// Shown near the right end of the top edge. The classic DOS desktops numbered windows so
     /// Alt+1..Alt+9 could reach them; the number in the frame is what makes
     /// that shortcut discoverable instead of secret.
     pub number: Option<u8>,
@@ -87,7 +87,7 @@ pub struct Window {
     pub centred: bool,
     /// What the close box sends instead of closing, if not zero.
     ///
-    /// Turbo Vision's `[■]` sent `cmClose`, and a program could refuse it -
+    /// The classic `[■]` sent a close command, and a program could refuse it -
     /// which is how "save changes?" got asked. With zero here the box just
     /// closes the window; with a command the program hears about it and
     /// decides. An editor with unsaved text wants the second.
@@ -96,7 +96,7 @@ pub struct Window {
     pub(crate) unzoomed: Option<Rect>,
     /// What this window adds to the status line while it is the active
     /// one: its own keys, bound and shown, and gone when it is not.
-    /// Turbo Vision changed the status line by help context; a window
+    /// The classic DOS toolkits changed the status line by help context; a window
     /// that carries its keys with it is the same idea with less
     /// machinery.
     pub status: Vec<StatusItem>,
@@ -174,9 +174,9 @@ pub struct TextView {
     /// through — so it cannot drift out of step with the text. Cleared by
     /// whoever saves, because only they know it happened.
     pub modified: bool,
-    /// Draw a bar across the caret line. Off by default: Borland's editors
+    /// Draw a bar across the caret line. Off by default: the classic DOS editors
     /// never did this, and a full-width highlight is the single thing that
-    /// makes a screen stop looking like Turbo Vision.
+    /// makes a screen stop looking like a classic DOS program.
     pub highlight_line: bool,
     /// Long lines folded at the view's right edge - at a space when the row
     /// has one, in the middle of the word when it has none. Only the picture
@@ -331,7 +331,7 @@ pub enum Dock {
     BottomRight(i16, i16),
     /// Left exactly where it was put, relative to the parent's client area.
     ///
-    /// The escape hatch, and the one every Turbo Vision dialog used for
+    /// The escape hatch, and the one every classic DOS dialog used for
     /// everything: its parts had their rectangles worked out by hand. It is
     /// honest for a dialog whose contents are known and fixed, and it is the
     /// wrong tool the moment anything has to grow.

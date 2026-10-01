@@ -97,7 +97,7 @@ OFFER_REPLACE   = 04h           ; Replace... Ctrl+H
 OFFER_WRAP      = 08h           ; Word wrap
 OFFER_READONLY  = 10h           ; Read only
 OFFER_HEX       = 20h           ; the same text as bytes
-OFFER_KEYS      = 40h           ; Classic keys: Borland's WordStar arrangement
+OFFER_KEYS      = 40h           ; Classic keys: the WordStar arrangement
 OFFER_SYNTAX    = 80h           ; Syntax: the language the text is coloured as
 OFFER_ALL       = 0FFh
 ; ---- and how it is set --------------------------------------------------------

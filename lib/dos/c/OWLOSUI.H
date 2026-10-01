@@ -60,7 +60,7 @@ typedef unsigned short owl_id;          /* a view; 0 is the desktop */
 #define OWL_OFFER_WRAP     0x08         /* Word wrap */
 #define OWL_OFFER_READONLY 0x10         /* Read only */
 #define OWL_OFFER_HEX      0x20         /* the same text as bytes */
-#define OWL_OFFER_KEYS     0x40         /* Classic keys: Borland's WordStar arrangement */
+#define OWL_OFFER_KEYS     0x40         /* Classic keys: the WordStar arrangement */
 #define OWL_OFFER_SYNTAX   0x80         /* Syntax: the language the text is coloured as */
 #define OWL_OFFER_ALL      0xFF
 /* ---- and how it is set ---- */

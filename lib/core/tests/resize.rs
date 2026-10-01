@@ -3,7 +3,7 @@
 //! Found by a person dragging the console window: everything vanished. The
 //! old `resize` shrank every window to fit the new screen and never grew one
 //! back, so a console taken down to a sliver and restored came back empty.
-//! Turbo Vision's answer was `gfGrowAll` - a window keeps its top-left
+//! The classic answer was to grow with the desktop - a window keeps its top-left
 //! corner and its far edges follow the desktop's - and that is what this is.
 
 use owlosui_core::{Buffer, Event, Kind, Rect, TextView, Ui, Window};

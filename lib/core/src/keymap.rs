@@ -4,7 +4,7 @@
 //! the mapping, and there are two of them because there are two kinds of
 //! person who will use this.
 //!
-//! `classic` is the Borland arrangement — WordStar control keys, `Ctrl+Y` to
+//! `classic` is the old DOS editors' arrangement — WordStar control keys, `Ctrl+Y` to
 //! delete a line, `Ctrl+K B` to mark a block. `modern` is what someone who has
 //! never seen a DOS editor will try first: `Ctrl+C`, `Ctrl+V`, `Ctrl+Z`,
 //! Shift and an arrow to select.
@@ -83,7 +83,7 @@ fn shared(k: Key) -> Option<Bound> {
     Some((cmd, s && cmd.is_movement()))
 }
 
-/// Borland's. WordStar underneath, which is why it looks arbitrary until you
+/// The old DOS editors'. WordStar underneath, which is why it looks arbitrary until you
 /// know that Ctrl+E/S/D/X are a diamond under the left hand.
 fn classic(k: Key) -> Option<Bound> {
     if !k.mods.ctrl {

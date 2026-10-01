@@ -106,7 +106,7 @@ right: a window asked for with `(-1, -1, 40, 10)` lands in the middle of the
 work area, and that is where most windows want to be.
 
 `close_cmd`, if present and not zero, is what the close box `[■]` sends
-instead of closing the window. Turbo Vision's sent `cmClose` and let the
+instead of closing the window. The classic close box sent a command and let the
 program refuse; this is the same bargain, and it is how an editor gets to
 ask "save changes?" first.
 
@@ -162,7 +162,7 @@ the percentage at the right. `SET_PROGRESS` moves it.
 
 `LIST` is a scrolling list of strings; `flags` bit 0 makes it
 multiple-choice, where Insert marks the item under the cursor and moves
-down, the way Norton Commander marked files. `GET_MARKED` and
+down, the way the classic file managers marked files. `GET_MARKED` and
 `GET_CURRENT` read it back.
 
 `CANVAS` is a rectangle of cells the program draws itself - Turbo
@@ -252,7 +252,7 @@ is the client's, and about 90 ms is long enough to be seen.
 | 0x40 | FRAME | —       | `w:i16 h:i16 cx:i16 cy:i16 hold:u8 glyphs:u16` then `w×h ×` (`glyph:u16 attr:u8`) |
 | 0x41 | TAKE  | —       | `pressed:u16 command:u16` |
 | 0x42 | GET_GLYPHS | —  | `growing:u8 n:u16` then `n × u16` — the Unicode code point of each glyph index in the session's font |
-| 0x43 | CYCLE | —       | OK — the front window goes to the back (Turbo Vision's F6) |
+| 0x43 | CYCLE | —       | OK — the front window goes to the back (the classic F6) |
 | 0x44 | ZOOM  | `id`    | OK — a window fills the work area, or goes back to its size (F5) |
 | 0x45 | SET_BUTTON | `id index:u8 enabled:u8` | OK — enable or disable one button of a row |
 | 0x46 | FOCUS | `id`    | OK — put the focus on that control, in its window |
@@ -283,7 +283,7 @@ editor's window is active. None of them sends the program a command.
     bit 3  Wrap      Word wrap, ticked while on
     bit 4  ReadOnly  Read only, ticked while on
     bit 5  Hex       Hex view: the same text as bytes; the text's id keeps working
-    bit 6  Keys      Classic keys: Borland's WordStar arrangement, or the modern one
+    bit 6  Keys      Classic keys: the WordStar arrangement, or the modern one
     bit 7  Syntax    Syntax: None, or one of the languages, to colour the text as
 
 The items go into the bar's Edit menu after a line, or, when the bar has
@@ -305,7 +305,7 @@ INI. Their colours are palette roles (`Syntax keyword`, `type`, `comment`,
 a client that wants to redraw only what changed keeps the previous frame
 and compares — the server does not know what the client has on its screen.
 `cx, cy` is where the caret should be, or `-1, -1` for none; the client
-shows the hardware cursor there, as Turbo Vision did.
+shows the hardware cursor there, as the classic DOS programs did.
 
 `hold` is `1` when this frame shows something chosen that has not yet
 happened: a button a key just pressed, drawn down; a menu item just

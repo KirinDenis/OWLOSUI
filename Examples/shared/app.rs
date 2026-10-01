@@ -42,7 +42,7 @@ cells and sends keys and clicks - it does not know what a window is.\n\
 F4 opens a dialog with every control in it. F1 is help. Alt+X leaves.\n";
 
 const HELP: &str = "<h1>OWLOSUI</h1>\
-<p>A Turbo Vision-shaped text mode UI toolkit with one portable core.</p>\
+<p>A text mode UI toolkit in the classic DOS style, with one portable core.</p>\
 <p>The same core is meant to drive a terminal, a browser canvas, a native \
 window and, eventually, DOS text memory. This page is the browser: a \
 WebAssembly module holding the core and this program, and a canvas the \
@@ -174,7 +174,7 @@ impl App {
         };
         at(ui, 2, 1, 56, 1, Kind::Static(StaticText::new("Everything a dialog is made of. Tab walks them in order.")));
         let mut name = InputLine::new("Name:", "OWLOSUI");
-        name.history = vec!["Turbo Vision".into(), "Free Vision".into()];
+        name.history = vec!["OWLOS".into(), "OWL FLY".into()];
         at(ui, 2, 3, 40, 1, Kind::Input(name));
         at(ui, 2, 5, 26, 3, Kind::Cluster(Cluster::checks(&["~S~ave on exit", "~B~ackup files", "~R~ead only"])));
         at(ui, 32, 5, 26, 3, Kind::Cluster(Cluster::radio(&["~T~ext", "~H~ex", "~A~uto"])));

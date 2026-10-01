@@ -132,7 +132,7 @@ pub struct ListBox {
     pub top: i16,
     pub focused: bool,
     rows: i16,
-    /// Insert marks an item and moves down, the way Norton Commander marked
+    /// Insert marks an item and moves down, the way the classic file managers marked
     /// files. Off by default: a list that answers a question has one
     /// answer, and a mark on it would be a second one.
     pub multi: bool,
@@ -248,7 +248,7 @@ impl StaticText {
 /// Words with a hotkey, standing beside the control they name.
 ///
 /// `~N~ame:` next to an input line means Alt+N puts the caret there, and a
-/// click on the words does the same. Turbo Vision's `TLabel` was the
+/// click on the words does the same. The classic label was the
 /// difference between a dialog you could drive blind and one you had to
 /// Tab through counting; it costs one field, the handle of the control.
 pub struct Label {
@@ -283,7 +283,7 @@ impl Label {
 ///
 /// `value` of `max`, drawn as `█` for what is done and `░` for what is not,
 /// with the percentage at the right if there is room for it. The program
-/// sets the value; nothing here counts. Turbo Vision never had one, and
+/// sets the value; nothing here counts. The classic toolkits never had one, and
 /// every program that needed one drew a row of blocks by hand - which is
 /// exactly the case for it being here.
 pub struct Progress {
@@ -319,7 +319,7 @@ impl Progress {
 
 /// A grid of cells the program draws itself.
 ///
-/// Turbo Vision's answer to "my view is not one of yours" was a `TView`
+/// The classic answer to "my view is not one of yours" was a view
 /// with its own `draw`. Over a wire there is no `draw` to call, so the
 /// program sends cells: characters with attributes, into a rectangle that
 /// is then drawn as it is - clipped, scrolled with its window, covered by

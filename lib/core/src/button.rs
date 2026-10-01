@@ -13,7 +13,7 @@
 // `no_std` needs these named; with `std` they are the prelude's.
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
-/// What a button is for, which is what colour it wears. Turbo Vision had
+/// What a button is for, which is what colour it wears. The classic toolkits had
 /// one colour of button; a keypad needs the eye to tell a digit from an
 /// operator from the key that throws everything away.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -89,7 +89,7 @@ impl Button {
         self.text.find('~').map(|i| self.text[..i].chars().count())
     }
 
-    /// Two spaces either side of the label, the way Turbo Vision drew them.
+    /// Two spaces either side of the label, the way the classic toolkits drew them.
     pub fn width(&self) -> i16 {
         self.label().chars().count() as i16 + 4
     }
@@ -114,7 +114,7 @@ pub struct ButtonRow {
     pub buttons: Vec<Button>,
     pub current: usize,
     pub focused: bool,
-    /// Whether Tab stops here. Turbo Vision's `ofSelectable`. A keypad is
+    /// Whether Tab stops here: a selectable view, in the classic terms. A keypad is
     /// pressed with the mouse or typed past, and a Tab that walked its
     /// thirty keys one by one would be a Tab nobody pressed twice.
     pub selectable: bool,
@@ -123,7 +123,7 @@ pub struct ButtonRow {
     /// The one being held down right now.
     ///
     /// A button that fires the instant it is touched cannot be changed your
-    /// mind about. Turbo Vision's went down on the press, stayed down while
+    /// mind about. The classic ones went down on the press, stayed down while
     /// the button was held, and did the thing on release — so sliding off it
     /// first was a way out. That is worth keeping and costs one field.
     pub down: Option<usize>,
@@ -141,7 +141,7 @@ pub struct ButtonRow {
 impl ButtonRow {
     pub fn new(buttons: Vec<Button>) -> Self {
         // The cursor starts on the default button, not on the first. Enter on
-        // a focused row presses the button under the cursor - Turbo Vision
+        // a focused row presses the button under the cursor - the classic toolkits
         // made the focused button the default for as long as it was focused
         // - so a row whose cursor started elsewhere would press the wrong
         // one on the first Enter: "Yes" in a box built to answer "No".

@@ -185,7 +185,7 @@ struct Drag {
     orig: Rect,
 }
 
-/// A window being moved or resized from the keyboard: Turbo Vision's
+/// A window being moved or resized from the keyboard: the classic
 /// Ctrl+F5. Arrows move it, Shift+arrows resize it, Enter keeps the
 /// result, Escape puts `orig` back.
 struct Sizing {
@@ -288,7 +288,7 @@ pub struct Ui {
     ///
     /// A click that acts instantly leaves nobody sure they hit anything: the
     /// panel is gone before the eye registers which line was under the
-    /// pointer. Turbo Vision lit the item up first and then acted, and the
+    /// pointer. The classic DOS menus lit the item up first and then acted, and the
     /// pause is the whole of the feedback. The waiting is the backend's job —
     /// the core has no clock and must not grow one.
     pending_pick: Option<(ViewId, Cmd)>,
@@ -298,7 +298,7 @@ pub struct Ui {
     /// The box that says a search found nothing, or how many it replaced.
     notice: Option<ViewId>,
     /// Ctrl+Q has been pressed in a classic editor, and the next key says
-    /// what for: Borland's two-key commands.
+    /// what for: the old DOS editors' two-key commands.
     chord: bool,
     /// The languages texts can be coloured as: the core's own, read from
     /// `syntax.ini` the first time one is asked for, then the program's.
@@ -347,7 +347,7 @@ impl Ui {
     pub fn insert(&mut self, parent: ViewId, rect: Rect, kind: Kind) -> ViewId {
         let id = ViewId(self.nodes.len() as u32);
         // A window on the desktop takes the first free number from 1 to 9,
-        // as Borland's did, so Alt+that brings it to the front. A modal
+        // as the classic DOS desktops did, so Alt+that brings it to the front. A modal
         // one does not: it is the only window there is while it is up. A
         // tenth window has no number and is reached from the list.
         let mut kind = kind;
@@ -416,7 +416,7 @@ impl Ui {
     ///
     /// A window keeps its top-left corner and follows the desktop's far
     /// edges: grow the console by ten columns and every resizable window is
-    /// ten columns wider. That is Turbo Vision's `gfGrowAll`, and it is what
+    /// ten columns wider. That is the classic grow-with-the-desktop rule, and it is what
     /// makes an editor that filled the screen still fill it. A window with a
     /// fixed size keeps it, and if it was centred it is centred again by the
     /// measure pass.
@@ -747,7 +747,7 @@ impl Ui {
             }
             if o & KEYS != 0 {
                 items.push(item("C~l~assic keys", String::new(), CM_ED_KEYS,
-                    "Borland's WordStar keys (Ctrl+S D E X move); off: Ctrl+C, V, Z as everywhere", text)
+                    "WordStar keys, as the old DOS editors had them (Ctrl+S D E X move); off: Ctrl+C, V, Z", text)
                     .checked(classic));
             }
         }
@@ -894,7 +894,7 @@ impl Ui {
     }
 
     /// The keys an editor's offers bring: Find, Replace, Find next, and
-    /// Borland's Ctrl+Q chords for them. True when the key was one.
+    /// the old DOS editors' Ctrl+Q chords for them. True when the key was one.
     fn editor_key(&mut self, tid: ViewId, k: Key) -> bool {
         use crate::edit::offer::*;
         use crate::event::KeyCode as K;
@@ -908,7 +908,7 @@ impl Ui {
         }
         if self.chord {
             // The second key of Ctrl+Q something: with Ctrl or without, as
-            // Borland's took it. Anything else is let go of quietly.
+            // the old DOS editors took it. Anything else is let go of quietly.
             self.chord = false;
             if let K::Char(c) = k.code {
                 match c.to_ascii_lowercase() {
@@ -1561,7 +1561,7 @@ impl Ui {
     }
 
     /// Open the submenu of an item, beside its panel, its first item on the
-    /// row of the item it came from - which is where Turbo Vision put it.
+    /// row of the item it came from - which is where the classic DOS menus put it.
     fn open_submenu(&mut self, mb: ViewId, ix: usize) {
         let items = match &self.nodes[mb.ix()].kind {
             Kind::MenuBox(m) => match m.items.get(ix) {
@@ -1724,7 +1724,7 @@ impl Ui {
         }
     }
 
-    /// Send the frontmost window to the back — Turbo Vision's Alt+F6 / F6.
+    /// Send the frontmost window to the back — the classic Alt+F6 / F6.
     pub fn cycle_windows(&mut self) {
         if self.modal().is_some() {
             return;
@@ -1737,7 +1737,7 @@ impl Ui {
     }
 
     /// The other way round: the window at the back comes to the front.
-    /// Turbo Vision's Shift+F6.
+    /// The classic Shift+F6.
     pub fn cycle_windows_back(&mut self) {
         if self.modal().is_some() {
             return;
@@ -1776,7 +1776,7 @@ impl Ui {
     }
 
     /// Start moving or resizing the active window from the keyboard:
-    /// Turbo Vision's Ctrl+F5. Arrows move, Shift+arrows resize, Enter
+    /// the classic Ctrl+F5. Arrows move, Shift+arrows resize, Enter
     /// keeps it, Escape puts it back. The frame shows the dragging colour
     /// meanwhile, as it does under the mouse.
     pub fn begin_size_move(&mut self) -> bool {
@@ -1862,7 +1862,7 @@ impl Ui {
         self.nodes[id.ix()].rect = r;
     }
 
-    /// The list of windows, as a modal dialog: Turbo Vision's Alt+0. A
+    /// The list of windows, as a modal dialog: the classic Alt+0. A
     /// row per window, front to back, its number first when it has one;
     /// Enter or OK brings the chosen one to the front.
     pub fn window_list(&mut self) {
@@ -1998,7 +1998,7 @@ impl Ui {
 
     /// Lay the windows along the diagonal, the back one at the top-left of
     /// the work area and each one in front a cell down and to the right,
-    /// every title bar showing. Turbo Vision's `TDeskTop::cascade`.
+    /// every title bar showing, as the classic desktops cascaded.
     ///
     /// The desktop's job and not the application's: which windows there
     /// are, which may move and which are modal is the desktop's knowledge,
@@ -2019,7 +2019,7 @@ impl Ui {
     /// Divide the work area between the windows so that none overlaps:
     /// the square root of their number in columns, the rest in rows, the
     /// columns on the right one window taller when it does not come out
-    /// even. Turbo Vision's `TDeskTop::tile`, which took the same road.
+    /// even - the road the classic desktops took too.
     ///
     /// A window that cannot be resized gets a cell like the others and
     /// stands in its top-left corner at its own size. The first cut left
@@ -2080,7 +2080,7 @@ impl Ui {
 
     /// Where the caret is on screen, if it should be seen at all.
     ///
-    /// The core does not draw it. Turbo Vision did not either — it moved the
+    /// The core does not draw it. The classic DOS toolkits did not either — they moved the
     /// video card's own cursor, and a terminal has the same thing. Left to the
     /// hardware it blinks by itself and costs nothing per frame; drawn into
     /// the grid it would have to be erased and repainted on every keystroke,
@@ -2428,7 +2428,7 @@ impl Ui {
         }
 
         if !w.title.is_empty() {
-            // The title takes the frame's own colour. Turbo Vision gave it no
+            // The title takes the frame's own colour. The classic palettes gave it no
             // entry of its own, and it does not need one: a title in a colour
             // the frame is not reads as a label stuck on rather than part of
             // the window.
@@ -2840,11 +2840,11 @@ impl Ui {
         // character left between, or a stray piece of border sticks out of the
         // end of it.
         //
-        // Measuring settled this. Plain Turbo Vision starts the bar two cells
+        // Measuring settled this. A plain classic window starts the bar two cells
         // in, because a plain window has nothing in its footer; the IDE's
         // editor starts it further along because its line:column indicator is
         // sitting there. One rule, both behaviours — and an empty footer
-        // reproduces Turbo Vision exactly.
+        // reproduces the classic layout exactly.
         let footer = match &self.nodes[id.ix()].kind {
             Kind::Window(w) => w.footer.chars().count() as i16,
             _ => 0,
@@ -3393,7 +3393,7 @@ impl Ui {
                 }
                 let a = match c.style {
                     Style::Text => p.text,
-                    // Turbo Vision's help had no bold and no headings of its
+                    // The classic help viewers had no bold and no headings of their
                     // own; both borrow the selected-text colour, which on a
                     // cyan body is the brightest thing available.
                     Style::Bold | Style::Heading => p.text_selected,
@@ -3755,7 +3755,7 @@ impl Ui {
                 }
 
                 // A button: it goes down now and does its work on release.
-                // The focus stays where it was - Turbo Vision's buttons did
+                // The focus stays where it was - the classic buttons did
                 // not take it on a click either - so a keypad pressed with
                 // the mouse leaves the caret in the display it types into.
                 for row in self.button_rows(id) {
@@ -3837,7 +3837,7 @@ impl Ui {
             }
             MouseKind::Drag => {
                 // Dragging along the bar with a panel open switches between
-                // them. Turbo Vision did this and it is how a menu is actually
+                // them. The classic menus did this and it is how a menu is actually
                 // used: press, slide, release.
                 if let (Some(mb), Some(bar)) = (self.menu_box_id(), self.menu_bar_id()) {
                     let babs = self.abs_rect(bar);
@@ -4111,7 +4111,7 @@ impl Ui {
             return self.sizing_key(k);
         }
 
-        // The desktop's own keys, the ones Turbo Vision's desktop had:
+        // The desktop's own keys, the ones the classic DOS desktops had:
         // Alt+1..9, Alt+0, Shift+F6, Ctrl+F5. Before the status line, so a
         // program's F6 does not shadow Shift+F6.
         if self.desktop_keys && self.modal().is_none() {
@@ -4233,7 +4233,7 @@ impl Ui {
 
     /// A help page has no caret, so it answers to a different, much shorter
     /// set of keys: Tab walks the links, Enter follows one, and the rest
-    /// scrolls. This is Turbo Vision's help browser, which worked exactly so.
+    /// scrolls. The classic help browsers worked exactly so.
     /// Walk the dialog's focus ring: the path field, the list, the buttons,
     /// and round again.
     ///
@@ -4363,7 +4363,7 @@ impl Ui {
     ///
     /// In the library rather than in every application, because every
     /// application needs it and none of them should spell it differently.
-    /// Turbo Vision had `messageBox` for the same reason.
+    /// The classic toolkits had a message box call for the same reason.
     ///
     /// Returns the window, so a caller can move it or add to it. The answer
     /// comes back through `take_pressed`, like any other button.
@@ -4382,7 +4382,7 @@ impl Ui {
         // Nothing to resize: it is as big as the words in it.
         win.resizable = false;
         win.zoomable = false;
-        // And no close box. Turbo Vision's meant cmCancel, but nothing here
+        // And no close box. The classic one meant Cancel, but nothing here
         // knows which of these buttons is the cancel one — so a close box
         // would be a way of dismissing the question without answering it,
         // which is the one thing a modal dialog must not have.
@@ -4611,7 +4611,7 @@ impl Ui {
         match &mut self.nodes[id.ix()].kind {
             Kind::Cluster(c) => match k.code {
                 // In radio buttons the arrows choose, not merely point:
-                // Turbo Vision's did, and a dot that stays behind while
+                // the classic ones did, and a dot that stays behind while
                 // the cursor moves shows one answer and means another.
                 K::Up => {
                     c.step(-1);

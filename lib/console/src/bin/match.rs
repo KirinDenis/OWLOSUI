@@ -1,6 +1,6 @@
 //! owlosui-match <scene> <reference.bin> [--rows a:b]
 //!
-//! Renders a scene we also built with the real Turbo Vision and says which
+//! Renders a scene we also built with the classic DOS toolkit and says which
 //! cells disagree. `--rows` exists because every reference screen carries a
 //! menu bar on row 0 and a status line on row 24, and a scene may not model
 //! either; without it the report is mostly noise about work that has not been

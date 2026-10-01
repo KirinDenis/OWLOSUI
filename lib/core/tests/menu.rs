@@ -1,6 +1,6 @@
 //! Menus: what they look like and what they do when pressed.
 //!
-//! The picture in `panel_layout` is the one Turbo Vision draws, measured off
+//! The picture in `panel_layout` is the one a classic DOS menu draws, measured off
 //! video memory rather than copied from a screenshot — label at the left,
 //! shortcut against the right edge, the widest item setting the width for all
 //! of them, and a separator that meets the frame with tee pieces.

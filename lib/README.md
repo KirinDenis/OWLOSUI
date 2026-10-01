@@ -50,7 +50,7 @@ Find, Replace, Word wrap, Read only, Hex view, Classic keys. While the
 editor's window is in front, the core puts them on the menu bar - in the
 program's Edit menu if it has one, or in one of their own after File -
 binds their keys (Ctrl+F, Ctrl+H, Ctrl+L; Ctrl+Q F and Ctrl+Q A with
-Borland's keys), builds the Find and Replace dialogs, and says on the right
+the WordStar keys), builds the Find and Replace dialogs, and says on the right
 of the status line where the caret is. Nothing comes back to the program;
 it writes no handler for any of it. With no menu bar, Find and Replace go on
 the status line instead.

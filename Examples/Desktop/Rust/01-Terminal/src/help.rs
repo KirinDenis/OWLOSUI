@@ -8,7 +8,7 @@
 
 pub const INDEX: &str = "\
 <h1>OWLOSUI</h1>
-<p>A Turbo Vision-shaped toolkit with one portable core. The same core is
+<p>A text mode toolkit in the classic DOS style, with one portable core. The same core is
 meant to drive a terminal, a browser canvas, a native window and, in the end,
 DOS text memory.</p>
 <hr>
@@ -31,7 +31,7 @@ itself.</p>
 pub const KEYS: &str = "\
 <h1>Keys</h1>
 <p>The editor contains no key codes at all. It knows commands with names, and
-a table turns keys into them &mdash; which is how Borland shipped four
+a table turns keys into them &mdash; which is how the old DOS editors shipped four
 arrangements for one editor, and how this one ships two.</p>
 <h2>Modern</h2>
 <pre>
@@ -40,7 +40,7 @@ arrangements for one editor, and how this one ships two.</p>
   Ctrl+A                     select all
   Shift + any movement       extend the selection
 </pre>
-<h2>Borland</h2>
+<h2>Classic (WordStar)</h2>
 <pre>
   Ctrl+E  Ctrl+S  Ctrl+D  Ctrl+X    up, left, right, down
   Ctrl+A  Ctrl+F                    word left, word right
@@ -65,7 +65,7 @@ keeps a whole application looking like one application. Give somebody
 screen that only has sixteen colours to begin with.</p>
 <hr>
 <p>The values themselves were not chosen by eye. They were read out of video
-memory while the real Turbo Vision was drawing:</p>
+memory while a classic DOS program was drawing:</p>
 <pre>
   0x71   blue on light grey    the desktop
   0x1F   white on blue         an active window

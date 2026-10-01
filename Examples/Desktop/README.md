@@ -2,6 +2,14 @@
 
 Programs for a desktop: a console, or a window of their own.
 
+**Quickest:** double-click `CS_Demo.cmd` (the C# demo in a console),
+`CS_Window.cmd` (the same in a window), `CS_Commander.cmd` (the file
+manager), `Rust_Terminal.cmd` or `Rust_Window.cmd` in the repository's
+root. They need the [.NET 8 SDK](https://dotnet.microsoft.com/download)
+and [Rust](https://rustup.rs), and say so if either is missing.
+
+![The C# demo in a native Windows window](../screens/window.png)
+
 ```
 CSharp/
     01-HelloWorld       a window, words, a button: the shape of every program

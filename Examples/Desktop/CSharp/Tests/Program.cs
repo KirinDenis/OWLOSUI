@@ -189,7 +189,7 @@ internal static class Tests
 
         // ------------------------------------- Notes: every other thing a hand can do
         //
-        // The list Turbo Vision's manual gives for a window: move, resize,
+        // The list a classic DOS manual gives for a window: move, resize,
         // zoom, close, next; and for an editor: type, Enter, scroll. Each of
         // these is one thing a person will do in the first minute, and each
         // is checked by doing it, not by reading the code that should do it.
@@ -499,6 +499,10 @@ internal static class Tests
             Check(app.Left.Dir.EndsWith("sub"), $"Enter on the folder did not go in: {app.Left.Dir}");
             var g = owl.GetFrame();
             Check(g.Find("inner.txt") != null, "the folder's contents are not shown", g);
+            // Inside, the cursor starts on the first name, not on `..`.
+            var at = owl.MarkedNames(app.Left.Files);
+            Check(at.Length == 1 && at[0] == "inner.txt", $"the cursor is not on the first name: {string.Join(",", at)}");
+            owl.Press(ConsoleKey.Home);
             owl.Press(ConsoleKey.Enter); // `..`
             app.Poll();
             Check(app.Left.Dir == l, $"`..` did not come back out: {app.Left.Dir}");
@@ -944,7 +948,7 @@ internal static class Tests
             app.Poll();
             Check(app.Calc.Display == "111111111010", $"FFA in binary: '{app.Calc.Display}'", owl.GetFrame());
 
-            // Arrows in radio buttons choose, as Turbo Vision's did: the
+            // Arrows in radio buttons choose, as the classic ones did: the
             // click left the focus on Bin, and Down makes it Oct. The
             // display follows the dot, not the cursor.
             // The caret went back to the display when Bin was chosen, so

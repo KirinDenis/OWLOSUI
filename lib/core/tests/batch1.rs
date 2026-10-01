@@ -1,4 +1,4 @@
-//! The first five of the missing Turbo Vision pieces: a status line that
+//! The first five of the missing classic pieces: a status line that
 //! binds keys, a label that names a control, a tick in a menu item, marks
 //! in a list and a file panel, and a bar that fills up.
 

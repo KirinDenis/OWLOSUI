@@ -6,7 +6,7 @@
 //!
 //! Keys are bound here, in the application, not in the core. The core exposes
 //! primitives — `toggle_zoom`, `cycle_windows`, `close` — and which key calls
-//! which is a table. That is how Borland shipped four different keymaps for
+//! which is a table. That is how the classic DOS editors shipped four keymaps for
 //! one editor, and it is why we can ship an authentic one and a modern one
 //! without touching a line of the toolkit.
 
@@ -364,7 +364,7 @@ fn open_controls(ui: &mut Ui) {
     win.max_h = h;
     let wid = ui.insert(ui.root(), r, Kind::Window(win));
 
-    // Placed by hand, which is what every Turbo Vision dialog did and what
+    // Placed by hand, which is what every classic DOS dialog did and what
     // `Dock::Manual` is for. Honest while the contents are known and fixed,
     // and the wrong tool the moment one of them has to grow.
     let at = |ui: &mut Ui, x, y, w, h, kind| {
@@ -787,7 +787,7 @@ fn follow_links(ui: &mut Ui) {
 }
 
 /// Keep the bottom-left frame slot showing the cursor position, the way every
-/// Borland editor did.
+/// classic DOS editor did.
 fn update_footers(ui: &mut Ui) {
     let windows: Vec<_> = ui.children(ui.root()).to_vec();
     for wid in windows {

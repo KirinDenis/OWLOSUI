@@ -1,8 +1,8 @@
 //! The status line.
 //!
 //! The bottom row of the screen, grey, with the keys that work right now and
-//! what they do: `F1 Help  F10 Menu  Alt-X Exit`. Turbo Vision's
-//! `TStatusLine` did two things at once and so does this: it *shows* the
+//! what they do: `F1 Help  F10 Menu  Alt-X Exit`. The classic
+//! status line did two things at once and so does this: it *shows* the
 //! keys, and it *is* where they are bound - press F1 and the status line,
 //! not the application, turns it into the Help command. That is why the
 //! picture and the behaviour cannot drift apart: they are one list.

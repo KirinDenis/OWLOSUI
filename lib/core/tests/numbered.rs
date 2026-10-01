@@ -1,4 +1,4 @@
-//! The desktop's own keys, the ones Turbo Vision's desktop had: numbered
+//! The desktop's own keys, the ones the classic DOS desktops had: numbered
 //! windows and Alt+1..9, the window list on Alt+0, Shift+F6 for the
 //! previous window, and Ctrl+F5 to move or resize from the keyboard.
 

@@ -2,12 +2,24 @@
 
 Programs on DOS: a real machine, DOSBox-X, or anything in between.
 
+**Quickest:** double-click `DOS_Pascal_Demo.cmd`, `DOS_C_Demo.cmd`,
+`DOS_Asm_Demo.cmd`, `DOS_Rust_Demo.cmd` or `DOS_Commander.cmd` in the
+repository's root. They need only [DOSBox-X](https://dosbox-x.com) - the
+programs are built and in the repository - and find it on their own, or
+through `DOSBOXX` set to `dosbox-x.exe` ([FINDDBX.CMD](FINDDBX.CMD) says
+where it looks).
+
+| The demo | The file manager |
+|---|---|
+| ![The demo on DOS: calculator, calendar, ASCII table, puzzle](../screens/dos_demo.png) | ![The file manager on DOS, asking before it copies](../screens/dos_commander.png) |
+
 ```
 Asm/            HELLO and DEMO in assembler (FASM)       \
 C/              HELLO and DEMO in C (Open Watcom)          > through the resident
 Pascal/         HELLO and DEMO in Pascal (Borland Pascal 7) /
 Rust/           HELLO and DEMO in Rust, and the shared application: the core linked in
-Commandr/       a two-panel file manager in Pascal, Norton Commander's shape
+Commandr/       a two-panel file manager in Pascal, the classic DOS shape
+FINDDBX.CMD     how the root's DOS_ launchers find DOSBox-X
 TESTKEYS.BAT    the keys the tests type - the same for every language
 CHECK.CMD       runs a folder's HELLO and DEMO and checks what they showed
 ```
@@ -58,7 +70,7 @@ with nothing else installed.
 | [Pascal](Pascal/README.md) | Borland Pascal 7 | DOSBox 0.74 | no - not in this repository |
 
 Watcom's compiler runs on the DOS/4GW extender, which hangs without a
-word in the DOSBox-X here, and Borland's is built the same way for
+word in the DOSBox-X here, and the Pascal one is built the same way for
 consistency: the compilers run in plain DOSBox, the programs in DOSBox-X,
 whose 32-bit DPMI the resident needs. `DOSBOX` and `DOSBOXX` say where
 the two are.

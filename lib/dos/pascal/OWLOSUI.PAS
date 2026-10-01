@@ -17,8 +17,8 @@
 
       repeat OwlWait(Pressed, Command); ... until Done;
 
-  Written for Borland Pascal 7 in real mode (BPC -CD); plain Turbo Pascal
-  dialect, nothing Borland-only beyond the Dos unit. Text is sent as it
+  Written for Borland Pascal 7 in real mode (BPC -CD); plain Pascal of
+  that time, nothing compiler-specific beyond the Dos unit. Text is sent as it
   is: keep it ASCII, or UTF-8.
   ========================================================================== }
 
@@ -61,7 +61,7 @@ const
   OfferWrap     = $08;                  { Word wrap }
   OfferReadOnly = $10;                  { Read only }
   OfferHex      = $20;                  { the same text as bytes }
-  OfferKeys     = $40;                  { Classic keys: Borland's WordStar arrangement }
+  OfferKeys     = $40;                  { Classic keys: the WordStar arrangement }
   OfferSyntax   = $80;                  { Syntax: the language the text is coloured as }
   OfferAll      = $FF;
   { and how it is set }

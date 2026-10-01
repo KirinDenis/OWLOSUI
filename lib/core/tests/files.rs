@@ -394,3 +394,14 @@ fn a_mark_stays_on_its_name_when_the_listing_changes() {
     p.clear_marks();
     assert!(p.marked_names().is_empty());
 }
+
+#[test]
+fn going_into_a_folder_starts_on_its_first_name_not_on_dot_dot() {
+    let mut p = FileList::new(vec![dir(".."), dir("SUB"), f("A.TXT", 1, 0)], "*.*");
+    p.cursor_to_first_name();
+    assert_eq!(p.selected().map(|e| e.name.clone()).as_deref(), Some("SUB"));
+    // An empty folder has only .., and the cursor stays there.
+    let mut p = FileList::new(vec![dir("..")], "*.*");
+    p.cursor_to_first_name();
+    assert_eq!(p.selected().map(|e| e.name.clone()).as_deref(), Some(".."));
+}

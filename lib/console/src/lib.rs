@@ -7,7 +7,7 @@
 //!
 //! `scenes` and `compare` are not for applications. They are the half of the
 //! reference factory that lives on this side: scenes built here and again in
-//! `REFGEN.PAS` with the real Turbo Vision units, and the comparison between
+//! `REFGEN.PAS` with the classic DOS toolkit, and the comparison between
 //! the two. See `src/bin/match.rs`.
 
 #![cfg_attr(not(feature = "std"), no_std)]

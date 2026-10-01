@@ -1,8 +1,16 @@
 # DOS, Pascal: the commander
 
-A two-panel file manager in the shape of Norton Commander, for DOS,
+A two-panel file manager in the classic DOS shape, for DOS,
 written in Pascal: [COMMANDR.PAS](COMMANDR.PAS). The folder and the
 program are called COMMANDR because a DOS name has at most eight letters.
+
+**Quickest:** double-click `DOS_Commander.cmd` in the repository's root:
+it starts DOSBox-X with the repository on the left and its `Examples` on
+the right.
+
+| The two sides, three files marked | The editor, coloured as Pascal |
+|---|---|
+| ![The file manager asking before it copies three marked files](../../screens/dos_commander.png) | ![COMMANDR.PAS in the file manager's editor, in colour](../../screens/dos_editor.png) |
 
 The same program for Windows is
 [Desktop/CSharp/03-Commander](../../Desktop/CSharp/03-Commander/Program.cs).
@@ -33,7 +41,7 @@ of its folders.
 | key | does |
 |---|---|
 | Tab | the other side |
-| Enter | into a folder; `..` back out; on a file, what DOS knows about it |
+| Enter | into a folder; `..` back out; on a file, what DOS knows about it. In the folder the cursor starts on its first name - on `..` only when there is nothing else |
 | Insert | mark a file, and move down |
 | F1 | help - with buttons for what needs Alt |
 | F3 | view the file under the cursor |
@@ -48,7 +56,7 @@ of its folders.
 Copy, move and delete ask first, and **No** is the answer Enter gives:
 doing something to files is chosen on purpose, with the arrow key and
 Enter, or Alt+Y. The marks are used up once their files have been dealt
-with, as they were in Norton.
+with, as they were in the classic file managers.
 
 The viewer and the editor bring an Edit menu to nobody - there is no menu
 bar here - but their keys work: Ctrl+F finds, Ctrl+L finds again, and the

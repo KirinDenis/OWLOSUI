@@ -10,7 +10,7 @@ Two Pascal programs that draw with OWLOSUI through the resident:
 
 Both use the unit [lib/dos/pascal/OWLOSUI.PAS](../../../lib/dos/pascal/OWLOSUI.PAS),
 the whole binding: every call builds a request, calls INT 60h with
-`Intr`, and reads the reply. A Turbo Vision programmer will know the
+`Intr`, and reads the reply. A programmer of the classic DOS toolkits will know the
 shape, with the drawing done by the resident instead of linked-in units.
 
 ```pascal
@@ -56,8 +56,8 @@ which runs `MAKE.BAT` in plain DOSBox 0.74 with Borland Pascal mounted as
 `DOSBox.exe`.
 
 Borland Pascal is commercial, and it is not in this repository. The
-programs are plain Turbo Pascal - `Dos` is the only unit used besides
-OWLOSUI - so Turbo Pascal 7 and Free Pascal's `i8086-msdos` target, in
+programs are plain Pascal - `Dos` is the only unit used besides
+OWLOSUI - so another compiler of that dialect, or Free Pascal's `i8086-msdos` target in
 `{$mode tp}`, should build them too. Only Borland Pascal 7 has been tried.
 
 ## Test

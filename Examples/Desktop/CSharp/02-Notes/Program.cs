@@ -83,10 +83,10 @@ public sealed class App
         // that it reads as a window and not as the screen. Because its size
         // was set relative to the desktop, it keeps that relation when the
         // console is resized: the core moves a window's far edges with the
-        // desktop's, which is what Turbo Vision called gfGrowAll.
+        // desktop's, the classic grow-with-the-desktop rule.
         //
         // closeCmd: the close box [■] sends CmExit instead of closing. That
-        // is Turbo Vision's cmClose bargain - the program hears about it and
+        // is the classic close-command bargain - the program hears about it and
         // decides - and it is how an editor gets to ask before losing text.
         Window = owl.Window(fileName, owl.Width - 4, owl.Height - 2, closeCmd: CmExit);
 

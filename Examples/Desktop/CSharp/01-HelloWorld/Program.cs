@@ -17,7 +17,7 @@
 //
 //  * There are no callbacks. A button does not "have an OnClick"; it has a
 //    number, and `Run` hands that number back when the button is pressed.
-//    This is Turbo Vision's design and it is what lets the same core sit
+//    This is the classic DOS toolkits' design and it is what lets the same core sit
 //    behind a pipe today and behind a DOS interrupt later - a number crosses
 //    both, a closure crosses neither.
 //
@@ -49,7 +49,7 @@ public static class App
         // 40 cells wide, 9 tall, and centred - (-1, -1) is the default
         // position and it means "in the middle", now and after the console
         // is resized. Style.Dialog is grey, fixed in size and closable: the
-        // look Turbo Vision gave to something that asks a question.
+        // look the classic DOS programs gave to something that asks a question.
         var w = owl.Window("Hello", 40, 9, style: Owlosui.Style.Dialog);
 
         // Static text is placed by hand, in cells, relative to the inside of
