@@ -215,8 +215,10 @@ export class CommanderTool {
       case Cm.CopyOk: this.copyOk(); return;
       case Cm.DriveLeft: this.drives(this.left); return;
       case Cm.DriveRight: this.drives(this.right); return;
-      case Cm.Upload: { const f = this.front; this.closeBox(); this.upload(f); return; }
-      case Cm.Download: { const f = this.front; this.closeBox(); this.track(this.download(f)); return; }
+      // The side the This computer dialog was opened from - or, from the
+      // window menu, the one in front.
+      case Cm.Upload: { const f = this.dialog?.s ?? this.front; this.closeBox(); this.upload(f); return; }
+      case Cm.Download: { const f = this.dialog?.s ?? this.front; this.closeBox(); this.track(this.download(f)); return; }
       case Cm.Swap: this.swap(); return;
       case Cm.Reread: this.track(this.refresh()); return;
     }
@@ -467,19 +469,36 @@ export class CommanderTool {
 
   /** F2: this computer - files from it, files to it. */
   computer(s) {
+    const to = this.uploadSide(s);
     const d = this.dialogBox('This computer', 56, 8, Cm.No);
-    this.owl.staticText(d.win, 2, 1, `Upload files into ${s.source.prefix}${s.dir}, or download the marked ones. Dropping files on the page uploads them too.`, 50, 3);
+    this.owl.staticText(d.win, 2, 1, `Upload files into ${to.source.prefix}${to.dir}, or download the marked ones. Dropping files on the page uploads them too.`, 50, 3);
     this.owl.buttons(d.win, { label: '~U~pload...', cmd: Cm.Upload, default: true }, { label: '~D~ownload', cmd: Cm.Download }, { label: '~C~ancel', cmd: Cm.No, cancel: true });
     d.s = s;
   }
 
-  /** The browser's own file picker; the chosen files go into a side. */
+  /** Where an upload goes: the side in front - or, when that one is read-only, the other. */
+  uploadSide(s) {
+    const other = s === this.left ? this.right : this.left;
+    return s.source.readOnly && other && !other.source.readOnly ? other : s;
+  }
+
+  /**
+   * The browser's own file picker; the chosen files go into a side. The
+   * picker is put on the page until it is done with: an element nothing
+   * holds may be thrown away while its dialog is open, and then the files
+   * chosen in it never arrive.
+   */
   upload(s) {
     if (typeof document === 'undefined' || !s) return;
+    const to = this.uploadSide(s);
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.onchange = () => this.track(this.put(s, [...input.files]));
+    input.style.display = 'none';
+    const done = () => input.remove();
+    input.addEventListener('change', () => { done(); this.track(this.put(to, [...input.files])); });
+    input.addEventListener('cancel', done);
+    document.body.append(input);
     input.click();
   }
 
@@ -512,7 +531,7 @@ export class CommanderTool {
     document.addEventListener('drop', e => {
       if (!this.left) return;
       e.preventDefault();
-      this.track(this.put(this.front, [...e.dataTransfer.files]));
+      this.track(this.put(this.uploadSide(this.front), [...e.dataTransfer.files]));
     });
   }
 
