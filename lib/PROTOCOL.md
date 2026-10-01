@@ -213,6 +213,7 @@ where you are.
 | 0x27 | ACTIVATE     | `id`      | OK — bring a window to the front |
 | 0x28 | MARKED_NAMES | `id`      | `n:u16` then `n × str` — a `FILES` panel's marked names, or the one under the cursor if none are |
 | 0x29 | SET_FILES_ERROR | `id text:str` | OK — show a message in the panel's pane, e.g. a folder that could not be read |
+| 0x61 | UNMARK | `id` | OK — a `FILES` panel's marks all taken off: what a commander does after copying, moving or deleting the marked files. Marks are kept on their names through `SET_FILES` of the same folder, and dropped by one of another |
 | 0x5A | ADD_FILES | `id` then entries as in FILES | OK — more names for a panel: a listing bigger than one request (64K) is sent as FILES or SET_FILES with the first part and ADD_FILES with the rest |
 | 0x2A | ACTIVE       | —         | `id` — the active window, or `0` |
 | 0x2B | SET_TEXT     | `id text:str` | OK — new words for a `STATIC` (keeps its place and width), an `INPUT` (keeps its label) or a `TEXT` (starts over) |

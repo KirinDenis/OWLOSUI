@@ -245,7 +245,14 @@ public sealed class App
                 CloseBox();
                 var act = onYes;
                 onYes = null;
-                try { act?.Invoke(); }
+                // The marks are used up once their files are dealt with, as
+                // Norton's were; a failure leaves them, to try again.
+                var from = Active;
+                try
+                {
+                    act?.Invoke();
+                    if (from.Files != 0) owl.Unmark(from.Files);
+                }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Tell(e.Message); }
                 Refresh();
                 return true;

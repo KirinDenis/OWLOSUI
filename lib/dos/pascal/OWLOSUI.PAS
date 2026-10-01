@@ -35,6 +35,7 @@ const
   OwlBlue     = $00;                    { a document }
   OwlCyan     = $10;                    { help }
   OwlGrey     = $20;                    { a dialog }
+  OwlNoShadow = $40;                    { windows that tile the screen cast none }
   OwlDialog   = OwlGrey or OwlFixed or OwlNoZoom;
 
   { a button's flags }
@@ -70,14 +71,33 @@ const
   EditHex       = $08;
   EditSyntax    = $10;                  { read back only: set a language with OwlSyntax }
 
+  { a file panel's flags (OwlFilesEx) }
+  FilesMarks      = $01;                { Insert marks names }
+  FilesNoPathWord = $02;                { the path line without its "Path:" }
+  FilesNoPathLine = $04;                { no path line: a commander's panel }
+
+  { a tree node's flags (OwlNode) }
+  NodeOpen = $01;                       { shown open }
+  NodeLazy = $02;                       { has children, asked for when opened }
+
 type
   TGlyphs = array[0..255] of Word;      { each glyph as Unicode }
+
+  { A place in a tree: how deep, and at each level which child and its text.
+    OwlTreeExpand fills it with the node somebody opened, OwlTreePath with
+    the texts from the root down to the cursor. }
+  TTreePath = record
+    Depth: Byte;
+    Index: array[1..16] of Word;
+    Text: array[1..16] of string[12];
+  end;
 
 { the session }
 function  OwlCheck: Boolean;            { started by OWLOSRES? says how, if not }
 procedure OwlInit;                      { the desktop: 80 by 25 }
 procedure OwlQuit;
 procedure OwlWait(var Pressed, Command: Word);
+procedure OwlDraw;                      { the screen drawn now, between waits: a progress bar }
 
 { views }
 function  OwlWindow(Parent: Word; X, Y, W, H: Integer; Flags: Byte;
@@ -128,6 +148,38 @@ function  OwlTakeFiles(Panel: Word; var Text: string): Byte;  { 0 nothing, 1 a n
 function  OwlCurrentName(Panel: Word; var Name: string): Boolean;         { the name under the cursor }
 function  OwlTextDos(Parent: Word; var Bytes; N: Word; Flags: Byte): Word;
                                         { an editor holding bytes in DOS's code page; Flags 1 = read-only }
+function  OwlTextDosEx(Parent: Word; var Bytes; N: Word; Flags: Byte; var Taken: Word): Word;
+                                        { the same, and Taken: how many bytes fitted in one request }
+function  OwlDosFits(var Bytes; N: Word): Word;
+                                        { how many of N bytes OwlTextDos would take - asked first,
+                                          so a title can say "the first 9000 bytes" }
+function  OwlGetTextDos(Id: Word; var Bytes; Room: Word): Word;
+                                        { an editor's text back as DOS bytes, CR LF lines;
+                                          $FFFF if it does not fit in Room }
+function  OwlFilesEx(Parent: Word; Top: Integer; Flags: Byte; const Dir: string): Word;
+                                        { a panel with Files.. flags: marks, no path line }
+function  OwlMarked(Panel: Word): Word; { how many names are marked - or 1, the one under
+                                          the cursor, when none are; then OwlMarkedName }
+function  OwlMarkedName(I: Word): string;   { name I (from 1) of the last OwlMarked }
+procedure OwlUnmark(Panel: Word);       { every mark off: the marked files were dealt with }
+
+{ controls }
+function  OwlInput(Parent: Word; X, Y, W: Integer; Max: Word; const Lab, Text: string): Word;
+function  OwlGetText(Id: Word): string; { an input's text, or a short editor's }
+procedure OwlList(Parent: Word; X, Y, W, H: Integer; N: Word);   { then N x OwlListItem, OwlEnd }
+procedure OwlListItem(const Text: string);
+function  OwlCurrent(List: Word): Word; { the row under the cursor, from 0 }
+function  OwlProgress(Parent: Word; X, Y, W: Integer; Max: LongInt): Word;
+procedure OwlSetProgress(Bar: Word; Value: LongInt);
+
+{ a tree: OwlTree, then its nodes with OwlNode, each followed by its own
+  children, then OwlEnd }
+procedure OwlTree(Parent: Word; N: Byte);
+procedure OwlNode(Flags: Byte; const Text: string; Children: Byte);
+function  OwlTreeExpand(Tree: Word; var Path: TTreePath): Boolean; { a lazy node opened? }
+procedure OwlTreeChildren(Tree: Word; const Path: TTreePath; N: Byte);
+                                        { then N x OwlNode, OwlEnd: its children }
+procedure OwlTreePath(Tree: Word; var Path: TTreePath);   { root to the cursor, texts only }
 
 { the wire itself, for what the above does not cover }
 procedure OwlBegin(Op: Byte);
@@ -144,7 +196,7 @@ var
   Req: array[0..32767] of Byte;         { the request being built: a file's text fits }
   DosTable: TGlyphs;                    { the glyphs as Unicode, for text from DOS }
   DosTableLoaded: Boolean;
-  Rep: array[0..2047] of Byte;          { the reply }
+  Rep: array[0..4095] of Byte;          { the reply: a few hundred marked names fit }
   At: Word;                             { where the next byte of Req goes }
 
 { ---- the wire ---- }
@@ -175,8 +227,10 @@ begin
   Inc(At, Length(S));
 end;
 
-{ DS:SI the request, ES:DI room for the reply, CX how much: INT 60h. }
-function OwlSend: Byte;
+{ DS:SI the request, ES:DI room for the reply, CX how much: INT 60h. The
+  status is 2, and nothing but the reply's header written, when the room is
+  too small. }
+function SendInto(var Room; Size: Word): Byte;
 var
   R: Registers;
   Len: Word;
@@ -186,11 +240,16 @@ begin
   Req[2] := Hi(Len);
   R.DS := Seg(Req);
   R.SI := Ofs(Req);
-  R.ES := Seg(Rep);
-  R.DI := Ofs(Rep);
-  R.CX := SizeOf(Rep);
+  R.ES := Seg(Room);
+  R.DI := Ofs(Room);
+  R.CX := Size;
   Intr($60, R);
-  OwlSend := Lo(R.AX);
+  SendInto := Lo(R.AX);
+end;
+
+function OwlSend: Byte;
+begin
+  OwlSend := SendInto(Rep, SizeOf(Rep));
 end;
 
 function ReplyU16(I: Integer): Word;
@@ -259,6 +318,17 @@ begin
   Simple($5C);
   Pressed := ReplyU16(0);
   Command := ReplyU16(2);
+end;
+
+{ FRAME: on DOS the resident draws the screen for it. The frame's own bytes
+  are not wanted here, so the room is only a header: the status says it was
+  too small, and that is fine. }
+procedure OwlDraw;
+var
+  Head: array[0..2] of Byte;
+begin
+  OwlBegin($40);
+  SendInto(Head, SizeOf(Head));
 end;
 
 { ---- views ---- }
@@ -485,15 +555,20 @@ begin
   if IsNew then Listing := ReplyU16(0) else Listing := Panel;
 end;
 
-function OwlFiles(Parent: Word; Top: Integer; const Dir: string): Word;
+function OwlFilesEx(Parent: Word; Top: Integer; Flags: Byte; const Dir: string): Word;
 var
   SR: SearchRec;
   Pattern: string;
 begin
   Pattern := PatternOf(Dir);
   FindFirst(Pattern, AnyEntry, SR);
-  OwlBegin($1A); OwlU16(Parent); Rect(0, Top, 0, 0); OwlU8(0); OwlStr('*.*'); OwlStr(Pattern);
-  OwlFiles := Listing(0, SR, True);     { a folder DOS cannot read: an empty panel }
+  OwlBegin($1A); OwlU16(Parent); Rect(0, Top, 0, 0); OwlU8(Flags); OwlStr('*.*'); OwlStr(Pattern);
+  OwlFilesEx := Listing(0, SR, True);   { a folder DOS cannot read: an empty panel }
+end;
+
+function OwlFiles(Parent: Word; Top: Integer; const Dir: string): Word;
+begin
+  OwlFiles := OwlFilesEx(Parent, Top, 0, Dir);
 end;
 
 function OwlSetFiles(Panel: Word; const Dir: string): Boolean;
@@ -547,16 +622,59 @@ end;
   glyph table into Unicode and on as UTF-8, which is what the wire
   carries. A line ends at LF; CR is dropped; a tab is a space. What does
   not fit in one request is left out. }
-function OwlTextDos(Parent: Word; var Bytes; N: Word; Flags: Byte): Word;
-var
-  LenAt, I, C: Word;
-  B: Byte;
+procedure LoadDosTable;
 begin
   if not DosTableLoaded then
   begin
     OwlGlyphs(DosTable);
     DosTableLoaded := True;
   end;
+end;
+
+{ How many bytes of UTF-8 a byte of a DOS text becomes on the wire. }
+function Cost(B: Byte): Word;
+var
+  C: Word;
+begin
+  if B = 13 then Cost := 0
+  else if (B = 10) or (B = 9) then Cost := 1
+  else
+  begin
+    C := DosTable[B];
+    if C < $80 then Cost := 1
+    else if C < $800 then Cost := 2
+    else Cost := 3;
+  end;
+end;
+
+function OwlDosFits(var Bytes; N: Word): Word;
+var
+  Used, I: Word;
+begin
+  LoadDosTable;
+  Used := 17;                           { TEXT's header, as OwlTextDosEx writes it }
+  I := 0;
+  while (I < N) and (Used + 4 < SizeOf(Req)) do
+  begin
+    Inc(Used, Cost(TBytes(Bytes)[I]));
+    Inc(I);
+  end;
+  OwlDosFits := I;
+end;
+
+function OwlTextDos(Parent: Word; var Bytes; N: Word; Flags: Byte): Word;
+var
+  Taken: Word;
+begin
+  OwlTextDos := OwlTextDosEx(Parent, Bytes, N, Flags, Taken);
+end;
+
+function OwlTextDosEx(Parent: Word; var Bytes; N: Word; Flags: Byte; var Taken: Word): Word;
+var
+  LenAt, I, C: Word;
+  B: Byte;
+begin
+  LoadDosTable;
   OwlBegin($11); OwlU16(Parent); Rect(0, 0, 0, 0); OwlU8(0); OwlU8(Flags);
   LenAt := At;
   OwlU16(0);
@@ -585,7 +703,241 @@ begin
     end;
   end;
   PatchU16(LenAt, At - LenAt - 2);
-  OwlTextDos := SendId;
+  Taken := I;
+  OwlTextDosEx := SendId;
+end;
+
+{ The byte of DOS's code page that shows a Unicode character: the glyph
+  table read backwards. ASCII is itself; what the table does not have is
+  a question mark. }
+function ByteOf(C: Word): Byte;
+var
+  I: Integer;
+begin
+  if (C >= 32) and (C < 127) then
+  begin
+    ByteOf := C;
+    Exit;
+  end;
+  for I := 0 to 255 do
+    if DosTable[I] = C then
+    begin
+      ByteOf := I;
+      Exit;
+    end;
+  ByteOf := Ord('?');
+end;
+
+{ GET_TEXT into a buffer of its own on the heap - a file's text is far more
+  than the 4K of Rep - and back from UTF-8 into the code page, a line ending
+  as CR LF, the way DOS keeps a text file. }
+function OwlGetTextDos(Id: Word; var Bytes; Room: Word): Word;
+const
+  Size = 65000;
+var
+  P: ^TBytes;
+  Len, I, Put, C: Word;
+  B: Byte;
+
+  procedure Emit(V: Byte);
+  begin
+    if Put < Room then TBytes(Bytes)[Put] := V;
+    Inc(Put);
+  end;
+
+begin
+  OwlGetTextDos := $FFFF;
+  LoadDosTable;
+  GetMem(P, Size);
+  OwlBegin($21); OwlU16(Id);
+  if SendInto(P^, Size) <> 0 then
+  begin
+    FreeMem(P, Size);
+    Exit;
+  end;
+  Len := P^[3] or (Word(P^[4]) shl 8);
+  I := 5;
+  Put := 0;
+  while (I < 5 + Len) and (Put <= Room) do
+  begin
+    B := P^[I];
+    if B < $80 then
+    begin
+      C := B;
+      Inc(I);
+    end
+    else if B < $E0 then
+    begin
+      C := (Word(B and $1F) shl 6) or (P^[I + 1] and $3F);
+      Inc(I, 2);
+    end
+    else if B < $F0 then
+    begin
+      C := (Word(B and $0F) shl 12) or (Word(P^[I + 1] and $3F) shl 6) or (P^[I + 2] and $3F);
+      Inc(I, 3);
+    end
+    else
+    begin
+      C := Ord('?');                    { beyond what a code page has }
+      Inc(I, 4);
+    end;
+    if C = 10 then
+    begin
+      Emit(13);
+      Emit(10);
+    end
+    else Emit(ByteOf(C));
+  end;
+  FreeMem(P, Size);
+  if Put <= Room then OwlGetTextDos := Put;
+end;
+
+var
+  MarkedCount: Word;
+
+function OwlMarked(Panel: Word): Word;
+begin
+  OwlBegin($28); OwlU16(Panel);
+  if OwlSend <> 0 then MarkedCount := 0 else MarkedCount := ReplyU16(0);
+  OwlMarked := MarkedCount;
+end;
+
+function OwlMarkedName(I: Word): string;
+var
+  Pos, K, N: Word;
+  S: string;
+begin
+  S := '';
+  if (I >= 1) and (I <= MarkedCount) then
+  begin
+    Pos := 5;                           { past the header and the count }
+    for K := 2 to I do
+      Inc(Pos, 2 + (Rep[Pos] or (Word(Rep[Pos + 1]) shl 8)));
+    N := Rep[Pos] or (Word(Rep[Pos + 1]) shl 8);
+    if N > 255 then N := 255;
+    S[0] := Chr(N);
+    if N > 0 then Move(Rep[Pos + 2], S[1], N);
+  end;
+  OwlMarkedName := S;
+end;
+
+procedure OwlUnmark(Panel: Word);
+begin
+  WithId($61, Panel);
+end;
+
+{ ---- controls ---- }
+
+procedure OwlU32(V: LongInt);
+begin
+  OwlU16(Word(V));
+  OwlU16(Word(V shr 16));
+end;
+
+function OwlInput(Parent: Word; X, Y, W: Integer; Max: Word; const Lab, Text: string): Word;
+begin
+  OwlBegin($13); OwlU16(Parent); Rect(X, Y, W, 1); OwlU16(Max); OwlStr(Lab); OwlStr(Text);
+  OwlInput := SendId;
+end;
+
+function OwlGetText(Id: Word): string;
+var
+  N: Word;
+  S: string;
+begin
+  OwlBegin($21); OwlU16(Id);
+  if OwlSend <> 0 then N := 0 else N := ReplyU16(0);
+  if N > 255 then N := 255;
+  S[0] := Chr(N);
+  if N > 0 then Move(Rep[5], S[1], N);
+  OwlGetText := S;
+end;
+
+procedure OwlList(Parent: Word; X, Y, W, H: Integer; N: Word);
+begin
+  OwlBegin($19); OwlU16(Parent); Rect(X, Y, W, H); OwlU8(0); OwlU16(N);
+end;
+
+procedure OwlListItem(const Text: string);
+begin
+  OwlStr(Text);
+end;
+
+function OwlCurrent(List: Word): Word;
+begin
+  WithId($24, List);
+  OwlCurrent := ReplyU16(0);
+end;
+
+function OwlProgress(Parent: Word; X, Y, W: Integer; Max: LongInt): Word;
+begin
+  OwlBegin($18); OwlU16(Parent); Rect(X, Y, W, 1); OwlU32(Max); OwlU8(1);
+  OwlProgress := SendId;
+end;
+
+procedure OwlSetProgress(Bar: Word; Value: LongInt);
+begin
+  OwlBegin($22); OwlU16(Bar); OwlU32(Value);
+  OwlSend;
+end;
+
+{ ---- a tree ---- }
+
+procedure OwlTree(Parent: Word; N: Byte);
+begin
+  OwlBegin($53); OwlU16(Parent); Rect(0, 0, 0, 0); OwlU8(N);
+end;
+
+procedure OwlNode(Flags: Byte; const Text: string; Children: Byte);
+begin
+  OwlU8(Flags); OwlStr(Text); OwlU8(Children);
+end;
+
+{ The texts of a reply, one after another from Pos, into Path.Text. }
+procedure ReadTexts(var Path: TTreePath; Pos: Word; WithIndex: Boolean);
+var
+  K, N, L: Word;
+begin
+  for K := 1 to Path.Depth do
+  begin
+    if WithIndex then
+    begin
+      Path.Index[K] := Rep[Pos] or (Word(Rep[Pos + 1]) shl 8);
+      Inc(Pos, 2);
+    end;
+    N := Rep[Pos] or (Word(Rep[Pos + 1]) shl 8);
+    L := N;
+    if L > 12 then L := 12;             { a DOS name is at most 8.3 }
+    Path.Text[K][0] := Chr(L);
+    if L > 0 then Move(Rep[Pos + 2], Path.Text[K][1], L);
+    Inc(Pos, 2 + N);
+  end;
+end;
+
+function OwlTreeExpand(Tree: Word; var Path: TTreePath): Boolean;
+begin
+  WithId($55, Tree);
+  Path.Depth := Rep[3];
+  if Path.Depth > 16 then Path.Depth := 16;
+  ReadTexts(Path, 4, True);
+  OwlTreeExpand := Path.Depth > 0;
+end;
+
+procedure OwlTreeChildren(Tree: Word; const Path: TTreePath; N: Byte);
+var
+  K: Integer;
+begin
+  OwlBegin($54); OwlU16(Tree); OwlU8(Path.Depth);
+  for K := 1 to Path.Depth do OwlU16(Path.Index[K]);
+  OwlU8(N);
+end;
+
+procedure OwlTreePath(Tree: Word; var Path: TTreePath);
+begin
+  WithId($56, Tree);
+  Path.Depth := Rep[3];
+  if Path.Depth > 16 then Path.Depth := 16;
+  ReadTexts(Path, 4, False);
 end;
 
 end.

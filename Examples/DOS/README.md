@@ -7,6 +7,7 @@ Asm/            HELLO and DEMO in assembler (FASM)       \
 C/              HELLO and DEMO in C (Open Watcom)          > through the resident
 Pascal/         HELLO and DEMO in Pascal (Borland Pascal 7) /
 Rust/           HELLO and DEMO in Rust, and the shared application: the core linked in
+Commandr/       a two-panel file manager in Pascal, Norton Commander's shape
 TESTKEYS.BAT    the keys the tests type - the same for every language
 CHECK.CMD       runs a folder's HELLO and DEMO and checks what they showed
 ```
@@ -62,6 +63,14 @@ consistency: the compilers run in plain DOSBox, the programs in DOSBox-X,
 whose 32-bit DPMI the resident needs. `DOSBOX` and `DOSBOXX` say where
 the two are.
 
+## The commander
+
+[Commandr/](Commandr/README.md) is a program rather than a demo of parts:
+a file manager in Pascal, two folders side by side - view, edit, copy,
+move, make a folder, delete, a drive list and a tree of the drive. Every
+file it touches, it touches through DOS. `RUN` in its folder starts it,
+`TEST.CMD` tries all of it on a folder of its own.
+
 ## Rust: the core linked in
 
 [Rust/](Rust/README.md) has HELLO and DEMO too, the same two programs the
@@ -79,6 +88,7 @@ Examples\DOS\Asm\TEST.CMD
 Examples\DOS\C\TEST.CMD
 Examples\DOS\Pascal\TEST.CMD
 Examples\DOS\Rust\test.cmd
+Examples\DOS\Commandr\TEST.CMD
 ```
 
 DOSBox-X types at the programs with AUTOTYPE, which presses keys one at a

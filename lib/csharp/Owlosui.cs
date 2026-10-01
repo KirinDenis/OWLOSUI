@@ -679,6 +679,9 @@ public sealed class Owlosui : IDisposable
         return ((FilesEvent)r[0], R.Str(r, 1));
     }
 
+    /// <summary>Every mark off a panel: the marked files were copied, moved or deleted.</summary>
+    public void Unmark(ushort id) => Call(Op.Unmark, W.U16(id));
+
     /// <summary>The marked names of a panel - or the one under the cursor, if none are marked.</summary>
     public string[] MarkedNames(ushort id)
     {
@@ -1504,7 +1507,7 @@ public sealed class Owlosui : IDisposable
         public const byte WindowStatus = 0x4A, WindowMenu = 0x4B, WindowList = 0x4C, CycleBack = 0x4D, SizeMove = 0x4E;
         public const byte SetHistory = 0x4F, GetHistory = 0x50, Palette = 0x51, SetColor = 0x52, AddFiles = 0x5A;
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
-        public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E, Syntax = 0x5F, SyntaxDefine = 0x60;
+        public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E, Syntax = 0x5F, SyntaxDefine = 0x60, Unmark = 0x61;
         public const byte OpenWindow = 0x5B, Wait = 0x5C;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;

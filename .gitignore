@@ -37,6 +37,8 @@ Examples/DOS/*/AUTOTYPE.TXT
 Examples/DOS/*/TRACE.TXT
 Examples/DOS/*/*.OBJ
 Examples/DOS/*/*.TPU
+# The commander's test plays with files: TEST.CMD makes this folder afresh.
+Examples/DOS/Commandr/PLAY/
 
 # The resident's Rust build. OWLOSRES.BIN and OWLOSRES.COM, which it
 # makes, are tracked: a program in assembler, Pascal or C needs them and

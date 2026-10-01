@@ -96,6 +96,15 @@ impl Host {
                 None => error("INIT first"),
             },
             op::OPEN_WINDOW => error("on DOS the screen is already the program's window"),
+            // A frame, asked for between WAITs: the screen is drawn now -
+            // what a program busy copying files wants its progress bar to
+            // do - and the frame's bytes come back as they do on any wire,
+            // to a program that has room for them.
+            op::FRAME if self.screen => {
+                self.draw();
+                let (status, body, _) = self.server.call(op, payload);
+                (status, body)
+            }
             _ => {
                 let (status, body, _) = self.server.call(op, payload);
                 (status, body)

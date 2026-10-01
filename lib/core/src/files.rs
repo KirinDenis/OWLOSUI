@@ -251,9 +251,20 @@ impl FileList {
     /// download lands, somebody deletes something. Restoring the index puts
     /// the cursor on whatever moved into that slot, and the next Enter opens
     /// a file nobody chose.
+    ///
+    /// Marks follow the same rule, for the same reason and a worse outcome:
+    /// kept by position, the mark on a file that was moved away passed to
+    /// whatever took its row, and the next F8 deleted a file nobody had
+    /// marked. A mark is on a name; a name that is gone takes its mark
+    /// with it.
     pub fn set_entries(&mut self, entries: Vec<FileEntry>) {
         let was = self.selected().map(|e| e.name.clone());
+        let marked: Vec<String> = (0..self.entries.len())
+            .filter(|&e| self.marked.get(e).copied().unwrap_or(false))
+            .map(|e| self.entries[e].name.clone())
+            .collect();
         self.entries = entries;
+        self.marked = self.entries.iter().map(|e| marked.contains(&e.name)).collect();
         self.rebuild();
         self.current = was
             .and_then(|n| (0..self.view.len()).find(|&i| self.entries[self.view[i]].name == n))
@@ -453,6 +464,12 @@ impl FileList {
             .and_then(|&e| self.marked.get(e))
             .copied()
             .unwrap_or(false)
+    }
+
+    /// No marks at all: after the marked files were copied, moved or
+    /// deleted, or on going into another folder.
+    pub fn clear_marks(&mut self) {
+        self.marked.clear();
     }
 
     /// The marked names, in the order they are shown.

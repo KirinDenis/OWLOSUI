@@ -373,3 +373,24 @@ fn a_long_message_takes_a_third_row() {
     l.layout(Rect::new(0, 0, 60, 14), 60);
     assert_eq!(l.foot_rows(), 2);
 }
+
+#[test]
+fn a_mark_stays_on_its_name_when_the_listing_changes() {
+    // Three files, the first marked. It is moved away and the folder read
+    // again: the mark must not pass to the file that took its row - that
+    // was how F8 once deleted a file nobody had marked.
+    let mut p = FileList::new(vec![f("A.TXT", 1, 0), f("B.TXT", 1, 0), f("C.TXT", 1, 0)], "*.*");
+    p.multi = true;
+    p.toggle_mark();
+    assert_eq!(p.marked_names(), vec!["A.TXT".to_string()]);
+    p.set_entries(vec![f("B.TXT", 1, 0), f("C.TXT", 1, 0)]);
+    assert!(p.marked_names().is_empty(), "the mark went with A.TXT");
+    // Read again with A.TXT still there: its mark is still on it.
+    let mut p = FileList::new(vec![f("A.TXT", 1, 0), f("B.TXT", 1, 0)], "*.*");
+    p.multi = true;
+    p.toggle_mark();
+    p.set_entries(vec![f("NEW.TXT", 1, 0), f("A.TXT", 1, 0), f("B.TXT", 1, 0)]);
+    assert_eq!(p.marked_names(), vec!["A.TXT".to_string()]);
+    p.clear_marks();
+    assert!(p.marked_names().is_empty());
+}

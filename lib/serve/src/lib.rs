@@ -118,6 +118,7 @@ pub mod op {
     pub const GET_EDITOR: u8 = 0x5E;
     pub const SYNTAX: u8 = 0x5F;
     pub const SYNTAX_DEFINE: u8 = 0x60;
+    pub const UNMARK: u8 = 0x61;
 }
 
 type Res<T> = Result<T, String>;
@@ -944,6 +945,11 @@ impl Server {
                 let id = self.alive(id)?;
                 match self.ui()?.kind_mut(id) {
                     Kind::Files(f) => {
+                        // Another folder: its names are other files, and a
+                        // mark carried over by name would be on the wrong one.
+                        if f.path_text() != path {
+                            f.clear_marks();
+                        }
                         f.set_mask(&mask);
                         f.set_entries(entries);
                         f.set_path(&path);
@@ -962,6 +968,17 @@ impl Server {
                 let id = self.alive(id)?;
                 match self.ui()?.kind_mut(id) {
                     Kind::Files(f) => f.add_entries(entries),
+                    _ => return Err(format!("view {} is not a file panel", id.raw())),
+                }
+            }
+
+            op::UNMARK => {
+                // What a commander does after it has copied, moved or
+                // deleted the marked files: the marks are used up.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Files(f) => f.clear_marks(),
                     _ => return Err(format!("view {} is not a file panel", id.raw())),
                 }
             }
