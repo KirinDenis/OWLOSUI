@@ -90,10 +90,11 @@ export class CommanderTool {
 
   /** Tools > Commander: the two sides over the whole desktop, or to the front if they are up. */
   /** left, right: drives - sources - to show on each side, instead of the ones they show. */
-  show({ left = null, right = null } = {}) {
+  /** leftDir, rightDir: the folders they open on, '/' unless said. */
+  show({ left = null, right = null, leftDir = '/', rightDir = '/' } = {}) {
     if (this.left) {
-      for (const [s, source] of [[this.left, left], [this.right, right]]) {
-        if (source && s.source !== source) { s.source = source; s.dir = ''; this.track(this.go(s, '/')); }
+      for (const [s, source, dir] of [[this.left, left, leftDir], [this.right, right, rightDir]]) {
+        if (source && (s.source !== source || s.dir !== dir)) { s.source = source; s.dir = ''; this.track(this.go(s, dir)); }
       }
       this.owl.activate(this.left.win);
       return this.work;
@@ -104,7 +105,7 @@ export class CommanderTool {
     this.right = this.side(half, W - half, H - 2, right ?? this.sources[this.start[1]]);
     this.left = this.side(0, half, H - 2, left ?? this.sources[this.start[0]]);
     this.owl.activate(this.left.win);
-    return this.track(Promise.all([this.go(this.left, '/'), this.go(this.right, '/')]));
+    return this.track(Promise.all([this.go(this.left, leftDir), this.go(this.right, rightDir)]));
   }
 
   /** Where the right side is on the screen: for a window that should sit exactly over it. */
@@ -113,7 +114,7 @@ export class CommanderTool {
     return { x: half, y: 1, w: W - half, h: H - 2 };
   }
 
-  /** A drive changed from outside - DOS wrote to its floppy: the sides showing it read it again. */
+  /** A drive changed from outside - DOS wrote to a floppy that is a folder of it: the sides showing it read it again. */
   refreshSource(source) {
     for (const s of [this.left, this.right]) if (s && s.source === source) this.track(this.go(s, s.dir));
   }

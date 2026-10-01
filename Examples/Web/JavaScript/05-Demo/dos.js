@@ -8,8 +8,10 @@
 //   C:\DEMO         the DOS examples - the commander, the demo in Pascal,
 //                   C and assembler - with their sources
 //   C:\GAMES        OWL FLY III, a networked flight game for DOS
-//   A:              a floppy the page and DOS share: the page's commander
-//                   sees it as the drive dos-a:, DOS as A:
+//   A:, B:          floppies that are folders of this browser's storage -
+//                   "DOS A Drive" and "DOS B Drive": what the page puts
+//                   there DOS finds, what DOS saves there the page keeps
+//                   (lib/js/dosbox/gates.js)
 //
 // What it starts into is a line in its AUTOEXEC: the commander, the demo,
 // OWL FLY III, or the prompt. Settings (DOSBox's own: video card, CPU,
@@ -23,8 +25,11 @@
 import { Style } from '../../../../lib/js/owlosui.js';
 import { DosBox, KEYS } from '../../../../lib/js/dosbox/dosbox.js';
 import { unzip } from '../../../../lib/js/dosbox/unzip.js';
-import { DosDrive } from '../../../../lib/js/files/dosdrive.js';
+import { DriveGates } from '../../../../lib/js/dosbox/gates.js';
 import { Monitors, MonCm } from './monitors.js';
+
+/** The floppies, and the folders of this browser's storage they are. */
+const GATES = [{ letter: 'A', folder: '/DOS A Drive/' }, { letter: 'B', folder: '/DOS B Drive/' }];
 
 /** The repository, as the page's server shows it. */
 const ROOT = new URL('../../../../', import.meta.url);
@@ -113,15 +118,10 @@ cd \\
     OWLFLY     OWL FLY III, over the network
 
   Every one of them draws with OWLOSRES: the same Rust core as the page around
-  this window, built for DOS. A: is the floppy the page shares with DOS.
+  this window, built for DOS. A: and B: are folders of the browser's storage,
+  "DOS A Drive" and "DOS B Drive": put files there from the page, find them here.
   Right Ctrl gives the keyboard back to the page.
 
-`,
-  'A/README.TXT': `This is the floppy the web page and DOS share.
-
-What DOS writes here, the page sees: in the page's Tools > Commander it is
-the drive dos-a:. What the page copies to dos-a:, DOS finds here - press
-Ctrl+R in the DOS commander to read the folder again.
 `,
 };
 
@@ -135,7 +135,7 @@ const STARTS = {
 
 /** DOSBox's settings, as the dialog shows them; DEFAULTS is what a first visit gets. */
 const DEFAULTS = {
-  machine: 'svga_s3', memsize: 16,
+  machine: 'svga_s3', memsize: 16, picture: 'sharp',
   core: 'auto', cputype: 'auto', cycles: 'auto', fixed: 20000,
   sbtype: 'sb16', gus: false, pcspeaker: true, rate: 44100,
   xms: true, ems: true, umb: true,
@@ -180,6 +180,7 @@ ipx=${yes(s.ipx)}
 @echo off
 mount c C
 mount a A -t floppy
+mount b B -t floppy
 path C:\\;Z:\\
 c:
 cls
@@ -203,11 +204,15 @@ const PAGES = [
       o.staticText(d.win, 34, 3, 'Memory:', 20);
       d.parts.memsize = o.cluster(d.win, 34, 4, 20, ['1 MB', '4 MB', '16 MB', '32 MB', '63 MB'],
         { single: true, on: [1, 4, 16, 32, 63].indexOf(s.memsize) });
-      o.staticText(d.win, 2, 11, 'The card decides what a program may draw: OWL FLY III asks the machine which modes it has.', 60, 2);
+      o.staticText(d.win, 34, 10, 'Picture:', 20);
+      d.parts.picture = o.cluster(d.win, 34, 11, 28, ['sharp: whole pixels', 'a monitor: 4:3, smoothed'],
+        { single: true, on: ['sharp', 'monitor'].indexOf(s.picture) });
+      o.staticText(d.win, 2, 11, 'The card decides what a program may draw: OWL FLY III asks the machine which modes it has.', 30, 4);
     },
     read(o, d, s) {
       s.machine = ['svga_s3', 'vgaonly', 'ega', 'cga', 'hercules', 'tandy'][radio(o, d.parts.machine)];
       s.memsize = [1, 4, 16, 32, 63][radio(o, d.parts.memsize)];
+      s.picture = ['sharp', 'monitor'][radio(o, d.parts.picture)];
     },
   },
   {
@@ -288,13 +293,18 @@ export class DosTool {
   static CmLast = 399;
 
   /**
-   * commander: the page's commander, told when the floppy changes. open:
-   * how the demo puts a text in an editor (for "Show dosbox.conf").
+   * commander: the page's commander, told when DOS changes a gate folder.
+   * storage: this browser's storage, where the gate folders are. open: how
+   * the demo puts a text in an editor (for "Show dosbox.conf").
    */
-  constructor(owl, { commander, open }) {
+  constructor(owl, { commander, storage, open }) {
     this.owl = owl;
     this.box = new DosBox(owl);
-    this.floppy = new DosDrive(this.box);
+    this.storage = storage;
+    // The floppies are folders of this browser's storage, there to see.
+    this.gates = new DriveGates(this.box, storage, GATES);
+    this.gates.pushed = () => this.floppyChanged();
+    this.gates.activity = letter => this.light(letter);
     this.commander = commander;
     this.open = open;
     this.settings = loadSettings();
@@ -303,14 +313,15 @@ export class DosTool {
     this.dialog = null;
     this.disk = null;         // drive C:'s files, fetched once
     this.network = { state: 'off', url: '' };
-    this.floppy.changed = () => this.floppyChanged();
+    this.lights = '';
     this.box.on(what => {
       if (what === 'keys') this.retitle();
       if (what === 'stopped' && this.win) this.retitle();
     });
     this.monitors = new Monitors(owl, this);
-    this.signature = '';
     if (typeof setInterval !== 'undefined') setInterval(() => this.watchFloppy(), 1500);
+    // The folders are made on the first visit, before anyone looks for them.
+    if (typeof navigator !== 'undefined' && navigator.storage?.getDirectory) this.gates.ensure().catch(() => {});
   }
 
   handles(cmd) { return cmd >= DosTool.CmFirst && cmd <= DosTool.CmLast; }
@@ -361,9 +372,16 @@ export class DosTool {
   defaultRect() {
     const W = this.owl.width, H = this.owl.height;
     const cw = this.owl.screen?.cellW ?? 10, ch = this.owl.screen?.cellH ?? 22;
-    let ih = H - 6;
-    let iw = Math.round((ih * ch * 4) / 3 / cw);
-    if (iw > W - 4) { iw = W - 4; ih = Math.round((iw * cw * 3) / 4 / ch); }
+    let iw, ih;
+    if (this.settings.picture === 'sharp') {
+      // The window round the picture: DOS's 640 by 400 at the largest
+      // whole scale the screen has room for.
+      ({ w: iw, h: ih } = DosBox.insideFor(this.owl, W - 4, H - 6));
+    } else {
+      ih = H - 6;
+      iw = Math.round((ih * ch * 4) / 3 / cw);
+      if (iw > W - 4) { iw = W - 4; ih = Math.round((iw * cw * 3) / 4 / ch); }
+    }
     return { x: Math.floor((W - iw - 2) / 2), y: 1 + Math.floor((H - 2 - ih - 2) / 2), w: iw + 2, h: ih + 2 };
   }
 
@@ -375,9 +393,7 @@ export class DosTool {
     // window, or before the machine is on.
     owl.staticText(this.win, 2, 1, 'The DOS PC is switching on. Its picture is laid over this window, and taken away ' +
       'while a menu or another window is over it - DOS keeps running. Bring this window to the front to see it again.', rect.w - 6, 6);
-    owl.windowStatus(this.win,
-      { label: '~Enter~ Keys to DOS', cmd: DosCm.Keys, key: 'Enter' },
-      { label: '~Right Ctrl~ Keys back', cmd: 0 });
+    this.showLights();
     owl.windowMenu(this.win, {
       label: '~M~achine', items: [
         { label: '~K~eyboard to DOS', cmd: DosCm.Keys, shortcut: 'Enter', hint: 'Or click the DOS picture; Right Ctrl gives it back' },
@@ -412,17 +428,19 @@ export class DosTool {
     else this.owl.activate(this.win);
     this.retitle();
     try {
-      // What is on the floppy stays on it when the PC starts again: it is
-      // a disk in a drive, not part of the machine.
-      const floppy = await this.floppyFiles();
-      const files = [...(await this.files()).filter(f => !(floppy.length && f.path.startsWith('A/'))), ...floppy, ...(program?.files ?? [])];
+      // What DOS saved on its floppies in its last moments goes into the
+      // folders before it is switched off; the folders are then the disks
+      // of the PC switching on.
+      await this.gates.pull().catch(() => {});
+      const files = [...(await this.files()), ...(await this.gates.files())];
       await this.box.start(this.win, {
         conf: dosboxConf(this.settings, start, program?.line),
         files,
         what: program?.name ?? STARTS[start].name,
         keepRunning: !!STARTS[start].network,
+        picture: this.settings.picture,
       });
-      this.signature = '';
+      await this.gates.started();
       if (STARTS[start].network || this.settings.always) this.connect();
       else this.network = { state: 'off', url: '' };
       if (grab) this.box.grab();
@@ -432,63 +450,45 @@ export class DosTool {
     this.retitle();
   }
 
-  /** Every file on the running PC's floppy, to put back on it when it starts again. */
-  async floppyFiles() {
-    if (!this.box.running) return [];
-    try {
-      const out = [];
-      const walk = async (node, path) => {
-        for (const n of node.nodes ?? []) {
-          if (n.nodes) await walk(n, `${path}${n.name}/`);
-          else out.push({ path: `${path}${n.name}`, contents: new Uint8Array(await this.box.ci.fsReadFile(`${path}${n.name}`)) });
-        }
-      };
-      const a = ((await this.box.ci.fsTree()).nodes ?? []).find(n => n.name === 'A');
-      if (a) await walk(a, 'A/');
-      return out;
-    } catch {
-      return [];
-    }
-  }
-
   /**
-   * Enter on a program in the page's commander: it runs on this PC. One
-   * already on the floppy runs from there; one from anywhere else goes onto
-   * the floppy first, in A:\RUN, with the files beside it - a program finds
-   * its data in its own folder. A toolkit program - one that asks for
-   * OWLOSRES, as each of them says it needs - runs with the toolkit behind
-   * it. When it ends, the commander, on the floppy.
+   * Enter on a program in the page's commander: it runs on this PC. One in
+   * a gate folder - DOS A Drive, DOS B Drive - is already on a floppy and
+   * runs from there. One from anywhere else is copied into DOS A Drive\RUN
+   * first, with the files beside it - a program finds its data in its own
+   * folder - and stays there, as the floppy does. A toolkit program - one
+   * that asks for OWLOSRES, as each of them says it needs - runs with the
+   * toolkit behind it. When it ends, the commander.
    */
   async runProgram(source, dir, name) {
-    const upper = name.toUpperCase();
-    const bat = upper.endsWith('.BAT');
     const BS = '\\';
-    let where, files = [];
-    if (source === this.floppy) {
-      where = 'A:' + BS + dir.split('/').filter(Boolean).join(BS);
-    } else {
-      // The program, and what sits beside it, up to a floppy's worth.
+    let path = `${dir}${name}`;
+    if (!(source === this.storage && this.gates.gateOf(path))) {
+      // RUN holds the last program run this way and its files, nothing older.
+      const run = `${GATES[0].folder}RUN/`;
+      await this.storage.remove(run).catch(() => {});
+      await this.storage.mkdir(run);
       let room = 1400 * 1024;
+      const own = await source.readBytes(path);
+      await this.storage.write(`${run}${name.toUpperCase()}`, own);
+      room -= own.length;
       const beside = (await source.list(dir)).filter(e => !e.dir && e.name !== name);
-      files.push({ path: `A/RUN/${upper}`, contents: await source.readBytes(`${dir}${name}`) });
-      room -= files[0].contents.length;
       for (const e of beside.sort((a, b) => a.size - b.size)) {
         if (e.size > room) continue;
-        files.push({ path: `A/RUN/${e.name.toUpperCase()}`, contents: await source.readBytes(`${dir}${e.name}`) });
+        await this.storage.write(`${run}${e.name.toUpperCase()}`, await source.readBytes(`${dir}${e.name}`));
         room -= e.size;
       }
-      where = `A:${BS}RUN`;
+      path = `${run}${name.toUpperCase()}`;
     }
-    const bytes = files[0]?.contents ?? await this.floppy.readBytes(`${dir}${name}`);
-    const toolkit = new TextDecoder('latin1').decode(bytes).includes('OWLOSRES');
-    const run = bat ? `call ${upper}` : toolkit ? `call C:${BS}OWL.BAT ${upper}` : upper;
-    const line = ['A:', `cd ${where.slice(2)}`, run, 'C:', `cd ${BS}`, `call C:${BS}COMMANDR.BAT`].join('\n');
-    // The floppy the program is on is the page's floppy too: running it
-    // from the floppy keeps what it writes there for the page to see.
-    return this.run('commander', { program: { name: upper, line, files } });
+    const at = this.gates.dosPath(path);              // A:\RUN\DEMO.COM
+    const folder = at.slice(0, at.lastIndexOf(BS)) || at.slice(0, 2);
+    const upper = name.toUpperCase();
+    const toolkit = new TextDecoder('latin1').decode(await this.storage.readBytes(path)).includes('OWLOSRES');
+    const run = upper.endsWith('.BAT') ? `call ${upper}` : toolkit ? `call C:${BS}OWL.BAT ${upper}` : upper;
+    const line = [folder.slice(0, 2), `cd ${folder.slice(2) || BS}`, run, 'C:', `cd ${BS}`, `call C:${BS}COMMANDR.BAT`].join('\n');
+    return this.run('commander', { program: { name: upper, line } });
   }
 
-  /** Drive C: and the floppy, fetched from the repository once and kept. */
+  /** Drive C:, fetched from the repository once and kept. */
   async files() {
     if (!this.disk) {
       const get = async path => {
@@ -538,10 +538,10 @@ export class DosTool {
     this.owl.refresh?.();
   }
 
-  // ------------------------------------------------------------ the floppy
+  // ------------------------------------------------------------ the floppies
 
   /**
-   * The page wrote to the floppy. DOS's commander shows a folder as it
+   * The page wrote to a floppy. DOS's commander shows a folder as it
    * read it, so it is asked to read again - Ctrl+R, pressed for the person.
    */
   floppyChanged() {
@@ -551,16 +551,35 @@ export class DosTool {
     }, 250);
   }
 
-  /** DOS wrote to the floppy: the page's commander reads it again. */
+  /** What DOS wrote to its floppies, into the folders - and the page's commander reads them again. */
   async watchFloppy() {
-    if (!this.box.running) return;
+    if (!this.box.running || this.pulling) return;
+    this.pulling = true;
     try {
-      const tree = await this.box.ci.fsTree();
-      const a = (tree.nodes ?? []).find(n => n.name === 'A');
-      const sig = JSON.stringify(a);
-      if (this.signature && sig !== this.signature) this.commander?.refreshSource?.(this.floppy);
-      this.signature = sig;
+      if (await this.gates.pull()) this.commander?.refreshSource?.(this.storage);
     } catch { /* switching off */ }
+    this.pulling = false;
+  }
+
+  /**
+   * A drive's light, on the DOS window's status line: lit while files go
+   * between a folder and its floppy, so the move can be seen.
+   */
+  light(letter) {
+    this.lights = letter;
+    this.showLights();
+    clearTimeout(this.lightsOff);
+    this.lightsOff = setTimeout(() => { this.lights = ''; this.showLights(); }, 700);
+  }
+
+  showLights() {
+    if (!this.win) return;
+    const lamp = l => (this.lights === l ? '■' : '·');   // code page 437's FEh and FAh
+    this.owl.windowStatus(this.win,
+      { label: '~Enter~ Keys to DOS', cmd: DosCm.Keys, key: 'Enter' },
+      { label: '~Right Ctrl~ Keys back', cmd: 0 },
+      { label: `A: ${lamp('A')}  B: ${lamp('B')}`, cmd: 0 });
+    this.owl.refresh?.();
   }
 
   // ------------------------------------------------------------ settings

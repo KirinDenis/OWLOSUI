@@ -181,7 +181,7 @@ put together in the page ([05-Demo/dos.js](JavaScript/05-Demo/dos.js)):
 | `C:\OWLOS` | OWLOSRES: the same Rust core as the page, built for DOS, resident behind INT 60h |
 | `C:\DEMO` | the DOS examples - the commander, the demo in Pascal, C and assembler - with their sources |
 | `C:\GAMES\OWLFLY3` | OWL FLY III, a DOS flight game played over the network ([dos/](dos/README.md)) |
-| `A:` | a floppy the page shares with DOS: the commander's drive `dos-a:` |
+| `A:`, `B:` | floppies that are folders of this browser's storage: `DOS A Drive` and `DOS B Drive` |
 
 Each disk is built from this repository's own files when the PC is switched
 on; nothing is a disk image. What it runs first is a line of its AUTOEXEC.
@@ -192,12 +192,21 @@ core says where (`owl.place`) - and taken away while a menu or another window
 is over it. Click the picture, or press Enter on the window, and the keyboard
 is DOS's; **Right Ctrl** gives it back, as in a virtual machine.
 
-**The floppy.** DOSBox remembers what a hard disk's folder held, so a file the
-page writes there stays out of DOS's sight; a floppy it reads afresh every
-time. So A: is the disk the two share. The page's commander copies onto it,
-and presses Ctrl+R in DOS's commander for you; DOS writes to it, and the
-page's commander sees it within two seconds
-([lib/js/files/dosdrive.js](../../lib/js/files/dosdrive.js)).
+**Your files in DOS.** In this browser's storage there are two folders,
+`DOS A Drive` and `DOS B Drive`, each with a README: they ARE the PC's
+floppies A: and B:. What is in them goes onto the disks when the PC is
+switched on; while it runs, what the page puts there - a copy, an upload, an
+editor's save - goes straight into DOS, and the page presses Ctrl+R in DOS's
+commander for you; what DOS saves there comes back into the folder within a
+couple of seconds. They are kept after the page is closed. Enter on a
+program in them runs it from its floppy; Enter on one anywhere else copies
+it, with the files beside it, into `DOS A Drive\RUN` first. The light
+on the DOS window's status line shows when files go across
+([lib/js/dosbox/gates.js](../../lib/js/dosbox/gates.js)).
+
+They are floppies because DOSBox reads a floppy's folder afresh every time
+DOS looks, and keeps a hard disk's in memory: a file the page put on a hard
+disk would stay out of DOS's sight until the next switch-on.
 
 **The network.** DOSBox's IPX card, in a browser, is a WebSocket to a relay
 that hands each packet to every machine in the same room. The page owns that
@@ -208,7 +217,9 @@ addresses ([lib/js/dosbox/nettap.js](../../lib/js/dosbox/nettap.js)).
 second, how busy it is, its disks. DOS's own memory and programs it does not
 show the page, so neither does the monitor.
 
-**DOS > Settings** is DOSBox's own: video card, memory, CPU core, type and
+**DOS > Settings** is DOSBox's own: video card, how its picture is shown -
+sharp, every DOS pixel a whole square of screen pixels and the window sized
+round it, or stretched to 4:3 and smoothed like a monitor - memory, CPU core, type and
 speed, sound cards, XMS, EMS and UMB, what to start, the network card and
 the relay. It writes the `dosbox.conf` the PC boots with, and shows it.
 

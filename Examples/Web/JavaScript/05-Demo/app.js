@@ -21,8 +21,9 @@
 //   Window    Size/Move, Zoom, Next, Previous, Close, List, Cascade, Tile:
 //             the desktop's own verbs. Alt+1..9 reach numbered windows.
 //   DOS       A DOS PC in a window: DOSBox in WebAssembly, its disk made
-//             of this repository's DOS examples on the same Rust core, a
-//             floppy shared with the page, OWL FLY III on the network,
+//             of this repository's DOS examples on the same Rust core,
+//             floppies that are folders of the browser's storage (DOS A
+//             Drive, DOS B Drive), OWL FLY III on the network,
 //             settings, a network monitor and a machine monitor (dos.js,
 //             monitors.js; the machine is lib/js/dosbox/).
 //   Help      What to see - the window a first visit opens on
@@ -97,12 +98,13 @@ export class App {
       run: (source, dir, name) => this.dos.runProgram(source, dir, name),
     });
     this.tools.push(this.commander);
-    // The DOS PC, and its floppy as one more drive for the commander.
+    // The DOS PC. Its floppies are folders of this browser's storage,
+    // DOS A Drive and DOS B Drive: the commander reaches them there.
     this.dos = new DosTool(owl, {
       commander: this.commander,
+      storage: this.browser,
       open: (name, text, source, path, options) => this.addDoc(name, text, source, path, options),
     });
-    this.commander.sources.push(this.dos.floppy);
     this.tools.push(this.dos);
     this.welcome = new Welcome(owl, this.choices());
     this.tools.push(this.welcome);
@@ -173,8 +175,9 @@ export class App {
       { label: 'OWLOSUI on DOS, in DOSBox', about: 'A DOS PC in a window - DOSBox, compiled to WebAssembly - running the same commander, ' +
         'written in Pascal, on the same Rust core, built for DOS. Click the picture for the keyboard; Right Ctrl gives it back.',
         go: () => this.dos.run('commander') },
-      { label: 'One floppy, two worlds', about: "This browser's files on the left; the DOS PC on the right, its floppy A: open. " +
-        'F5 on the left copies a file onto the floppy and DOS sees it at once. What DOS writes to A:, the page sees.',
+      { label: 'Your files in DOS', about: "In this browser's storage, the folder DOS A Drive is drive A: of the DOS PC, and DOS B Drive " +
+        'is B:. F5 copies a file into it, F2 uploads one from your computer: DOS sees it at once, and Enter there runs it. ' +
+        'What DOS saves on A:, the folder keeps.',
         go: () => this.floppyDemo() },
       { label: 'Play OWL FLY III', about: 'A DOS flight game over the network: each IPX packet goes in a WebSocket to a relay, to every ' +
         'player in the room. DOS > Network monitor shows the traffic, packet by packet.',
@@ -191,9 +194,13 @@ export class App {
     ];
   }
 
-  /** The browser's files on the left, DOS over the right side with its floppy: F5 copies from one world into the other. */
+  /**
+   * The browser's files on the left; on the right, DOS A Drive - with the
+   * DOS PC over it, A: open. F5 on the left copies into the folder on the
+   * right, and so onto the floppy in front of you.
+   */
   floppyDemo() {
-    this.commander.show({ left: this.browser, right: this.dos.floppy });
+    this.commander.show({ left: this.browser, right: this.browser, rightDir: '/DOS A Drive/' });
     const r = this.commander.rightRect();
     this.dos.run('commander', { rect: r, grab: false }).then(() => {
       if (this.commander.left) this.owl.activate(this.commander.left.win);
