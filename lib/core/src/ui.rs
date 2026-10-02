@@ -1529,6 +1529,9 @@ impl Ui {
             }
             status.extend(self.editor_status(tid));
             right = self.editor_indicator(tid);
+        } else if let Some(Kind::Window(w)) = active.map(|a| &self.nodes[a.ix()].kind) {
+            // Not an editor: the window's own words, if it has any.
+            right = w.indicator.clone();
         }
         if let Some(sid) = self.status_id() {
             if let Kind::Status(s) = &mut self.nodes[sid.ix()].kind {
@@ -3305,11 +3308,17 @@ impl Ui {
                 }
             }
         }
-        // The editor's words at the right end, where they cover nothing.
-        let len = s.right.chars().count() as i16;
-        let x = abs.right() - len;
+        // The words at the right end - an editor's line and column, or a
+        // window's own - where they cover nothing. A part between tildes is
+        // lit: green, as a drive's light was.
+        let shown: String = s.right.chars().filter(|&c| c != '~').collect();
+        let len = shown.chars().count() as i16;
+        let mut x = abs.right() - len;
         if len > 0 && x >= abs.x + s.items_end() + 2 {
-            buf.text(x, abs.y, &s.right, p.status, clip);
+            let lit = (p.status & 0xF0) | crate::cell::Color::Green as u8;
+            for (i, part) in s.right.split('~').enumerate() {
+                x += buf.text(x, abs.y, part, if i % 2 == 1 { lit } else { p.status }, clip);
+            }
         }
     }
 

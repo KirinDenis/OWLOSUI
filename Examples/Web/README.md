@@ -200,9 +200,14 @@ editor's save - goes straight into DOS, and the page presses Ctrl+R in DOS's
 commander for you; what DOS saves there comes back into the folder within a
 couple of seconds. They are kept after the page is closed. Enter on a
 program in them runs it from its floppy; Enter on one anywhere else copies
-it, with the files beside it, into `DOS A Drive\RUN` first. The light
-on the DOS window's status line shows when files go across
+it, with the files beside it, into `DOS A Drive\RUN` first
 ([lib/js/dosbox/gates.js](../../lib/js/dosbox/gates.js)).
+
+**The drive lights.** At the right of the status line, while the DOS window
+is in front: `[A: B: C:]`. A letter turns green while files go to or from
+that drive - A: and B: between their folders and DOS, C: when DOS writes to
+its hard disk. What DOS only reads, the page cannot see, so a game loading
+from C: lights nothing.
 
 They are floppies because DOSBox reads a floppy's folder afresh every time
 DOS looks, and keeps a hard disk's in memory: a file the page put on a hard

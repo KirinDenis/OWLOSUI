@@ -64,6 +64,11 @@ pub struct Window {
     /// its name does not say - `[awake]` on an emulator that keeps running
     /// in a background tab. Empty for none.
     pub tag: String,
+    /// Words at the right end of the status line while this window is in
+    /// front, where an editor shows its line and column. A part between
+    /// tildes is lit, green: `[~A:~ B: C:]` - a drive's light, on while
+    /// files move. Empty for none.
+    pub indicator: String,
     /// Smallest size the window may be dragged down to, frame included.
     ///
     /// Zero means no preference, which is the default: most windows do not
@@ -124,6 +129,7 @@ impl Window {
             palette: crate::palette::WinPalette::Blue,
             footer: String::new(),
             tag: String::new(),
+            indicator: String::new(),
             min_w: 0,
             min_h: 0,
             max_w: 0,

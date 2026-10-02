@@ -72,3 +72,21 @@ fn a_window_carries_the_word_its_program_gives_it() {
     let top: String = (10..52).map(|x| buf.get(x, 3).unwrap().to_char()).collect();
     assert!(!top.contains("awake"), "the word stayed: {top:?}");
 }
+
+#[test]
+fn a_windows_own_words_at_the_right_of_the_status_line_with_a_lit_part() {
+    use owlosui_core::{StatusItem, StatusLine};
+    let mut ui = desk();
+    let root = ui.root();
+    ui.insert(root, Rect::new(0, 24, 80, 1), Kind::Status(StatusLine::new(vec![StatusItem::new("~F1~ Help", None, 1)])));
+    let mut w = Window::new("DOS");
+    w.indicator = "[~A:~ B: C:]".into();
+    ui.insert(root, Rect::new(10, 3, 42, 14), Kind::Window(w));
+    let mut buf = Buffer::new(80, 25);
+    ui.draw(&mut buf);
+    let row: String = (0..80).map(|x| buf.get(x, 24).unwrap().to_char()).collect();
+    assert!(row.ends_with("[A: B: C:]"), "the status line reads {row:?}");
+    let a = row.find("A:").unwrap() as i16;
+    let b = row.find("B:").unwrap() as i16;
+    assert_ne!(buf.get(a, 24).unwrap().attr, buf.get(b, 24).unwrap().attr, "A: is not lit apart from B:");
+}

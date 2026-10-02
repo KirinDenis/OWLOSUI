@@ -113,13 +113,13 @@ cd \\
   'C/README.TXT': `
   This PC runs in your browser: DOSBox, compiled to WebAssembly.
 
-    COMMANDR   the file manager - C:\\DEMO on the left, the floppy A: on the right
-    DEMO       the OWLOSUI demo, in Pascal      CDEMO, ASMDEMO   in C, in assembler
+    COMMANDR   the file manager: C:\\DEMO on the left, floppy A: on the right
+    DEMO       the OWLOSUI demo in Pascal; CDEMO in C, ASMDEMO in assembler
     OWLFLY     OWL FLY III, over the network
 
-  Every one of them draws with OWLOSRES: the same Rust core as the page around
-  this window, built for DOS. A: and B: are folders of the browser's storage,
-  "DOS A Drive" and "DOS B Drive": put files there from the page, find them here.
+  Each of them draws with OWLOSRES: the same Rust core as the page around this
+  window, built for DOS. A: and B: are folders of the browser's storage, DOS A
+  Drive and DOS B Drive: put files there from the page and find them here.
   Right Ctrl gives the keyboard back to the page.
 
 `,
@@ -316,7 +316,8 @@ export class DosTool {
     this.dialog = null;
     this.disk = null;         // drive C:'s files, fetched once
     this.network = { state: 'off', url: '' };
-    this.lights = '';
+    this.lit = new Set();        // the drives whose light is on
+    this.lightsOff = {};
     this.box.on(what => {
       if (what === 'keys') this.retitle();
       if (what === 'stopped' && this.win) this.retitle();
@@ -396,10 +397,13 @@ export class DosTool {
     // window, or before the machine is on.
     owl.staticText(this.win, 2, 1, 'The DOS PC is switching on. Its picture is laid over this window, and taken away ' +
       'while a menu or another window is over it - DOS keeps running. Bring this window to the front to see it again.', rect.w - 6, 6);
+    // Right Ctrl, the one key worth saying; a click on the picture is how
+    // the keyboard goes to DOS.
+    owl.windowStatus(this.win, { label: '~Right Ctrl~ Keys back', cmd: 0 });
     this.showLights();
     owl.windowMenu(this.win, {
       label: '~M~achine', items: [
-        { label: '~K~eyboard to DOS', cmd: DosCm.Keys, shortcut: 'Enter', hint: 'Or click the DOS picture; Right Ctrl gives it back' },
+        { label: '~K~eyboard to DOS', cmd: DosCm.Keys, hint: 'Or click the DOS picture; Right Ctrl gives it back' },
         { label: '~R~estart', cmd: DosCm.Restart, hint: 'Switch off and on again, with the settings as they are now' },
         { label: '~S~ettings...', cmd: DosCm.Settings },
         { label: '~N~etwork monitor', cmd: DosCm.NetMonitor },
@@ -429,6 +433,7 @@ export class DosTool {
     if (typeof document === 'undefined') return;
     this.started = start;
     this.program = program;
+    this.cSeen = null;          // a new disk C: is not DOS writing to it
     if (!this.win || rect) this.openWindow(rect ?? undefined);
     else this.owl.activate(this.win);
     this.retitle();
@@ -561,34 +566,40 @@ export class DosTool {
     }, 250);
   }
 
-  /** What DOS wrote to its floppies, into the folders - and the page's commander reads them again. */
+  /**
+   * What DOS wrote to its floppies, into the folders - and the page's
+   * commander reads them again. And whether DOS wrote to its hard disk,
+   * for C:'s light: the emulator tells the page what its files are and how
+   * big, so a change is seen; what DOS only reads is not.
+   */
   async watchFloppy() {
     if (!this.box.running || this.pulling) return;
     this.pulling = true;
     try {
       if (await this.gates.pull()) this.commander?.refreshSource?.(this.storage);
+      const tree = await this.box.ci.fsTree();
+      const c = JSON.stringify((tree.nodes ?? []).find(n => n.name === 'C'));
+      if (this.cSeen && c !== this.cSeen) this.light('C');
+      this.cSeen = c;
     } catch { /* switching off */ }
     this.pulling = false;
   }
 
   /**
-   * A drive's light, on the DOS window's status line: lit while files go
-   * between a folder and its floppy, so the move can be seen.
+   * A drive's light, at the right of the status line while the DOS window
+   * is in front: [A: B: C:], a letter green while files go to or from it.
    */
   light(letter) {
-    this.lights = letter;
+    this.lit.add(letter);
     this.showLights();
-    clearTimeout(this.lightsOff);
-    this.lightsOff = setTimeout(() => { this.lights = ''; this.showLights(); }, 700);
+    clearTimeout(this.lightsOff[letter]);
+    this.lightsOff[letter] = setTimeout(() => { this.lit.delete(letter); this.showLights(); }, 900);
   }
 
   showLights() {
     if (!this.win) return;
-    const lamp = l => (this.lights === l ? '■' : '·');   // code page 437's FEh and FAh
-    this.owl.windowStatus(this.win,
-      { label: '~Enter~ Keys to DOS', cmd: DosCm.Keys, key: 'Enter' },
-      { label: '~Right Ctrl~ Keys back', cmd: 0 },
-      { label: `A: ${lamp('A')}  B: ${lamp('B')}`, cmd: 0 });
+    const drives = ['A', 'B', 'C'].map(l => (this.lit.has(l) ? `~${l}:~` : `${l}:`)).join(' ');
+    this.owl.windowIndicator(this.win, `[${drives}]`);
     this.owl.refresh?.();
   }
 

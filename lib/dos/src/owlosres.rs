@@ -470,11 +470,28 @@ Usage: OWLOSRES PROGRAM.EXE [arguments]\r\n$");
         clear_screen();
     }
     if !ran {
-        say(seg, if dos_error == 2 {
-            b"OWLOSRES: no such program.\r\n$"
-        } else {
-            b"OWLOSRES: DOS would not run the program.\r\n$"
-        });
+        // Which error DOS gave, by number and in words: "would not run"
+        // alone leaves the person guessing, and the number is what tells
+        // a full memory from a file that is not a program.
+        let why: &[u8] = match dos_error {
+            2 => b"no such program",
+            3 => b"no such folder",
+            5 => b"access denied",
+            8 => b"not enough memory - a program left resident may hold it",
+            10 | 11 => b"not a program DOS can load",
+            _ => b"",
+        };
+        let mut text = b"OWLOSRES: DOS would not run the program: error ".to_vec();
+        if dos_error >= 10 {
+            text.push(b'0' + (dos_error / 10 % 10) as u8);
+        }
+        text.push(b'0' + (dos_error % 10) as u8);
+        if !why.is_empty() {
+            text.extend_from_slice(b", ");
+            text.extend_from_slice(why);
+        }
+        text.extend_from_slice(b".\r\n$");
+        say(seg, &text);
         dos_exit(5);
     }
     let mut code = RealRegs { eax: 0x4D00, ..Default::default() };

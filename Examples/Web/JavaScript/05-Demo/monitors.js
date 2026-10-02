@@ -20,6 +20,17 @@ const kb = n => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} K
 const grouped = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 const clock = t => new Date(t).toTimeString().slice(0, 8);
 
+/** Words into lines no wider than width: a sentence in a window narrower than it is not cut off. */
+function wrap(text, width) {
+  const lines = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    if (line && line.length + 1 + word.length > width) { lines.push(line); line = word; } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
 /** A bar graph of values, `rows` high, in half-cell steps: rows of text. */
 function bars(values, width, rows, max) {
   const top = Math.max(max, 1);
@@ -115,8 +126,8 @@ export class Monitors {
     bars(hist.map(h => h.out), width, 3, max).forEach((line, i) => rows.push([(i === 0 ? ' Sent' : '').padEnd(10) + line, YELLOW]));
     rows.push([` ${'time'.padEnd(9)}${'way'.padEnd(5)}${'bytes'.padStart(6)}  ${'from (node:socket)'.padEnd(23)}  to (node:socket)`, GREY]);
     if (tap.packets.length === 0) {
-      rows.push([' Nothing has gone over the wire yet. DOS > Play OWL FLY III puts a machine on it:', WHITE]);
-      rows.push([' every IPX packet it sends is one WebSocket message to the relay, counted here.', WHITE]);
+      for (const line of wrap('Nothing has gone over the wire yet. DOS > Play OWL FLY III puts a machine on it: ' +
+        'every IPX packet it sends is one WebSocket message to the relay, counted here.', m.w - 2)) rows.push([` ${line}`, WHITE]);
     }
     const room = m.h - rows.length;
     for (const p of tap.packets.slice(-room).reverse()) {
@@ -134,7 +145,7 @@ export class Monitors {
     const m = this.machine, box = this.dos.box;
     const rows = [];
     if (!box.running) {
-      rows.push([' The DOS PC is off. DOS > Switch on starts it.', WHITE]);
+      for (const line of wrap('The DOS PC is off. DOS > Switch on starts it.', m.w - 2)) rows.push([` ${line}`, WHITE]);
       this.last = null;
       this.lines(m, rows);
       return;
@@ -173,8 +184,9 @@ export class Monitors {
     rows.push([this.disks, WHITE]);
     const t = box.net.totals();
     rows.push([` Network   ${this.dos.network.state}; ${kb(t.sent)} out, ${kb(t.received)} in`, WHITE]);
-    rows.push([' DOSBox does not show the page DOS\'s memory or programs;', GREY]);
-    rows.push([' what is here is what js-dos counts in the emulator.', GREY]);
+    for (const line of wrap("DOSBox does not show the page DOS's memory or programs; what is here is what js-dos counts in the emulator.", m.w - 2)) {
+      rows.push([` ${line}`, GREY]);
+    }
     this.lines(m, rows);
   }
 }

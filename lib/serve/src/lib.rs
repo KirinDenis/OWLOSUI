@@ -126,6 +126,7 @@ pub mod op {
     pub const SUSPEND: u8 = 0x63;
     pub const RESUME: u8 = 0x64;
     pub const SET_TAG: u8 = 0x65;
+    pub const SET_INDICATOR: u8 = 0x66;
 }
 
 type Res<T> = Result<T, String>;
@@ -1411,6 +1412,19 @@ impl Server {
                 let id = self.alive(id)?;
                 match self.ui()?.kind_mut(id) {
                     Kind::Window(w) => w.tag = core,
+                    _ => return Err(format!("view {} is not a window", id.raw())),
+                }
+            }
+
+            op::SET_INDICATOR => {
+                // The words at the right end of the status line while the
+                // window is in front; a part between tildes lit, green.
+                let id = r.id("id")?;
+                let text = r.str("text")?;
+                let core = self.cp.to_core(&text);
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Window(w) => w.indicator = core,
                     _ => return Err(format!("view {} is not a window", id.raw())),
                 }
             }
