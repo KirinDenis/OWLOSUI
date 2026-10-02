@@ -138,7 +138,7 @@ const DEFAULTS = {
   machine: 'svga_s3', memsize: 16, picture: 'sharp',
   core: 'auto', cputype: 'auto', cycles: 'auto', fixed: 20000,
   sbtype: 'sb16', gus: false, pcspeaker: true, rate: 44100,
-  xms: true, ems: true, umb: true,
+  ems: true, umb: true,         // XMS is always on: see dosboxConf
   awake: true,
   start: 'commander',
   ipx: true, always: true, relay: 'wss://view.owlos.sk', room: 'owlfly3',
@@ -153,15 +153,12 @@ function saveSettings(s) {
 
 /**
  * The dosbox.conf a machine boots with: the settings, and what to start.
- * With XMS off the toolkit cannot start - CWSDPMI then takes its memory
- * from DOS's own 640K and DOS has none left to load the program - so the
- * PC says so before it tries, rather than leave only "error 8".
+ * XMS is always on, and not a setting: without it CWSDPMI takes the
+ * toolkit core's memory from DOS's own 640K, DOS has none left to load
+ * the program, and every OWLOSUI program fails with "error 8".
  */
 export function dosboxConf(s, start, line = STARTS[start]?.line ?? '') {
   const yes = b => (b ? 'true' : 'false');
-  // No > in an echo: DOS reads it as "into a file".
-  const warn = s.xms ? '' : 'echo XMS is off, and the OWLOSUI programs here need it to start.\n' +
-    "echo Turn it on in the page's DOS menu: Settings, the DOS page.\necho.\n";
   return crlf(`[sdl]
 autolock=false
 [dosbox]
@@ -180,7 +177,7 @@ gus=${yes(s.gus)}
 [speaker]
 pcspeaker=${yes(s.pcspeaker)}
 [dos]
-xms=${yes(s.xms)}
+xms=true
 ems=${yes(s.ems)}
 umb=${yes(s.umb)}
 [ipx]
@@ -193,7 +190,7 @@ mount b B -t floppy
 path C:\\;Z:\\
 c:
 cls
-${warn}${line}
+${line}
 type C:\\README.TXT
 `);
 }
@@ -267,9 +264,8 @@ const PAGES = [
     name: 'DOS',
     build(o, d, s) {
       o.staticText(d.win, 2, 3, 'Memory DOS offers:', 26);
-      // XMS is where CWSDPMI finds the memory the toolkit's core runs in;
-      // without it the core takes DOS's own 640K and no program fits after.
-      d.parts.mem = o.cluster(d.win, 2, 4, 30, ['XMS - OWLOSUI needs it', 'EMS', 'Upper memory blocks'], { on: [s.xms, s.ems, s.umb] });
+      // No XMS here: it is always on - the toolkit's core lives in it.
+      d.parts.mem = o.cluster(d.win, 2, 4, 30, ['EMS', 'Upper memory blocks'], { on: [s.ems, s.umb] });
       o.staticText(d.win, 34, 3, 'At start, run:', 26);
       d.parts.start = o.cluster(d.win, 34, 4, 26, ['the commander', 'the OWLOSUI demo', 'OWL FLY III', 'the DOS prompt'],
         { single: true, on: ['commander', 'demo', 'owlfly', 'prompt'].indexOf(s.start) });
@@ -277,7 +273,7 @@ const PAGES = [
       d.parts.awake = o.cluster(d.win, 2, 13, 60, ['Keep running in a background tab - [awake] on its window'], { on: [s.awake] });
     },
     read(o, d, s) {
-      [s.xms, s.ems, s.umb] = o.clusterState(d.parts.mem).on;
+      [s.ems, s.umb] = o.clusterState(d.parts.mem).on;
       s.start = ['commander', 'demo', 'owlfly', 'prompt'][radio(o, d.parts.start)];
       [s.awake] = o.clusterState(d.parts.awake).on;
     },

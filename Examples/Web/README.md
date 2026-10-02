@@ -225,7 +225,7 @@ show the page, so neither does the monitor.
 **DOS > Settings** is DOSBox's own: video card, how its picture is shown -
 sharp, every DOS pixel a whole square of screen pixels and the window sized
 round it, or stretched to 4:3 and smoothed like a monitor - memory, CPU core, type and
-speed, sound cards, XMS, EMS and UMB, what to start, the network card and
+speed, sound cards, EMS and UMB (XMS is always on: the toolkit lives in it), what to start, the network card and
 the relay. It writes the `dosbox.conf` the PC boots with, and shows it.
 
 **Awake.** A browser pauses a hidden page's emulator; the PC does not let it,
