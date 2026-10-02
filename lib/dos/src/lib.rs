@@ -376,8 +376,33 @@ impl MouseState {
             m.x = x;
             m.y = y;
             m.buttons = b;
+            // Asking empties the driver's counts: what was clicked before
+            // this program started is not this program's.
+            for b in 0..3u16 {
+                Self::presses(5, b);
+                Self::presses(6, b);
+            }
         }
         m
+    }
+
+    /// The driver's own count of presses (5) or releases (6) of a button
+    /// since it was last asked, and the cell of the last of them.
+    fn presses(func: u32, button: u16) -> (u16, i16, i16) {
+        let mut r = RealRegs { eax: func, ebx: button as u32, ..Default::default() };
+        real_int(0x33, &mut r);
+        ((r.ebx & 0xFFFF) as u16, ((r.ecx & 0xFFFF) / 8) as i16, ((r.edx & 0xFFFF) / 8) as i16)
+    }
+
+    /// A press, as the core's event: a second on the same cell within half
+    /// a second - nine ticks - is a double.
+    fn down(&mut self, x: i16, y: i16, b: u16, button: Button) -> Event {
+        let now = ticks();
+        let twice = now.wrapping_sub(self.last_down) < 9 && self.last_at == (x, y, b);
+        self.last_down = if twice { 0 } else { now };
+        self.last_at = (x, y, b);
+        let kind = if twice { MouseKind::Double(button) } else { MouseKind::Down(button) };
+        Event::Mouse(Mouse { x, y, kind })
     }
 
     /// Where the pointer is, to paint it; `None` without a mouse.
@@ -398,41 +423,67 @@ impl MouseState {
     }
 
     /// What changed since last time, as the core's events: presses and
-    /// releases by button, a drag or a move by motion. A second press on
-    /// the same cell within half a second - nine ticks - is a double.
+    /// releases by button, a drag or a move by motion.
+    ///
+    /// The buttons are not read as they are now but as the driver counted
+    /// them: a quick click falls between two looks - the more so in an
+    /// emulator, the more so while the program is busy drawing - and a
+    /// button that is up both times was, by its state alone, never pressed.
+    /// The button went down on screen and nothing happened; held for a
+    /// moment, it worked. The counts remember every press and release, and
+    /// where the last of each was.
     pub fn poll(&mut self, out: &mut VecDeque<Event>) {
         if !self.present {
             return;
         }
         let (x, y, buttons) = self.read();
-        if x != self.x || y != self.y {
-            let kind = if self.buttons != 0 { MouseKind::Drag } else { MouseKind::Move };
-            out.push_back(Event::Mouse(Mouse { x, y, kind }));
-        }
-        let changed = buttons ^ self.buttons;
         for b in 0..3u16 {
             let bit = 1 << b;
-            if changed & bit == 0 {
-                continue;
-            }
             let button = match b {
                 1 => Button::Right,
                 2 => Button::Middle,
                 _ => Button::Left,
             };
-            let kind = if buttons & bit != 0 {
-                let now = ticks();
-                let twice = now.wrapping_sub(self.last_down) < 9 && self.last_at == (x, y, b);
-                self.last_down = if twice { 0 } else { now };
-                self.last_at = (x, y, b);
-                if twice {
-                    MouseKind::Double(button)
-                } else {
-                    MouseKind::Down(button)
+            let (downs, dx, dy) = Self::presses(5, b);
+            let (ups, ux, uy) = Self::presses(6, b);
+            let was = self.buttons & bit != 0;
+            let now = buttons & bit != 0;
+            let up = |x, y| Event::Mouse(Mouse { x, y, kind: MouseKind::Up(button) });
+            // Presses and releases alternate, so the state before, the
+            // state now and the two counts say what happened in between:
+            // up first if it was down, then a press, its release, and a
+            // press again if it is down now. Three at most - a double
+            // click inside one gap is the most a hand can do there, and
+            // the press timing finds it.
+            if downs == 0 && ups == 0 {
+                // Nothing the driver counted: trust the state.
+                if now && !was {
+                    let e = self.down(x, y, b, button);
+                    out.push_back(e);
+                } else if was && !now {
+                    out.push_back(up(x, y));
                 }
-            } else {
-                MouseKind::Up(button)
-            };
+                continue;
+            }
+            let mut ups_left = ups;
+            if was && ups_left > 0 {
+                out.push_back(up(ux, uy));
+                ups_left -= 1;
+            }
+            if downs > 0 && (!was || ups > 0) {
+                let e = self.down(dx, dy, b, button);
+                out.push_back(e);
+                if ups_left > 0 {
+                    out.push_back(up(ux, uy));
+                    if now {
+                        let e = self.down(dx, dy, b, button);
+                        out.push_back(e);
+                    }
+                }
+            }
+        }
+        if x != self.x || y != self.y {
+            let kind = if buttons != 0 { MouseKind::Drag } else { MouseKind::Move };
             out.push_back(Event::Mouse(Mouse { x, y, kind }));
         }
         self.x = x;

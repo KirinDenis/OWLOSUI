@@ -23,11 +23,39 @@
   run(document.getElementById('screen'), owl => {
     const app = new App(owl);
     window.demo = app;          // for the browser's console
+    if (new URLSearchParams(location.search).has('mouselog')) mouseLog(owl);
     app.welcome.show();
     return app;
   }).catch(e => {
     document.body.textContent = String(e) + ' - was lib\\js\\build.cmd run?';
   });
+
+  // ?mouselog: what the browser sent and what the core was given, in the
+  // corner, the newest at the bottom - for a mouse that misbehaves in one
+  // browser and not in another, so the order of its events can be read off
+  // a screenshot instead of guessed.
+  function mouseLog(owl) {
+    const box = document.createElement('pre');
+    box.style.cssText = 'position:fixed;right:0;bottom:0;margin:0;padding:4px 8px;z-index:99999;' +
+      'background:#000c;color:#5f5;font:12px monospace;pointer-events:none;white-space:pre';
+    document.body.append(box);
+    const lines = [], t0 = performance.now();
+    const add = s => {
+      lines.push(`${String(Math.round(performance.now() - t0)).padStart(7)}  ${s}`);
+      if (lines.length > 18) lines.shift();
+      box.textContent = lines.join('\n');
+    };
+    box.textContent = navigator.userAgent + '  dpr ' + devicePixelRatio;
+    for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture',
+      'mousedown', 'mouseup', 'click', 'blur']) {
+      window.addEventListener(type, e => add(`${type} b${e.button ?? ''} bs${e.buttons ?? ''} ${e.pointerType ?? ''} ` +
+        `${e.clientX ?? ''},${e.clientY ?? ''} on ${e.target?.tagName ?? e.target}`), true);
+    }
+    const mouse = owl.mouse.bind(owl), take = owl.take.bind(owl);
+    const kinds = ['down', 'up', 'drag', 'move', 'wheel+', 'wheel-', 'double'];
+    owl.mouse = (k, x, y, b = 0) => { if (k !== 3) add(`  core ${kinds[k]} ${x},${y} b${b}`); return mouse(k, x, y, b); };
+    owl.take = () => { const r = take(); if (r.pressed || r.command) add(`  core gave ${r.pressed || r.command}`); return r; };
+  }
 </script>
 </body>
 </html>
