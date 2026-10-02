@@ -144,8 +144,20 @@ const DEFAULTS = {
   ipx: true, always: true, relay: 'wss://view.owlos.sk', room: 'owlfly3',
 };
 
+/**
+ * The memory sizes on offer, in MB. Nothing under 16: at 4 MB the toolkit
+ * core's DPMI memory does not fit and every OWLOSUI program fails with
+ * "error 8"; at 1 MB there is no extended memory at all, and DOS-extended
+ * programs (DOS/16M, DOS4GW) stop with "not enough extended memory".
+ */
+const MEMORY = [16, 32, 63];
+
 function loadSettings() {
-  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('owlosui.dosbox') ?? '{}') }; } catch { return { ...DEFAULTS }; }
+  let s;
+  try { s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('owlosui.dosbox') ?? '{}') }; } catch { s = { ...DEFAULTS }; }
+  // A size saved before the small ones were withdrawn: lift it.
+  if (!MEMORY.includes(s.memsize)) s.memsize = DEFAULTS.memsize;
+  return s;
 }
 function saveSettings(s) {
   try { localStorage.setItem('owlosui.dosbox', JSON.stringify(s)); } catch { /* a private window: for this visit only */ }
@@ -208,8 +220,8 @@ const PAGES = [
       d.parts.machine = o.cluster(d.win, 2, 4, 28, ['S3 Trio64 SVGA', 'VGA', 'EGA', 'CGA', 'Hercules', 'Tandy'],
         { single: true, on: ['svga_s3', 'vgaonly', 'ega', 'cga', 'hercules', 'tandy'].indexOf(s.machine) });
       o.staticText(d.win, 34, 3, 'Memory:', 20);
-      d.parts.memsize = o.cluster(d.win, 34, 4, 20, ['1 MB', '4 MB', '16 MB', '32 MB', '63 MB'],
-        { single: true, on: [1, 4, 16, 32, 63].indexOf(s.memsize) });
+      d.parts.memsize = o.cluster(d.win, 34, 4, 20, MEMORY.map(m => `${m} MB`),
+        { single: true, on: MEMORY.indexOf(s.memsize) });
       o.staticText(d.win, 34, 10, 'Picture:', 20);
       d.parts.picture = o.cluster(d.win, 34, 11, 28, ['sharp: whole pixels', 'a monitor: 4:3, smoothed'],
         { single: true, on: ['sharp', 'monitor'].indexOf(s.picture) });
@@ -217,7 +229,7 @@ const PAGES = [
     },
     read(o, d, s) {
       s.machine = ['svga_s3', 'vgaonly', 'ega', 'cga', 'hercules', 'tandy'][radio(o, d.parts.machine)];
-      s.memsize = [1, 4, 16, 32, 63][radio(o, d.parts.memsize)];
+      s.memsize = MEMORY[radio(o, d.parts.memsize)];
       s.picture = ['sharp', 'monitor'][radio(o, d.parts.picture)];
     },
   },
