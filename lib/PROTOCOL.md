@@ -118,8 +118,19 @@ ask "save changes?" first.
 | 1   | not resizable |
 | 2   | not zoomable |
 | 3   | not closable |
-| 4–5 | palette: `0` blue (documents), `1` cyan (help), `2` grey (dialogs) |
+| 4–5 | palette: `0` blue (documents), `1` cyan (help), `2` grey (dialogs), `3` black (a terminal: a console's window, frame and all) |
 | 6   | no shadow — for windows that tile the screen rather than float on it |
+| 7   | no minimize box. A modal window has none anyway, nor has one without a shadow (a commander's panel) |
+
+The boxes sit together at the right of the top edge: minimize `[↓]`, zoom
+`[↑]` (`[↕]` while zoomed), close `[■]` in the corner, and only on the
+active window. Minimize puts the window away: it falls, as a box with its
+title, into a bar one row high in the bottom right corner of the work
+area, the bars stacking upwards (a column further left when one fills).
+A bar lies on the desktop under every window; a click on it brings the
+window back where it was and in front, its `[■]` closes it (or sends its
+`close_cmd`). `ACTIVATE` on a minimized window brings it back too, and so
+does Alt+its number. `PLACE` says covered while it is away.
 
 `TEXT.dock`: `0` fill the parent, `1` stay where the `rect` put it.
 `TEXT.flags`: bit 0 read-only, bit 1 drawn as a box of its own.
@@ -273,6 +284,7 @@ is the client's, and about 90 ms is long enough to be seen.
 | 0x42 | GET_GLYPHS | —  | `growing:u8 n:u16` then `n × u16` — the Unicode code point of each glyph index in the session's font |
 | 0x43 | CYCLE | —       | OK — the front window goes to the back (the classic F6) |
 | 0x44 | ZOOM  | `id`    | OK — a window fills the work area, or goes back to its size (F5) |
+| 0x6C | MINIMIZE | `id` | OK — the window is put away into its bar in the bottom right corner, as its `[↓]` does; `ACTIVATE` brings it back |
 | 0x45 | SET_BUTTON | `id index:u8 enabled:u8` | OK — enable or disable one button of a row |
 | 0x46 | FOCUS | `id`    | OK — put the focus on that control, in its window |
 | 0x47 | CASCADE | —     | OK — the windows along the diagonal, every title showing; a fixed-size window only moves |
@@ -329,7 +341,10 @@ shows the hardware cursor there, as the classic DOS programs did.
 `hold` is `1` when this frame shows something chosen that has not yet
 happened: a button a key just pressed, drawn down; a menu item just
 clicked, drawn lit. Show the frame, wait about 90 ms, send `TICK`, then
-`TAKE`. A press that fires before it is seen is a press nobody believes —
+`TAKE`. `hold` is `2` for a step of a window falling into its bar or
+rising out of it: the same, with as short a wait as the client likes
+(the page waits 35 ms); a client that treats it as `1` animates slower,
+and correctly. A press that fires before it is seen is a press nobody believes —
 Alt+S saved the file and nothing on the screen said so.
 
 A cell's `attr` is the IBM byte: low nibble foreground, high nibble

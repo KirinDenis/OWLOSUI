@@ -1206,7 +1206,10 @@ fn the_desktop_keys_work_over_the_wire() {
     c.ok(0x30, &[2, 0, 0, 0]);
     let f = frame(&mut c);
     let (x, _) = find(&f, " Alpha ").unwrap();
-    assert_eq!(x, 1 + (30 - 7) / 2, "the title moved with the window");
+    // Centred would be 1 + 11; the three boxes and the number at the right
+    // of a window 30 wide leave the title room up to column 16, so it
+    // stands just left of them.
+    assert_eq!(x, 1 + 9, "the title moved with the window");
     // The three verbs as ops too.
     c.ok(0x4D, &[]);
     c.ok(0x4E, &[]);

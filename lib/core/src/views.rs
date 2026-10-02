@@ -102,6 +102,12 @@ pub struct Window {
     /// closes the window; with a command the program hears about it and
     /// decides. An editor with unsaved text wants the second.
     pub close_cmd: u16,
+    /// Has a minimize box: the window can be put away into a bar of its
+    /// own in the bottom right corner, and brought back from there.
+    pub minimizable: bool,
+    /// Put away: drawn as its bar in the corner, not as itself. Its own
+    /// rectangle is kept, to come back to.
+    pub(crate) minimized: bool,
     /// Set while zoomed; holds the rectangle to restore.
     pub(crate) unzoomed: Option<Rect>,
     /// What this window adds to the status line while it is the active
@@ -136,6 +142,8 @@ impl Window {
             max_h: 0,
             centred: false,
             close_cmd: 0,
+            minimizable: true,
+            minimized: false,
             unzoomed: None,
             status: Vec::new(),
             menu: Vec::new(),
@@ -144,6 +152,10 @@ impl Window {
 
     pub fn is_zoomed(&self) -> bool {
         self.unzoomed.is_some()
+    }
+
+    pub fn is_minimized(&self) -> bool {
+        self.minimized
     }
 }
 

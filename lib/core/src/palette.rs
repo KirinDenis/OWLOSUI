@@ -54,6 +54,9 @@ pub enum WinPalette {
     Blue,
     Cyan,
     Gray,
+    /// A terminal's: black, so a console's frame is the colour of what is
+    /// in it, as a document's frame is its blue.
+    Black,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -68,6 +71,7 @@ pub struct Palette {
     pub blue: WinColors,
     pub cyan: WinColors,
     pub gray: WinColors,
+    pub black: WinColors,
 
     /// Menus. Measured: the panel is one colour throughout, frame included,
     /// and the item under the cursor turns green rather than inverting.
@@ -196,6 +200,7 @@ impl Palette {
             WinPalette::Blue => &self.blue,
             WinPalette::Cyan => &self.cyan,
             WinPalette::Gray => &self.gray,
+            WinPalette::Black => &self.black,
         }
     }
 
@@ -275,6 +280,25 @@ impl Palette {
                 text_selected: attr(Color::White, Color::Green),
                 link: attr(Color::Blue, Color::LightGray),
                 link_focus: attr(Color::White, Color::Green),
+            },
+
+            // A terminal. Chosen, not measured: the frame is the console's
+            // own black, its lines the console's grey, white when active.
+            black: WinColors {
+                frame_passive: attr(Color::DarkGray, Color::Black),
+                frame_active: attr(Color::White, Color::Black),
+                frame_dragging: attr(Color::LightGreen, Color::Black),
+                handle: attr(Color::LightGreen, Color::Black),
+
+                body: attr(Color::LightGray, Color::Black),
+                body_passive: attr(Color::LightGray, Color::Black),
+
+                scroll: attr(Color::LightGray, Color::Black),
+
+                text: attr(Color::LightGray, Color::Black),
+                text_selected: attr(Color::Black, Color::LightGray),
+                link: attr(Color::LightCyan, Color::Black),
+                link_focus: attr(Color::White, Color::Black),
             },
 
             // 0x70 and 0x74, measured rather than guessed from a picture. The
@@ -498,6 +522,17 @@ impl Palette {
         ("Syntax", "string"),
         ("Syntax", "number"),
         ("Syntax", "directive"),
+        ("Black window", "frame passive"),
+        ("Black window", "frame active"),
+        ("Black window", "frame dragging"),
+        ("Black window", "handle"),
+        ("Black window", "body"),
+        ("Black window", "body passive"),
+        ("Black window", "scroll"),
+        ("Black window", "text"),
+        ("Black window", "text selected"),
+        ("Black window", "link"),
+        ("Black window", "link focus"),
     ];
 
     /// The attribute of entry `ix` of `NAMES`.
@@ -595,6 +630,17 @@ impl Palette {
             89 => Some(self.syntax_string),
             90 => Some(self.syntax_number),
             91 => Some(self.syntax_directive),
+            92 => Some(self.black.frame_passive),
+            93 => Some(self.black.frame_active),
+            94 => Some(self.black.frame_dragging),
+            95 => Some(self.black.handle),
+            96 => Some(self.black.body),
+            97 => Some(self.black.body_passive),
+            98 => Some(self.black.scroll),
+            99 => Some(self.black.text),
+            100 => Some(self.black.text_selected),
+            101 => Some(self.black.link),
+            102 => Some(self.black.link_focus),
             _ => None,
         }
     }
@@ -694,6 +740,17 @@ impl Palette {
             89 => self.syntax_string = attr,
             90 => self.syntax_number = attr,
             91 => self.syntax_directive = attr,
+            92 => self.black.frame_passive = attr,
+            93 => self.black.frame_active = attr,
+            94 => self.black.frame_dragging = attr,
+            95 => self.black.handle = attr,
+            96 => self.black.body = attr,
+            97 => self.black.body_passive = attr,
+            98 => self.black.scroll = attr,
+            99 => self.black.text = attr,
+            100 => self.black.text_selected = attr,
+            101 => self.black.link = attr,
+            102 => self.black.link_focus = attr,
             _ => return false,
         }
         true

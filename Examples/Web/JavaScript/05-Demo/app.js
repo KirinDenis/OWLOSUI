@@ -21,7 +21,7 @@
 //             report (log.js records it, console.js shows it).
 //   Options   A dialog of check boxes and radio buttons; the colour dialog,
 //             every role of the palette changed live; a ticked item.
-//   Window    Size/Move, Zoom, Next, Previous, Close, List, Cascade, Tile:
+//   Window    Size/Move, Zoom, Minimize, Next, Previous, Close, List, Cascade, Tile:
 //             the desktop's own verbs. Alt+1..9 reach numbered windows.
 //   DOS       A DOS PC in a window: DOSBox in WebAssembly, its disk made
 //             of this repository's DOS examples on the same Rust core,
@@ -69,7 +69,7 @@ const SAMPLES = [
   ['/dos_demo.png', 'Examples/screens/dos_demo.png'],
 ].map(([to, from]) => [to, new URL(from, ROOT).href]);
 export const CmOptions = 20, CmClock = 21, CmColors = 22;
-export const CmNext = 30, CmZoom = 31, CmClose = 32, CmCascade = 33, CmTile = 34, CmPrevious = 35, CmList = 36, CmSizeMove = 37;
+export const CmNext = 30, CmZoom = 31, CmClose = 32, CmCascade = 33, CmTile = 34, CmPrevious = 35, CmList = 36, CmSizeMove = 37, CmMinimize = 38;
 export const CmAbout = 40, CmHelp = 41, CmWelcome = 42, CmConsole = 43;
 export const CmOk = 60, CmCancel = 61, CmDismiss = 62;
 export const CmOpenBrowser = 50, CmOpenServer = 51, CmOpenDav = 52, CmSave = 53;
@@ -155,6 +155,7 @@ export class App {
       sub('~W~indow',
         { label: '~S~ize/Move', cmd: CmSizeMove, shortcut: 'Ctrl+F5', hint: 'Arrows move the window, Shift+arrows resize it; Enter keeps, Esc puts back' },
         { label: '~Z~oom', cmd: CmZoom, shortcut: 'F5', hint: 'The window fills the desktop, or goes back to its size' },
+        { label: 'Mi~n~imize', cmd: CmMinimize, hint: 'The window falls into a bar in the bottom right corner; a click on the bar brings it back' },
         { label: '~N~ext', cmd: CmNext, shortcut: 'F6', hint: 'The front window goes to the back' },
         { label: '~P~revious', cmd: CmPrevious, shortcut: 'Shift+F6', hint: 'The window at the back comes to the front' },
         { label: '~C~lose', cmd: CmClose, shortcut: 'Alt+F3', hint: 'Close the front window' },
@@ -525,6 +526,7 @@ export class App {
       case CmNext: owl.nextWindow(); return true;
       case CmPrevious: owl.previousWindow(); return true;
       case CmZoom: { const a = owl.active(); if (a) owl.zoom(a); return true; }
+      case CmMinimize: { const a = owl.active(); if (a) owl.minimize(a); return true; }
       case CmClose: this.closeActive(); return true;
       case CmCascade: owl.cascade(); return true;
       case CmTile: owl.tile(); return true;

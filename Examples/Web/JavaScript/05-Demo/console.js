@@ -35,7 +35,9 @@ export class ConsoleWindow {
     const owl = this.owl;
     if (this.win) { owl.activate(this.win); return; }
     const w = Math.min(110, owl.width - 2), h = Math.max(10, owl.height - 4);
-    this.win = owl.window('Console', w, h, { style: Style.Document, closeCmd: Cm.Close });
+    // Black, frame and all: the window is the colour of what is in it, as a
+    // document's is its blue.
+    this.win = owl.window('Console', w, h, { style: Style.Terminal, closeCmd: Cm.Close });
     this.view = owl.console(this.win, { scrollback: 2000 });
     owl.consoleWrite(this.view, log.text());
     // Written a moment later, not inside whatever is logging: a line can

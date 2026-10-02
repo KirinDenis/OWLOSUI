@@ -765,6 +765,12 @@ public sealed class Owlosui : IDisposable
     /// <summary>A window fills the work area, or goes back to its size: F5.</summary>
     public void Zoom(ushort window) => Call(Op.Zoom, W.U16(window));
 
+    /// <summary>
+    /// Put a window away into its bar in the bottom right corner;
+    /// <see cref="Activate"/> brings it back.
+    /// </summary>
+    public void Minimize(ushort window) => Call(Op.Minimize, W.U16(window));
+
     // ------------------------------------------------------------- clusters
 
     /// <summary>
@@ -1520,6 +1526,7 @@ public sealed class Owlosui : IDisposable
         Help = 0x10,              // cyan
         Dialog = 0x20 | 0x02 | 0x04,  // grey, fixed size
         ModalDialog = Dialog | 0x01,
+        Terminal = 0x30,          // black, frame and all: a console's window
     }
 
     private static class Op
@@ -1536,7 +1543,7 @@ public sealed class Owlosui : IDisposable
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
         public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E, Syntax = 0x5F, SyntaxDefine = 0x60, Unmark = 0x61;
         public const byte OpenWindow = 0x5B, Wait = 0x5C;
-        public const byte Console = 0x67, ConsoleWrite = 0x68;
+        public const byte Console = 0x67, ConsoleWrite = 0x68, Minimize = 0x6C;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;
     }

@@ -82,21 +82,21 @@ fn the_boxes_of_an_inactive_window_only_activate_it() {
     settle(&mut ui);
     assert_eq!(ui.active_window(), Some(b));
 
-    // A's close box would be at (3,0) if it were active. It is not, so the
-    // click activates A and that is all.
-    click(&mut ui, 3, 0);
+    // A's close box would be at (36,0), in its right-hand corner, if it
+    // were active. It is not, so the click activates A and that is all.
+    click(&mut ui, 36, 0);
     assert!(ui.is_alive(a), "clicking where an inactive window's [■] would be closed it");
     assert_eq!(ui.active_window(), Some(a));
 
     // Now it is active and the box is there.
-    click(&mut ui, 3, 0);
+    click(&mut ui, 36, 0);
     assert!(!ui.is_alive(a));
 
-    // Same for the zoom box: (40+20-5+1, 5) is B's [↑] cell, B inactive.
+    // Same for the zoom box: left of the close box, (20+40-8+1, 5) is B's [↑] cell, B inactive.
     let c = ui.insert(root, Rect::new(0, 0, 10, 4), Kind::Window(Window::new("C")));
     settle(&mut ui);
     assert_eq!(ui.active_window(), Some(c));
-    click(&mut ui, 56, 5);
+    click(&mut ui, 53, 5);
     assert_eq!(ui.rect(b), Rect::new(20, 5, 40, 10), "an inactive window was zoomed by a click");
     assert_eq!(ui.active_window(), Some(b));
 }

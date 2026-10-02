@@ -133,17 +133,17 @@ fn the_close_box_can_be_a_command() {
     let w = ui.insert(root, Rect::new(2, 1, 76, 23), Kind::Window(win));
     settle(&mut ui);
 
-    // The box is at x+2..x+4 on the title row.
-    ui.handle(Event::Mouse(Mouse { x: 5, y: 1, kind: MouseKind::Down(Button::Left) }));
-    ui.handle(Event::Mouse(Mouse { x: 5, y: 1, kind: MouseKind::Up(Button::Left) }));
+    // The box is in the right-hand corner of the title row: right - 5 .. right - 3.
+    ui.handle(Event::Mouse(Mouse { x: 74, y: 1, kind: MouseKind::Down(Button::Left) }));
+    ui.handle(Event::Mouse(Mouse { x: 74, y: 1, kind: MouseKind::Up(Button::Left) }));
     assert!(ui.is_alive(w), "closed instead of asking");
     assert_eq!(ui.take_command(), Some(42));
 
     // And with no command, it just closes.
     let w2 = ui.insert(root, Rect::new(2, 1, 76, 23), Kind::Window(Window::new("Other")));
     settle(&mut ui);
-    ui.handle(Event::Mouse(Mouse { x: 5, y: 1, kind: MouseKind::Down(Button::Left) }));
-    ui.handle(Event::Mouse(Mouse { x: 5, y: 1, kind: MouseKind::Up(Button::Left) }));
+    ui.handle(Event::Mouse(Mouse { x: 74, y: 1, kind: MouseKind::Down(Button::Left) }));
+    ui.handle(Event::Mouse(Mouse { x: 74, y: 1, kind: MouseKind::Up(Button::Left) }));
     assert!(!ui.is_alive(w2));
     assert_eq!(ui.take_command(), None);
 }

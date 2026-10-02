@@ -222,6 +222,48 @@ pub struct HostClip {
     pub paste_wanted: Option<ViewId>,
 }
 
+/// The boxes on a window's top edge.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TitleBox {
+    Minimize,
+    Zoom,
+    Close,
+}
+
+/// The boxes on a window's top edge and the column of each one's `[`,
+/// from the right-hand corner leftwards: close, zoom, minimize - where
+/// every windowing system since has put them, and where the hand looks.
+/// One list for the drawing and the clicking alike.
+fn title_boxes(w: &Window, abs: Rect) -> Vec<(TitleBox, i16)> {
+    let mut v = Vec::new();
+    let mut x = abs.right() - 5;
+    if w.closable && abs.w >= 8 {
+        v.push((TitleBox::Close, x));
+        x -= 3;
+    }
+    if w.zoomable && abs.w >= 12 {
+        v.push((TitleBox::Zoom, x));
+        x -= 3;
+    }
+    if w.minimizable && !w.modal && abs.w >= 18 {
+        v.push((TitleBox::Minimize, x));
+    }
+    v
+}
+
+/// How many frames a window takes to fall into its bar, or rise out of it.
+const ANIM_STEPS: u8 = 6;
+
+/// A window on its way to its bar in the corner, or back: drawn as a box
+/// with its title, from `from` to `to`, a step for every TICK.
+struct Anim {
+    id: ViewId,
+    from: Rect,
+    to: Rect,
+    step: u8,
+    minimizing: bool,
+}
+
 struct Drag {
     id: ViewId,
     mode: DragMode,
@@ -366,6 +408,11 @@ pub struct Ui {
     context_for: Option<ViewId>,
     /// The clipboard as the host program shares it. See `HostClip`.
     pub host_clip: HostClip,
+    /// Minimized windows, in the order their bars stack up from the
+    /// bottom right corner.
+    minimized: Vec<ViewId>,
+    /// A window falling into its bar, or rising out of it.
+    anim: Option<Anim>,
 }
 
 impl Ui {
@@ -400,6 +447,8 @@ impl Ui {
             selecting: None,
             context_for: None,
             host_clip: HostClip::default(),
+            minimized: Vec::new(),
+            anim: None,
         }
     }
 
@@ -586,6 +635,10 @@ impl Ui {
             return None;
         }
         let inside = self.client_abs(id);
+        // Put away, or on its way there or back: nothing of it is showing.
+        if self.is_minimized(id) || self.anim.as_ref().is_some_and(|a| a.id == id) {
+            return Some((inside, true));
+        }
         let mut order: Vec<ViewId> = self.nodes[self.root.ix()].children.clone();
         order.sort_by_key(|c| self.nodes[c.ix()].kind.layer());
         let at = order.iter().position(|&c| c == id)?;
@@ -619,6 +672,11 @@ impl Ui {
     /// The frontmost window is the last child of the desktop, so "activate"
     /// is just "move to the end". Painter's order does the rest.
     pub fn activate(&mut self, id: ViewId) {
+        // A window put away comes back to be in front: Alt+its number, the
+        // window list, a program bringing it up.
+        if self.is_minimized(id) {
+            return self.restore(id);
+        }
         let Some(parent) = self.nodes[id.ix()].parent else {
             return;
         };
@@ -657,8 +715,181 @@ impl Ui {
             .rev()
             .copied()
             .find(|id| {
-                self.nodes[id.ix()].alive && matches!(self.nodes[id.ix()].kind, Kind::Window(_))
+                self.nodes[id.ix()].alive && matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if !w.minimized)
             })
+    }
+
+    fn is_minimized(&self, id: ViewId) -> bool {
+        matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if w.minimized)
+    }
+
+    // -------------------------------------------------------------- minimize
+
+    /// Put a window away: it falls, as a box with its title, into a bar of
+    /// its own in the bottom right corner, the bars stacking upwards. The
+    /// window in front of the rest becomes the active one.
+    pub fn minimize(&mut self, id: ViewId) {
+        if !self.is_alive(id) || self.is_minimized(id) {
+            return;
+        }
+        let from = self.abs_rect(id);
+        let Kind::Window(w) = &mut self.nodes[id.ix()].kind else { return };
+        if !w.minimizable || w.modal {
+            return;
+        }
+        w.minimized = true;
+        self.finish_anim();
+        self.drag = None;
+        self.close_menu();
+        self.minimized.push(id);
+        let to = self.bar_rect(id);
+        self.anim = Some(Anim { id, from, to, step: 0, minimizing: true });
+    }
+
+    /// Bring a minimized window back where it was, rising out of its bar,
+    /// and in front.
+    pub fn restore(&mut self, id: ViewId) {
+        if !self.is_minimized(id) {
+            return;
+        }
+        self.finish_anim();
+        let from = self.bar_rect(id);
+        self.minimized.retain(|m| *m != id);
+        let to = self.abs_rect(id);
+        self.anim = Some(Anim { id, from, to, step: 0, minimizing: false });
+    }
+
+    /// Whether a window is falling or rising: each frame is held, and each
+    /// TICK is a step.
+    pub fn animating(&self) -> bool {
+        self.anim.is_some()
+    }
+
+    fn step_anim(&mut self) {
+        let done = match &mut self.anim {
+            Some(a) => {
+                a.step += 1;
+                a.step >= ANIM_STEPS
+            }
+            None => return,
+        };
+        if done {
+            self.finish_anim();
+        }
+    }
+
+    /// The animation to its end at once: the window is in its bar, or back.
+    fn finish_anim(&mut self) {
+        let Some(a) = self.anim.take() else { return };
+        if !a.minimizing && self.is_alive(a.id) {
+            if let Kind::Window(w) = &mut self.nodes[a.id.ix()].kind {
+                w.minimized = false;
+            }
+            self.activate(a.id);
+        }
+    }
+
+    /// Where a minimized window's bar is: the bottom right of the work
+    /// area, one row each, upwards in the order they were put away; a
+    /// column to the left when one fills.
+    fn bar_rect(&self, id: ViewId) -> Rect {
+        let work = self.work_area();
+        let i = self.minimized.iter().position(|m| *m == id).unwrap_or(self.minimized.len()) as i16;
+        let title = match &self.nodes[id.ix()].kind {
+            Kind::Window(w) => w.title.chars().count() as i16,
+            _ => 0,
+        };
+        let w = (title + 10).clamp(18, 32).min(work.w.max(1));
+        let per = work.h.max(1);
+        let (col, row) = (i / per, i % per);
+        Rect::new((work.right() - w * (col + 1)).max(work.x), work.bottom() - 1 - row, w, 1)
+    }
+
+    /// The minimized window whose bar is under the pointer.
+    fn bar_at(&self, p: Point) -> Option<ViewId> {
+        self.minimized.iter().rev().copied().find(|&id| self.is_alive(id) && self.bar_rect(id).contains(p))
+    }
+
+    /// A press on a bar: its `[■]` closes the window, as the close box
+    /// would; anywhere else brings it back.
+    fn bar_click(&mut self, id: ViewId, p: Point) {
+        let r = self.bar_rect(id);
+        let (closable, close_cmd) = match &self.nodes[id.ix()].kind {
+            Kind::Window(w) => (w.closable, w.close_cmd),
+            _ => return,
+        };
+        if closable && p.x >= r.right() - 4 && p.x <= r.right() - 2 {
+            if close_cmd != 0 {
+                // The program decides, as for the close box, and is asked
+                // about a window it can see.
+                self.restore(id);
+                self.finish_anim();
+                self.command = Some(close_cmd);
+            } else {
+                self.close(id);
+            }
+            return;
+        }
+        self.restore(id);
+    }
+
+    fn draw_bars(&self, buf: &mut Buffer, clip: Rect) {
+        for &id in &self.minimized {
+            if !self.is_alive(id) || self.anim.as_ref().is_some_and(|a| a.id == id) {
+                continue;
+            }
+            let Kind::Window(w) = &self.nodes[id.ix()].kind else { continue };
+            let r = self.bar_rect(id);
+            let p = self.palette.window(w.palette);
+            buf.fill(r, b' ', p.frame_active, clip);
+            let room = (r.w - 9).max(0) as usize;
+            let title: String = w.title.chars().take(room).collect();
+            buf.text(r.x + 1, r.y, &title, p.frame_active, clip);
+            // Up, to come back; the square, to close - the same boxes, in
+            // the same places, as on the window's own top edge.
+            let rx = r.right() - 7;
+            buf.put(rx, r.y, b'[', p.frame_active, clip);
+            buf.put(rx + 1, r.y, 0x18 as Glyph, p.handle, clip);
+            buf.put(rx + 2, r.y, b']', p.frame_active, clip);
+            if w.closable {
+                let cx = r.right() - 4;
+                buf.put(cx, r.y, b'[', p.frame_active, clip);
+                buf.put(cx + 1, r.y, glyph::SQUARE, p.handle, clip);
+                buf.put(cx + 2, r.y, b']', p.frame_active, clip);
+            }
+        }
+    }
+
+    /// The window in flight: a box with its title, between where it was
+    /// and where it is going, nearer the end with every step.
+    fn draw_anim(&self, buf: &mut Buffer, clip: Rect) {
+        let Some(a) = &self.anim else { return };
+        let Kind::Window(w) = &self.nodes[a.id.ix()].kind else { return };
+        let t = a.step as i32 + 1;
+        let n = ANIM_STEPS as i32 + 1;
+        let lerp = |f: i16, to: i16| (f as i32 + (to as i32 - f as i32) * t / n) as i16;
+        let r = Rect::new(lerp(a.from.x, a.to.x), lerp(a.from.y, a.to.y), lerp(a.from.w, a.to.w).max(4), lerp(a.from.h, a.to.h).max(1));
+        let p = self.palette.window(w.palette);
+        let fa = p.frame_active;
+        buf.fill(r, b' ', p.body, clip);
+        if r.h >= 2 {
+            buf.hline(r.x + 1, r.y, r.w - 2, glyph::SL_H, fa, clip);
+            buf.hline(r.x + 1, r.bottom() - 1, r.w - 2, glyph::SL_H, fa, clip);
+            buf.vline(r.x, r.y + 1, r.h - 2, glyph::SL_V, fa, clip);
+            buf.vline(r.right() - 1, r.y + 1, r.h - 2, glyph::SL_V, fa, clip);
+            buf.put(r.x, r.y, glyph::SL_TL, fa, clip);
+            buf.put(r.right() - 1, r.y, glyph::SL_TR, fa, clip);
+            buf.put(r.x, r.bottom() - 1, glyph::SL_BL, fa, clip);
+            buf.put(r.right() - 1, r.bottom() - 1, glyph::SL_BR, fa, clip);
+        } else {
+            buf.fill(r, b' ', fa, clip);
+        }
+        let room = (r.w - 4).max(0) as usize;
+        let title: String = w.title.chars().take(room).collect();
+        if !title.is_empty() {
+            let tx = r.x + (r.w - title.chars().count() as i16) / 2;
+            buf.text(tx, r.y, &title, fa, clip);
+        }
     }
 
     pub fn take_command(&mut self) -> Option<Cmd> {
@@ -1507,8 +1738,12 @@ impl Ui {
     /// item clicked, a button pressed by a key. Draw one frame, wait a
     /// moment - long enough to be seen, about 90 ms - then call
     /// `complete_pick`. The core has no clock; the waiting is the backend's.
+    ///
+    /// A window falling into its bar, or rising out of it, is held the same
+    /// way, a frame for every TICK: every client already waits and ticks
+    /// for a chosen item, so every client animates without knowing it.
     pub fn pick_pending(&self) -> bool {
-        if self.pending_pick.is_some() {
+        if self.pending_pick.is_some() || self.anim.is_some() {
             return true;
         }
         let Some(w) = self.active_window() else { return false };
@@ -1520,6 +1755,7 @@ impl Ui {
 
     /// Deliver what `pick_pending` was holding.
     pub fn complete_pick(&mut self) {
+        self.step_anim();
         if let Some((_, cmd)) = self.pending_pick.take() {
             self.close_menu();
             self.emit(cmd);
@@ -1879,6 +2115,11 @@ impl Ui {
         if let Some(parent) = self.nodes[id.ix()].parent {
             self.nodes[parent.ix()].children.retain(|k| *k != id);
         }
+        // Its bar goes with it, and the bars above come down a row.
+        self.minimized.retain(|m| *m != id);
+        if self.anim.as_ref().is_some_and(|a| a.id == id) {
+            self.anim = None;
+        }
         if let Some(p) = partner.filter(|p| self.nodes[p.ix()].alive) {
             match &mut self.nodes[p.ix()].kind {
                 Kind::Hex(h) => h.source = None,
@@ -1894,10 +2135,19 @@ impl Ui {
         if self.modal().is_some() {
             return;
         }
-        let kids = &mut self.nodes[self.root.ix()].children;
-        if kids.len() > 1 {
-            let v = kids.pop().unwrap();
-            kids.insert(0, v);
+        // Round until a window that is showing is in front: a minimized one
+        // there would be a turn of F6 that did nothing.
+        let n = self.nodes[self.root.ix()].children.len();
+        for _ in 0..n {
+            let kids = &mut self.nodes[self.root.ix()].children;
+            if kids.len() > 1 {
+                let v = kids.pop().unwrap();
+                kids.insert(0, v);
+            }
+            let last = self.nodes[self.root.ix()].children.last().copied();
+            if !last.is_some_and(|l| self.is_minimized(l)) {
+                break;
+            }
         }
     }
 
@@ -1911,7 +2161,7 @@ impl Ui {
         let first = self.nodes[root]
             .children
             .iter()
-            .position(|k| matches!(self.nodes[k.ix()].kind, Kind::Window(_)));
+            .position(|k| matches!(&self.nodes[k.ix()].kind, Kind::Window(w) if !w.minimized));
         if let Some(pos) = first {
             let kids = &mut self.nodes[root].children;
             if kids.len() > 1 {
@@ -2303,6 +2553,7 @@ impl Ui {
         let clip = buf.rect();
         let blue = self.palette.blue;
         self.draw_node(self.root, buf, clip, &blue);
+        self.draw_anim(buf, clip);
     }
 
     /// The measure pass.
@@ -2421,6 +2672,11 @@ impl Ui {
     /// in a document and cyan in a help topic, and that is a property of where
     /// it was put, not of what it is.
     fn draw_node(&self, id: ViewId, buf: &mut Buffer, parent_clip: Rect, wc: &WinColors) {
+        // Put away: its bar is drawn on the desktop instead, shadow and all
+        // of the window left out.
+        if self.is_minimized(id) {
+            return;
+        }
         let abs = self.abs_rect(id);
 
         // The shadow falls outside the view, so it is drawn against the
@@ -2440,6 +2696,10 @@ impl Ui {
         match &self.nodes[id.ix()].kind {
             Kind::Desktop(d) => {
                 buf.fill(abs, d.glyph, self.palette.desktop, clip);
+                // The bars of the windows put away lie on the desktop,
+                // under every window: a window moved over the corner
+                // covers them, as it would anything else on the desk.
+                self.draw_bars(buf, clip);
             }
             Kind::Window(w) => self.draw_window(id, w, abs, buf, clip),
             Kind::Text(t) => self.draw_text(t, abs, buf, clip, wc),
@@ -2573,24 +2833,34 @@ impl Ui {
         // The boxes appear on the active window only. An inactive window
         // shows its title and its number and nothing you could click, which
         // is honest: clicking it would only activate it anyway.
+        //
+        // They sit together at the right: minimize, zoom, close, the close
+        // box last, in the corner - where every windowing system since has
+        // put them and where the hand goes looking. The classic DOS desktops
+        // had the close box alone at the left; that was the one thing about
+        // them a person who grew up on anything later could not find.
+        let boxes = title_boxes(w, abs);
         if active {
-            if w.closable && abs.w >= 8 {
-                buf.put(abs.x + 2, abs.y, b'[', fa, clip);
-                buf.put(abs.x + 3, abs.y, glyph::SQUARE, p.handle, clip);
-                buf.put(abs.x + 4, abs.y, b']', fa, clip);
-            }
-            if w.zoomable && abs.w >= 12 {
-                let zx = abs.right() - 5;
-                let icon = if w.is_zoomed() { 0x19 } else { 0x18 }; // ↓ / ↑
-                buf.put(zx, abs.y, b'[', fa, clip);
-                buf.put(zx + 1, abs.y, icon as Glyph, p.handle, clip);
-                buf.put(zx + 2, abs.y, b']', fa, clip);
+            for &(b, x) in &boxes {
+                let icon: Glyph = match b {
+                    TitleBox::Minimize => 0x19,                              // ↓, down into the corner
+                    TitleBox::Zoom if w.is_zoomed() => 0x12,                 // ↕, back to its size
+                    TitleBox::Zoom => 0x18,                                  // ↑, the whole desktop
+                    TitleBox::Close => glyph::SQUARE as Glyph,
+                };
+                buf.put(x, abs.y, b'[', fa, clip);
+                buf.put(x + 1, abs.y, icon, p.handle, clip);
+                buf.put(x + 2, abs.y, b']', fa, clip);
             }
         }
-
+        // Left of the boxes: the window's number, and the title in the
+        // middle of what is left.
+        let boxes_x = boxes.last().map_or(abs.right() - 2, |&(_, x)| x);
+        let mut title_end = boxes_x - 1;
         if let Some(n) = w.number {
             if abs.w >= 16 {
-                buf.put(abs.right() - 7, abs.y, b'0' + (n % 10), fa, clip);
+                buf.put(boxes_x - 2, abs.y, b'0' + (n % 10), fa, clip);
+                title_end = boxes_x - 3;
             }
         }
 
@@ -2612,8 +2882,11 @@ impl Ui {
             let tag = self.title_tag(id, w);
             let extra = tag.map_or(0, |t| t.chars().count() as i16 + 3);
             let n = w.title.chars().count() as i16 + 2 + extra;
-            if n < abs.w - 10 {
-                let tx = abs.x + (abs.w - n) / 2;
+            let start = abs.x + 2;
+            if n <= title_end - start {
+                // Centred on the window when that clears the boxes; pushed
+                // left of them when it does not.
+                let tx = (abs.x + (abs.w - n) / 2).min(title_end - n).max(start);
                 buf.put(tx, abs.y, b' ', ta, clip);
                 let mut used = buf.text(tx + 1, abs.y, &w.title, ta, clip);
                 if let Some(t) = tag {
@@ -3724,7 +3997,7 @@ impl Ui {
             .iter()
             .rev()
             .copied()
-            .find(|id| self.abs_rect(*id).contains(p))
+            .find(|id| !self.is_minimized(*id) && self.abs_rect(*id).contains(p))
     }
 
     /// The second meaning of what is under the pointer. The `Down` that
@@ -3742,10 +4015,11 @@ impl Ui {
             // them from the click already. And no drag: the press that
             // came before this started one, and a zoomed window that is
             // also being dragged is two answers to one gesture.
-            let zoomable = matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if w.zoomable);
-            let on_close = p.x >= abs.x + 2 && p.x <= abs.x + 4;
-            let on_zoom = p.x >= abs.right() - 5 && p.x <= abs.right() - 3;
-            if zoomable && !on_close && !on_zoom {
+            let (zoomable, on_box) = match &self.nodes[id.ix()].kind {
+                Kind::Window(w) => (w.zoomable, title_boxes(w, abs).iter().any(|&(_, x)| p.x >= x && p.x <= x + 2)),
+                _ => (false, false),
+            };
+            if zoomable && !on_box {
                 self.drag = None;
                 self.toggle_zoom(id);
             }
@@ -3862,7 +4136,14 @@ impl Ui {
                     }
                 }
 
-                let Some(id) = self.window_at(p) else { return };
+                // The bars of minimized windows lie on the desktop, under
+                // the windows: only a press no window took reaches them.
+                let Some(id) = self.window_at(p) else {
+                    if let Some(b) = self.bar_at(p) {
+                        self.bar_click(b, p);
+                    }
+                    return;
+                };
                 // The close and zoom boxes, and the resize grip, are drawn
                 // on the active window only, so on an inactive one there is
                 // nothing there to click: the click activates it, and the
@@ -3874,30 +4155,27 @@ impl Ui {
                 let Kind::Window(w) = &self.nodes[id.ix()].kind else {
                     return;
                 };
-                let (closable, zoomable, movable, resizable) = (
-                    w.closable && was_active,
-                    w.zoomable && was_active,
-                    w.movable,
-                    w.resizable && was_active,
-                );
+                let (movable, resizable) = (w.movable, w.resizable && was_active);
+                let boxes = if was_active { title_boxes(w, abs) } else { Vec::new() };
 
                 // Frame hits first, body second.
                 if p.y == abs.y {
-                    if closable && p.x >= abs.x + 2 && p.x <= abs.x + 4 {
-                        let cmd = match &self.nodes[id.ix()].kind {
-                            Kind::Window(w) => w.close_cmd,
-                            _ => 0,
-                        };
-                        if cmd != 0 {
-                            self.command = Some(cmd);
-                        } else {
-                            self.close(id);
+                    match boxes.iter().find(|&&(_, x)| p.x >= x && p.x <= x + 2).map(|&(b, _)| b) {
+                        Some(TitleBox::Close) => {
+                            let cmd = match &self.nodes[id.ix()].kind {
+                                Kind::Window(w) => w.close_cmd,
+                                _ => 0,
+                            };
+                            if cmd != 0 {
+                                self.command = Some(cmd);
+                            } else {
+                                self.close(id);
+                            }
+                            return;
                         }
-                        return;
-                    }
-                    if zoomable && p.x >= abs.right() - 5 && p.x <= abs.right() - 3 {
-                        self.toggle_zoom(id);
-                        return;
+                        Some(TitleBox::Zoom) => return self.toggle_zoom(id),
+                        Some(TitleBox::Minimize) => return self.minimize(id),
+                        None => {}
                     }
                     if movable {
                         self.drag = Some(Drag {

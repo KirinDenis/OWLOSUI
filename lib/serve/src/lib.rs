@@ -132,6 +132,7 @@ pub mod op {
     pub const CLIPBOARD: u8 = 0x69;
     pub const CLIPBOARD_GET: u8 = 0x6A;
     pub const CLIPBOARD_PASTE: u8 = 0x6B;
+    pub const MINIMIZE: u8 = 0x6C;
 }
 
 type Res<T> = Result<T, String>;
@@ -538,8 +539,16 @@ impl Server {
                 w.palette = match (flags >> 4) & 3 {
                     1 => WinPalette::Cyan,
                     2 => WinPalette::Gray,
+                    3 => WinPalette::Black,
                     _ => WinPalette::Blue,
                 };
+                // Bit 7: no minimize box. A modal window has none anyway:
+                // it is a question, and a question put away is one nobody
+                // can answer. Nor has a window without a shadow: that is a
+                // commander's panel, half of a pair, and half a commander
+                // in the corner is not something anyone wants. A tool of a
+                // fixed size - a calculator - has one, as everywhere else.
+                w.minimizable = flags & 0x80 == 0 && !w.modal && w.shadow;
                 if !w.resizable {
                     w.min_w = rect.w;
                     w.max_w = rect.w;
@@ -1307,6 +1316,17 @@ impl Server {
                 self.ui()?.tile();
             }
 
+            op::MINIMIZE => {
+                // Put away into its bar in the corner; ACTIVATE brings it back.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let ui = self.ui()?;
+                if !matches!(ui.kind(id), Kind::Window(_)) {
+                    return Err(format!("view {} is not a window", id.raw()));
+                }
+                ui.minimize(id);
+            }
+
             op::ZOOM => {
                 let id = r.id("id")?;
                 let id = self.alive(id)?;
@@ -1577,8 +1597,10 @@ impl Server {
                 out.i16(cur.map_or(-1, |p| p.x));
                 out.i16(cur.map_or(-1, |p| p.y));
                 // "Show this one for a moment, then send TICK": a button
-                // that a key just put down, a menu item just chosen.
-                out.u8(ui.pick_pending() as u8);
+                // that a key just put down, a menu item just chosen (1);
+                // a step of a window falling into its bar or rising out of
+                // it (2), which a client may show for less of a moment.
+                out.u8(if ui.animating() { 2 } else { ui.pick_pending() as u8 });
                 // How long the font is now: a client whose table is shorter
                 // fetches it again before it draws.
                 out.u16(font_len);
