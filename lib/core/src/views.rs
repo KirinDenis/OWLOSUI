@@ -59,6 +59,11 @@ pub struct Window {
     /// Shown in the bottom-left of the frame — a position indicator, a byte
     /// count, whatever the application wants there.
     pub footer: String,
+    /// A word the program puts after the title, in brackets, as the
+    /// desktop puts `[modal]` and `[view]`: what the window is doing that
+    /// its name does not say - `[awake]` on an emulator that keeps running
+    /// in a background tab. Empty for none.
+    pub tag: String,
     /// Smallest size the window may be dragged down to, frame included.
     ///
     /// Zero means no preference, which is the default: most windows do not
@@ -118,6 +123,7 @@ impl Window {
             number: None,
             palette: crate::palette::WinPalette::Blue,
             footer: String::new(),
+            tag: String::new(),
             min_w: 0,
             min_h: 0,
             max_w: 0,

@@ -2801,9 +2801,12 @@ impl Ui {
     /// The first child, if it is anything that scrolls at all.
     /// The word after a window's title, if it has one: what the window
     /// is that its name does not say.
-    fn title_tag(&self, id: ViewId, w: &Window) -> Option<&'static str> {
+    fn title_tag<'a>(&self, id: ViewId, w: &'a Window) -> Option<&'a str> {
         if w.modal {
             return Some("modal");
+        }
+        if !w.tag.is_empty() {
+            return Some(&w.tag);
         }
         let first = self.scrolling_child(id)?;
         match &self.nodes[first.ix()].kind {

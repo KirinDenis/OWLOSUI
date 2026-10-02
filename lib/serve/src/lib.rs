@@ -125,6 +125,7 @@ pub mod op {
     /// program; and its session back. See lib/dos/src/owlosres.rs.
     pub const SUSPEND: u8 = 0x63;
     pub const RESUME: u8 = 0x64;
+    pub const SET_TAG: u8 = 0x65;
 }
 
 type Res<T> = Result<T, String>;
@@ -1397,6 +1398,20 @@ impl Server {
                     // wrap, keys and language are kept.
                     Kind::Text(t) => t.set_lines(lines),
                     _ => return Err(format!("view {} has no text to set", id.raw())),
+                }
+            }
+
+            op::SET_TAG => {
+                // The word after a window's title, in brackets, as [modal]
+                // is: what the window is doing that its name does not say.
+                // Empty takes it away.
+                let id = r.id("id")?;
+                let tag = r.str("tag")?;
+                let core = self.cp.to_core(&tag);
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Window(w) => w.tag = core,
+                    _ => return Err(format!("view {} is not a window", id.raw())),
                 }
             }
 

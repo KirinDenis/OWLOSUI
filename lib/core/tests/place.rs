@@ -53,3 +53,22 @@ fn the_inside_of_a_window_and_what_covers_it() {
     // Not a window: no place.
     assert_eq!(ui.place(root), None);
 }
+
+#[test]
+fn a_window_carries_the_word_its_program_gives_it() {
+    let mut ui = desk();
+    let root = ui.root();
+    let mut w = Window::new("DOS");
+    w.tag = "awake".into();
+    let dos = ui.insert(root, Rect::new(10, 3, 42, 14), Kind::Window(w));
+    let mut buf = Buffer::new(80, 25);
+    ui.draw(&mut buf);
+    let top: String = (10..52).map(|x| buf.get(x, 3).unwrap().to_char()).collect();
+    assert!(top.contains("DOS [awake]"), "the top edge reads {top:?}");
+    if let Kind::Window(w) = ui.kind_mut(dos) {
+        w.tag.clear();
+    }
+    ui.draw(&mut buf);
+    let top: String = (10..52).map(|x| buf.get(x, 3).unwrap().to_char()).collect();
+    assert!(!top.contains("awake"), "the word stayed: {top:?}");
+}

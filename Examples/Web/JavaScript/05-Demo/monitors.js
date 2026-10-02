@@ -65,7 +65,7 @@ export class Monitors {
 
   open(title, w, h, closeCmd, x) {
     const W = Math.min(w, this.owl.width), H = Math.min(h, this.owl.height - 2);
-    const win = this.owl.window(title, W, H, { style: Style.Help, closeCmd, x: x ?? -1 });
+    const win = this.owl.window(title, W, H, { style: Style.Document, closeCmd, x: x ?? -1 });
     const canvas = this.owl.canvas(win, 0, 0, W - 2, H - 2);
     return { win, canvas, w: W - 2, h: H - 2 };
   }

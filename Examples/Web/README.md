@@ -223,6 +223,12 @@ round it, or stretched to 4:3 and smoothed like a monitor - memory, CPU core, ty
 speed, sound cards, XMS, EMS and UMB, what to start, the network card and
 the relay. It writes the `dosbox.conf` the PC boots with, and shows it.
 
+**Awake.** A browser pauses a hidden page's emulator; the PC does not let it,
+and says so with `[awake]` after its window's title, as a modal dialog says
+`[modal]`. A game played in step over the network - Duke Nukem 3D - waits
+for every player, so one hidden tab would stop it for all of them. Settings
+> DOS turns it off, to spare a laptop's battery.
+
 DOSBox runs on threads that share memory, which a browser allows a page only
 when it is isolated from other sites. RUN.CMD's server and GitHub Pages
 cannot say so in headers, so [coi-serviceworker.js](JavaScript/05-Demo/coi-serviceworker.js)

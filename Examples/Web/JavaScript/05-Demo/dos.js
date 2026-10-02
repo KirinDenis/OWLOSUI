@@ -139,6 +139,7 @@ const DEFAULTS = {
   core: 'auto', cputype: 'auto', cycles: 'auto', fixed: 20000,
   sbtype: 'sb16', gus: false, pcspeaker: true, rate: 44100,
   xms: true, ems: true, umb: true,
+  awake: true,
   start: 'commander',
   ipx: true, always: true, relay: 'wss://view.owlos.sk', room: 'owlfly3',
 };
@@ -263,10 +264,12 @@ const PAGES = [
       d.parts.start = o.cluster(d.win, 34, 4, 26, ['the commander', 'the OWLOSUI demo', 'OWL FLY III', 'the DOS prompt'],
         { single: true, on: ['commander', 'demo', 'owlfly', 'prompt'].indexOf(s.start) });
       o.staticText(d.win, 2, 10, 'DOS > Switch on runs this; the other DOS menu items say what to run themselves.', 60, 2);
+      d.parts.awake = o.cluster(d.win, 2, 13, 60, ['Keep running in a background tab - [awake] on its window'], { on: [s.awake] });
     },
     read(o, d, s) {
       [s.xms, s.ems, s.umb] = o.clusterState(d.parts.mem).on;
       s.start = ['commander', 'demo', 'owlfly', 'prompt'][radio(o, d.parts.start)];
+      [s.awake] = o.clusterState(d.parts.awake).on;
     },
   },
   {
@@ -413,6 +416,8 @@ export class DosTool {
     const name = this.program?.name ?? STARTS[this.started]?.name ?? 'DOS';
     const state = !this.box.running ? ' (off)' : this.box.hasKeys() ? ' - keys in DOS' : '';
     this.owl.setText(this.win, `DOS: ${name}${state}`);
+    // [awake], beside the title as [modal] is, while it would keep running hidden.
+    this.owl.windowTag(this.win, this.box.running && this.box.keepRunning ? 'awake' : '');
     this.owl.refresh?.();
   }
 
@@ -437,7 +442,12 @@ export class DosTool {
         conf: dosboxConf(this.settings, start, program?.line),
         files,
         what: program?.name ?? STARTS[start].name,
-        keepRunning: !!STARTS[start].network,
+        // Awake: it keeps running in a background tab, as a PC does when
+        // you look away from it. A browser pauses a hidden page's emulator
+        // otherwise - and a game played in step over the network, Duke
+        // Nukem 3D, waits for every player, so one hidden tab stops it for
+        // all of them. Settings > DOS can turn it off, to spare the battery.
+        keepRunning: this.settings.awake,
         picture: this.settings.picture,
       });
       await this.gates.started();
