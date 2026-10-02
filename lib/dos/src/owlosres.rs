@@ -477,7 +477,9 @@ Usage: OWLOSRES PROGRAM.EXE [arguments]\r\n$");
             2 => b"no such program",
             3 => b"no such folder",
             5 => b"access denied",
-            8 => b"not enough memory - a program left resident may hold it",
+            // In DOSBox the usual cause is XMS turned off: CWSDPMI then
+            // takes the core's memory from the 640K the program needs.
+            8 => b"not enough memory - is XMS on? A program left resident may hold it too",
             10 | 11 => b"not a program DOS can load",
             _ => b"",
         };

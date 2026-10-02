@@ -151,9 +151,17 @@ function saveSettings(s) {
   try { localStorage.setItem('owlosui.dosbox', JSON.stringify(s)); } catch { /* a private window: for this visit only */ }
 }
 
-/** The dosbox.conf a machine boots with: the settings, and what to start. */
+/**
+ * The dosbox.conf a machine boots with: the settings, and what to start.
+ * With XMS off the toolkit cannot start - CWSDPMI then takes its memory
+ * from DOS's own 640K and DOS has none left to load the program - so the
+ * PC says so before it tries, rather than leave only "error 8".
+ */
 export function dosboxConf(s, start, line = STARTS[start]?.line ?? '') {
   const yes = b => (b ? 'true' : 'false');
+  // No > in an echo: DOS reads it as "into a file".
+  const warn = s.xms ? '' : 'echo XMS is off, and the OWLOSUI programs here need it to start.\n' +
+    "echo Turn it on in the page's DOS menu: Settings, the DOS page.\necho.\n";
   return crlf(`[sdl]
 autolock=false
 [dosbox]
@@ -185,7 +193,7 @@ mount b B -t floppy
 path C:\\;Z:\\
 c:
 cls
-${line}
+${warn}${line}
 type C:\\README.TXT
 `);
 }
@@ -259,7 +267,9 @@ const PAGES = [
     name: 'DOS',
     build(o, d, s) {
       o.staticText(d.win, 2, 3, 'Memory DOS offers:', 26);
-      d.parts.mem = o.cluster(d.win, 2, 4, 28, ['XMS (HIMEM)', 'EMS', 'Upper memory blocks'], { on: [s.xms, s.ems, s.umb] });
+      // XMS is where CWSDPMI finds the memory the toolkit's core runs in;
+      // without it the core takes DOS's own 640K and no program fits after.
+      d.parts.mem = o.cluster(d.win, 2, 4, 30, ['XMS - OWLOSUI needs it', 'EMS', 'Upper memory blocks'], { on: [s.xms, s.ems, s.umb] });
       o.staticText(d.win, 34, 3, 'At start, run:', 26);
       d.parts.start = o.cluster(d.win, 34, 4, 26, ['the commander', 'the OWLOSUI demo', 'OWL FLY III', 'the DOS prompt'],
         { single: true, on: ['commander', 'demo', 'owlfly', 'prompt'].indexOf(s.start) });
