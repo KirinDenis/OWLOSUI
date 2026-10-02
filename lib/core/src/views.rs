@@ -318,6 +318,8 @@ pub enum Kind {
     Progress(crate::controls::Progress),
     /// Cells the program drew itself; shown as they are.
     Canvas(crate::controls::Canvas),
+    /// Text that keeps arriving, coloured by its ANSI sequences: a log.
+    Console(crate::console::Console),
 }
 
 /// Where a child sits inside its parent.

@@ -127,6 +127,8 @@ pub mod op {
     pub const RESUME: u8 = 0x64;
     pub const SET_TAG: u8 = 0x65;
     pub const SET_INDICATOR: u8 = 0x66;
+    pub const CONSOLE: u8 = 0x67;
+    pub const CONSOLE_WRITE: u8 = 0x68;
 }
 
 type Res<T> = Result<T, String>;
@@ -809,6 +811,14 @@ impl Server {
                         .collect::<Vec<_>>()
                         .join("\n"),
                     Kind::Input(i) => cp.from_core(&i.text),
+                    // The record without its colours: what a bug report
+                    // pastes.
+                    Kind::Console(c) => c
+                        .lines()
+                        .iter()
+                        .map(|l| cp.decode(&l.iter().map(|cell| cell.ch).collect::<Vec<_>>()))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                     _ => return Err(format!("view {} has no text", id.raw())),
                 };
                 out.str(&s);
@@ -1344,6 +1354,35 @@ impl Server {
                 let id = self.alive(id)?;
                 if !self.ui()?.set_button_enabled(id, ix, on) {
                     return Err(format!("view {} has no button {ix}", id.raw()));
+                }
+            }
+
+            op::CONSOLE => {
+                // A console filling its window: `scrollback` lines are kept,
+                // 0 for a thousand.
+                let parent = r.id("parent")?;
+                let _rect = r.rect()?;
+                let scrollback = r.u16("scrollback")?;
+                let parent = self.alive(parent)?;
+                let keep = if scrollback == 0 { 1000 } else { scrollback as usize };
+                let ui = self.ui()?;
+                let id = ui.insert(parent, Rect::default(), Kind::Console(owlosui_core::Console::new(keep)));
+                ui.set_dock(id, Dock::Fill);
+                self.settle_focus()?;
+                out.id(id);
+            }
+
+            op::CONSOLE_WRITE => {
+                // Text at the end, ANSI sequences obeyed. The font turns each
+                // printable character into a glyph, growing if it has to.
+                let id = r.id("id")?;
+                let text = r.str("text")?;
+                let id = self.alive(id)?;
+                let cp = &mut self.cp;
+                let ui = self.ui.as_mut().ok_or("INIT first")?;
+                match ui.kind_mut(id) {
+                    Kind::Console(c) => c.write(&text, &mut |ch| cp.cell_glyph(ch)),
+                    _ => return Err(format!("view {} is not a console", id.raw())),
                 }
             }
 

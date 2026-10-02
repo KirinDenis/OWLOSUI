@@ -240,6 +240,28 @@ when it is isolated from other sites. RUN.CMD's server and GitHub Pages
 cannot say so in headers, so [coi-serviceworker.js](JavaScript/05-Demo/coi-serviceworker.js)
 does, and the page reloads itself once on the first visit.
 
+## Help > Console
+
+Everything the page has done since it opened, in a terminal window: the
+browser and screen it is running on, every window opened and closed, the DOS
+PC switching on and off with its settings, what DOSBox itself prints, programs
+run, files crossing to the floppies, the network, and every error nobody
+caught, with its stack. [log.js](JavaScript/05-Demo/log.js) records it from
+the first moment - before the console is opened, before anything can go wrong
+unseen - and [console.js](JavaScript/05-Demo/console.js) shows it.
+
+For a bug report: **F4** writes the state of everything now - windows,
+memory, storage, the DOS PC and its emulator's counters, the network's
+packets - then **Ctrl+C** copies the whole console as plain text, or **F2**
+saves it as a file. F8 empties the window; the page goes on recording.
+
+The window is the toolkit's own `CONSOLE` view, the same in every client: the
+lines are written with ANSI colour sequences, and the core colours them as a
+terminal would and keeps them out of the copied text
+([lib/PROTOCOL.md](../../lib/PROTOCOL.md), `CONSOLE` and `CONSOLE_WRITE`).
+`?mouselog` at the end of the demo's address shows the mouse's events in a
+corner instead, for a click that goes missing in one browser only.
+
 ## The live demo
 
 [site/build.mjs](site/build.mjs) makes the static site GitHub Pages serves:

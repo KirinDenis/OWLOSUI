@@ -22,6 +22,7 @@ extern crate alloc;
 pub mod buffer;
 pub mod button;
 pub mod cell;
+pub mod console;
 pub mod edit;
 pub mod controls;
 pub mod event;
@@ -40,6 +41,7 @@ pub mod ui;
 pub mod views;
 
 pub use buffer::Buffer;
+pub use console::Console;
 pub use button::{Align, Button as PushButton, ButtonRow, ButtonStyle};
 pub use cell::{attr, glyph_of, glyphs, Cell, Color, Glyph, GLYPH_MAX};
 pub use event::{Button, Event, Key, KeyCode, Mods, Mouse, MouseKind};

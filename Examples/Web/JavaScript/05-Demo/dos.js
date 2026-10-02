@@ -27,6 +27,7 @@ import { DosBox, KEYS } from '../../../../lib/js/dosbox/dosbox.js';
 import { unzip } from '../../../../lib/js/dosbox/unzip.js';
 import { DriveGates } from '../../../../lib/js/dosbox/gates.js';
 import { Monitors, MonCm } from './monitors.js';
+import { log, describe } from './log.js';
 
 /** The floppies, and the folders of this browser's storage they are. */
 const GATES = [{ letter: 'A', folder: '/DOS A Drive/' }, { letter: 'B', folder: '/DOS B Drive/' }];
@@ -324,7 +325,7 @@ export class DosTool {
     this.storage = storage;
     // The floppies are folders of this browser's storage, there to see.
     this.gates = new DriveGates(this.box, storage, GATES);
-    this.gates.pushed = () => this.floppyChanged();
+    this.gates.pushed = () => { log.info('files', 'the page wrote to a floppy: DOS reads it again'); this.floppyChanged(); };
     this.gates.activity = letter => this.light(letter);
     this.commander = commander;
     this.open = open;
@@ -336,9 +337,17 @@ export class DosTool {
     this.network = { state: 'off', url: '' };
     this.lit = new Set();        // the drives whose light is on
     this.lightsOff = {};
-    this.box.on(what => {
-      if (what === 'keys') this.retitle();
-      if (what === 'stopped' && this.win) this.retitle();
+    let keys = null;
+    this.box.on((what, box, detail) => {
+      if (what === 'keys') {
+        this.retitle();
+        // Said when it changes hands, not on every focus event.
+        if (box.hasKeys() !== keys) { keys = box.hasKeys(); log.info('dos', keys ? 'the keyboard is in DOS' : 'the keyboard is back on the page'); }
+      }
+      if (what === 'stopped') { log.info('dos', 'switched off'); if (this.win) this.retitle(); }
+      if (what === 'frame') log.info('dos', `picture ${box.frameSize.w}x${box.frameSize.h}`);
+      if (what === 'stdout') log.info('dos out', detail.replace(/\s+$/, ''));
+      if (what === 'message') log.write('dos out', detail.text, detail.type === 'error' ? 'error' : detail.type === 'warn' ? 'warn' : 'info');
     });
     this.monitors = new Monitors(owl, this);
     if (typeof setInterval !== 'undefined') setInterval(() => this.watchFloppy(), 1500);
@@ -455,6 +464,10 @@ export class DosTool {
     if (!this.win || rect) this.openWindow(rect ?? undefined);
     else this.owl.activate(this.win);
     this.retitle();
+    const s = this.settings;
+    log.info('dos', `switching on to run ${program?.name ?? STARTS[start].name}: ${s.machine}, ${s.memsize} MB, ` +
+      `cycles ${s.cycles === 'fixed' ? `fixed ${s.fixed}` : s.cycles}, ${s.awake ? 'awake' : 'pauses when hidden'}`);
+    if (program) log.info('dos', `its lines: ${program.line.replace(/\n/g, ' | ')}`);
     try {
       // What DOS saved on its floppies in its last moments goes into the
       // folders before it is switched off; the folders are then the disks
@@ -474,10 +487,12 @@ export class DosTool {
         picture: this.settings.picture,
       });
       await this.gates.started();
+      log.info('dos', `on: ${files.length} files on its disks`);
       if (STARTS[start].network || this.settings.always) this.connect();
       else this.network = { state: 'off', url: '' };
       if (grab) this.box.grab();
     } catch (e) {
+      log.error('dos', `did not start: ${describe(e)}`);
       this.owl.messageBox('DOS', `The DOS PC did not start: ${e.message}`, { label: '~O~K', cmd: 0, default: true });
     }
     this.retitle();
@@ -517,6 +532,7 @@ export class DosTool {
     const upper = name.toUpperCase();
     const toolkit = new TextDecoder('latin1').decode(await this.storage.readBytes(path)).includes('OWLOSRES');
     const run = upper.endsWith('.BAT') ? `call ${upper}` : toolkit ? `call C:${BS}OWL.BAT ${upper}` : upper;
+    log.info('dos', `run ${at} from the page's commander${toolkit ? ', with the toolkit behind it' : ''}`);
     const line = [folder.slice(0, 2), `cd ${folder.slice(2) || BS}`, run, 'C:', `cd ${BS}`, `call C:${BS}COMMANDR.BAT`].join('\n');
     return this.run('commander', { program: { name: upper, line } });
   }
@@ -544,11 +560,14 @@ export class DosTool {
   async connect() {
     const url = `${this.settings.relay.replace(/\/+$/, '')}/ipx/${this.settings.room}`;
     this.network = { state: 'connecting', url };
+    log.info('net', `connecting the IPX card to ${url}`);
     try {
       await this.box.ci.networkConnect(0, url);
       this.network = { state: 'connected', url };
+      log.info('net', 'connected');
     } catch (e) {
       this.network = { state: `not connected: ${e?.message ?? 'no answer'}`, url };
+      log.warn('net', this.network.state);
     }
     this.owl.refresh?.();
   }
@@ -594,7 +613,10 @@ export class DosTool {
     if (!this.box.running || this.pulling) return;
     this.pulling = true;
     try {
-      if (await this.gates.pull()) this.commander?.refreshSource?.(this.storage);
+      if (await this.gates.pull()) {
+        log.info('files', 'DOS wrote to a floppy: the folder in this browser has it now');
+        this.commander?.refreshSource?.(this.storage);
+      }
       const tree = await this.box.ci.fsTree();
       const c = JSON.stringify((tree.nodes ?? []).find(n => n.name === 'C'));
       if (this.cSeen && c !== this.cSeen) this.light('C');
@@ -651,6 +673,8 @@ export class DosTool {
   settingsOk() {
     const d = this.dialog;
     PAGES[d.page].read(this.owl, d, d.draft);
+    const changed = Object.keys(d.draft).filter(k => d.draft[k] !== this.settings[k]).map(k => `${k} ${this.settings[k]} -> ${d.draft[k]}`);
+    log.info('dos', `settings: ${changed.length ? changed.join(', ') : 'nothing changed'}`);
     this.settings = d.draft;
     saveSettings(this.settings);
     this.closeDialog();

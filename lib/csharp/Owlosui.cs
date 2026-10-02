@@ -804,6 +804,29 @@ public sealed class Owlosui : IDisposable
     }
 
     /// <summary>
+    /// A console filling its window: text that keeps arriving, coloured by
+    /// the ANSI sequences in it. It keeps <paramref name="scrollback"/>
+    /// lines (0, a thousand), folds long ones to its width, and follows the
+    /// newest line until it is scrolled back; End follows again. Not called
+    /// Console: inside this class that name is System.Console's.
+    /// </summary>
+    public ushort ConsoleView(ushort parent, int scrollback = 0) =>
+        R.U16(Call(Op.Console, W.U16(parent), W.Rect(0, 0, 0, 0), W.U16((ushort)scrollback)));
+
+    /// <summary>
+    /// Text at the end of a console. SGR colours, CR, tab, backspace,
+    /// erase-line and clear are obeyed and never shown; a sequence cut in
+    /// two between calls is still one. <see cref="GetText"/> gives the
+    /// whole record back without its colours.
+    /// </summary>
+    public void ConsoleWrite(ushort id, string text)
+    {
+        // A request carries 64K; a character is at most four bytes of UTF-8.
+        for (int i = 0; i < text.Length; i += 16000)
+            Call(Op.ConsoleWrite, W.U16(id), W.Str(text.Substring(i, Math.Min(16000, text.Length - i))));
+    }
+
+    /// <summary>
     /// A rectangle of cells the program draws itself - a game board, a
     /// chart, a piece of ANSI art. Fill it with <see cref="Blit"/>; it is
     /// shown as it is, never wrapped or collapsed.
@@ -1513,6 +1536,7 @@ public sealed class Owlosui : IDisposable
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
         public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E, Syntax = 0x5F, SyntaxDefine = 0x60, Unmark = 0x61;
         public const byte OpenWindow = 0x5B, Wait = 0x5C;
+        public const byte Console = 0x67, ConsoleWrite = 0x68;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;
     }

@@ -47,6 +47,20 @@ fn is_edit_menu(it: &crate::menu::MenuItem) -> bool {
     !it.items.is_empty() && it.label().eq_ignore_ascii_case("edit")
 }
 
+/// A console: black, whatever the window around it is, because a terminal
+/// is black and the colours written into it were chosen against black.
+fn draw_console(c: &crate::console::Console, abs: Rect, buf: &mut Buffer, clip: Rect) {
+    buf.fill(abs, SP, crate::console::CONSOLE_ATTR, clip);
+    for row in 0..abs.h {
+        let Some(cells) = c.row(c.top + row) else {
+            break;
+        };
+        for (col, cell) in cells.iter().enumerate() {
+            buf.put(abs.x + col as i16, abs.y + row, cell.ch, cell.attr, clip);
+        }
+    }
+}
+
 /// A labelled field. The label is plain and the field is a sunken box the eye
 /// can find without reading anything, which is the only job the colours have.
 fn draw_input(
@@ -2277,6 +2291,7 @@ impl Ui {
             let taken = self.foot_taken(id);
             match &mut self.nodes[i].kind {
                 Kind::Html(h) => h.layout(r.w),
+                Kind::Console(c) => c.layout(r.w, r.h),
                 Kind::Files(f) => {
                     f.set_foot_taken(taken);
                     f.layout(r, screen_w);
@@ -2327,6 +2342,7 @@ impl Ui {
             Kind::Window(w) => self.draw_window(id, w, abs, buf, clip),
             Kind::Text(t) => self.draw_text(t, abs, buf, clip, wc),
             Kind::Html(h) => self.draw_html(h, abs, buf, clip, wc),
+            Kind::Console(c) => draw_console(c, abs, buf, clip),
             Kind::Files(f) => {
                 let active = self.parent_active(id);
                 self.draw_files(f, abs, buf, clip, wc, self.foot_taken(id), active)
@@ -2837,7 +2853,7 @@ impl Ui {
     fn scrolling_child(&self, id: ViewId) -> Option<ViewId> {
         let first = *self.nodes[id.ix()].children.first()?;
         match self.nodes[first.ix()].kind {
-            Kind::Text(_) | Kind::Html(_) | Kind::Files(_) | Kind::Hex(_) => Some(first),
+            Kind::Text(_) | Kind::Html(_) | Kind::Files(_) | Kind::Hex(_) | Kind::Console(_) => Some(first),
             _ => None,
         }
     }
@@ -2869,6 +2885,8 @@ impl Ui {
             Kind::Text(t) if t.wrapping() => (t.top, t.line_count(), 0, 0, inner.w),
             Kind::Text(t) => (t.top, t.line_count(), t.left, t.longest(), inner.w),
             Kind::Html(h) => (h.top, h.line_count(), 0, 0, inner.w),
+            // Folded to its width, like a help page: nothing sideways.
+            Kind::Console(c) => (c.top, c.row_count(), 0, 0, inner.w),
             Kind::Hex(h) => (h.top, h.total_rows(), 0, 0, inner.w),
             // A file panel runs off the edge sideways, never downwards: the
             // names flow to the bottom of the column and then start a new one.
@@ -4009,6 +4027,7 @@ impl Ui {
             (Kind::Text(t), Axis::Vertical) => t.top,
             (Kind::Text(t), Axis::Horizontal) => t.left,
             (Kind::Html(h), Axis::Vertical) => h.top,
+            (Kind::Console(c), Axis::Vertical) => c.top,
             (Kind::Hex(h), Axis::Vertical) => h.top,
             (Kind::Files(f), Axis::Horizontal) => f.overflow().0,
             _ => 0,
@@ -4038,6 +4057,13 @@ impl Ui {
             if axis == Axis::Vertical {
                 let d = pos.max(0) - h.top;
                 h.scroll(d);
+            }
+            return;
+        }
+        if let Kind::Console(c) = &mut self.nodes[tid.ix()].kind {
+            if axis == Axis::Vertical {
+                let d = pos.max(0) - c.top;
+                c.scroll(d);
             }
             return;
         }
@@ -4137,6 +4163,7 @@ impl Ui {
             }
             Kind::Html(h) => h.scroll(delta, page),
             Kind::Hex(h) => h.scroll(delta),
+            Kind::Console(c) => c.scroll(delta),
             _ => {}
         }
     }
@@ -4359,7 +4386,7 @@ impl Ui {
         match &self.nodes[id.ix()].kind {
             Kind::Text(t) => !t.readonly,
             Kind::Tree(_) => true,
-            Kind::Input(_) | Kind::Files(_) | Kind::Html(_) | Kind::Hex(_) | Kind::List(_) => true,
+            Kind::Input(_) | Kind::Files(_) | Kind::Html(_) | Kind::Hex(_) | Kind::List(_) | Kind::Console(_) => true,
             Kind::Cluster(c) => c.enabled,
             Kind::Buttons(b) => b.selectable && !b.buttons.is_empty(),
             _ => false,
@@ -4762,6 +4789,26 @@ impl Ui {
             },
             Kind::Hex(_) => self.hex_key(id, k),
             Kind::Html(_) => self.html_key(id, k),
+            Kind::Console(_) => self.console_key(id, k),
+            _ => {}
+        }
+    }
+
+    /// Up, down and the page keys through the record; Home and End to its
+    /// two ends, and End is how following the newest line starts again.
+    fn console_key(&mut self, id: ViewId, k: Key) {
+        use crate::event::KeyCode as K;
+        let page = self.abs_rect(id).h.max(1);
+        let Kind::Console(c) = &mut self.nodes[id.ix()].kind else {
+            return;
+        };
+        match k.code {
+            K::Up => c.scroll(-1),
+            K::Down => c.scroll(1),
+            K::PageUp => c.scroll(-page),
+            K::PageDown => c.scroll(page),
+            K::Home => c.home(),
+            K::End => c.end(),
             _ => {}
         }
     }

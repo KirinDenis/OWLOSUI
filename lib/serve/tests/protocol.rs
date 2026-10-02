@@ -1450,3 +1450,31 @@ fn a_commanders_panel_says_its_folder_in_the_title_and_only_details_at_the_foot(
     assert!(foot.contains("1234") && foot.contains("30-09-2026 21:55"), "{foot:?}");
     assert!(!foot.contains("ONE.TXT") && !picture(&f).contains(r"C:\A\*.*"), "{}", picture(&f));
 }
+
+#[test]
+fn a_console_colours_what_is_written_and_gives_it_back_plain() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(40), i16(12)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 40, 10), vec![0x20], s("Console")].concat()));
+    // CONSOLE: parent, rect (it fills the window anyway), scrollback.
+    let con = id_of(&c.ok(0x67, &[u16(win).to_vec(), rect(0, 0, 0, 0), u16(0).to_vec()].concat()));
+    // CONSOLE_WRITE, in two pieces cut inside a sequence.
+    c.ok(0x68, &[u16(con).to_vec(), s("first \x1b[3")].concat());
+    c.ok(0x68, &[u16(con).to_vec(), s("2mgreen\x1b[0m\nПривет ═\n")].concat());
+
+    let f = frame(&mut c);
+    let y = (0..12).find(|&y| f.row(y).contains("first green")).expect("the written line");
+    let x = f.row(y).chars().position(|ch| ch == 'g').unwrap() as i16;
+    let attr = f.cells[((y * f.w + x) * 3 + 2) as usize];
+    assert_eq!(attr, 0x02, "ANSI 32 is green on black");
+
+    // GET_TEXT: the record without its colours, the Cyrillic intact.
+    let body = c.ok(0x21, &u16(con));
+    let n = u16::from_le_bytes([body[0], body[1]]) as usize;
+    let text = String::from_utf8(body[2..2 + n].to_vec()).unwrap();
+    assert_eq!(text, "first green\nПривет ═\n");
+
+    // Not a console: an error, not a crash.
+    let e = c.err(0x68, &[u16(win).to_vec(), s("x")].concat());
+    assert!(e.contains("not a console"), "{e}");
+}

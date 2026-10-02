@@ -17,6 +17,7 @@ import { CalcEngine, Base } from './03-Calculator/calc-engine.js';
 import * as Soko from './04-Sokoban/app.js';
 import * as Demo from './05-Demo/app.js';
 import { Board } from './05-Demo/tools.js';
+import { log } from './05-Demo/log.js';
 
 const bytes = readFileSync(new URL('../../../lib/js/owlosui-wire.wasm', import.meta.url));
 let failed = 0;
@@ -197,6 +198,24 @@ await test('Demo: menu bar, hints, and every tool opens', async () => {
   app.onCommand(Demo.CmClose);
   o.press('0', { alt: true });
   check(o.frame().find('Windows [modal]'), 'Alt+0 did not list the windows', o.frame());
+});
+
+await test('Demo: Help > Console shows what the page did, coloured, and gives it back as plain text', async () => {
+  const o = await owl(100, 30);
+  const app = new Demo.App(o);
+  log.error('error', 'something broke before anyone looked');
+  app.onCommand(Demo.CmConsole);
+  let f = o.frame();
+  check(f.find(' Console ') && f.find('the core is running'), 'the console does not show the record from before it opened', f);
+  const at = f.find('something broke');
+  check(at && f.attr(at.x, at.y) === 0x0C, `an error is not bright red: ${at && f.attr(at.x, at.y).toString(16)}`, f);
+  // A line written while it is open arrives a moment later, at the bottom.
+  log.info('dos', 'switching on');
+  await new Promise(r => setTimeout(r, 10));
+  f = o.frame();
+  check(f.find('switching on'), 'a new line did not arrive', f);
+  const text = o.getText(app.console.view);
+  check(text.includes('something broke before anyone looked') && !text.includes('\x1b'), 'the text is not the record without its colours');
 });
 
 await test('Demo: an editor brings an Edit menu the core answers - Word wrap, Find', async () => {

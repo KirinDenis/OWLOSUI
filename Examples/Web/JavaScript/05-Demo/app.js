@@ -27,7 +27,10 @@
 //             settings, a network monitor and a machine monitor (dos.js,
 //             monitors.js; the machine is lib/js/dosbox/).
 //   Help      What to see - the window a first visit opens on
-//             (welcome.js) - and About.
+//             (welcome.js); Console - everything the page has done since
+//             it opened, errors included, in a terminal window, to copy
+//             into a bug report (log.js records it, console.js shows it);
+//             and About.
 //
 // Every tool owns a range of command numbers and answers handles(cmd), so
 // this file only routes: a menu command opens a tool, a tool's own buttons
@@ -43,6 +46,8 @@ import { Repository } from '../../../../lib/js/files/repository.js';
 import { CommanderTool } from './commander.js';
 import { DosTool, DosCm } from './dos.js';
 import { Welcome } from './welcome.js';
+import { ConsoleWindow } from './console.js';
+import { log, watchWindows, mb } from './log.js';
 
 export const CmNew = 1, CmExit = 2;
 export const CmCalc = 10, CmCalendar = 11, CmAscii = 12, CmPuzzle = 13, CmCommander = 14;
@@ -65,7 +70,7 @@ const SAMPLES = [
 ].map(([to, from]) => [to, new URL(from, ROOT).href]);
 export const CmOptions = 20, CmClock = 21, CmColors = 22;
 export const CmNext = 30, CmZoom = 31, CmClose = 32, CmCascade = 33, CmTile = 34, CmPrevious = 35, CmList = 36, CmSizeMove = 37;
-export const CmAbout = 40, CmHelp = 41, CmWelcome = 42;
+export const CmAbout = 40, CmHelp = 41, CmWelcome = 42, CmConsole = 43;
 export const CmOk = 60, CmCancel = 61, CmDismiss = 62;
 export const CmOpenBrowser = 50, CmOpenServer = 51, CmOpenDav = 52, CmSave = 53;
 export const CmFileOpen = 54, CmFileCancel = 55, CmDavConnect = 56, CmDavCancel = 57;
@@ -73,6 +78,9 @@ export const CmFileOpen = 54, CmFileCancel = 55, CmDavConnect = 56, CmDavCancel 
 export class App {
   constructor(owl) {
     this.owl = owl;
+    // Every window from here on is in the console's record, opened and closed.
+    this.windows = watchWindows(owl);
+    log.info('page', `the core is running: ${owl.width}x${owl.height} cells`);
     this.calc = new CalculatorWindow(owl, CmClose);
     this.calendar = new CalendarWindow(owl, CmClose);
     this.ascii = new AsciiTableWindow(owl, CmClose);
@@ -108,6 +116,8 @@ export class App {
     this.tools.push(this.dos);
     this.welcome = new Welcome(owl, this.choices());
     this.tools.push(this.welcome);
+    this.console = new ConsoleWindow(owl, { state: () => this.state() });
+    this.tools.push(this.console);
     this.dropServerIfAbsent();
     this.options = 0;
     this.box = 0;
@@ -152,6 +162,7 @@ export class App {
         { label: '~T~ile', cmd: CmTile, hint: 'The windows share the desktop with no overlap' }),
       sub('~H~elp',
         { label: '~W~hat to see...', cmd: CmWelcome, hint: 'The window this page opened with: what there is, and Enter to see it' },
+        { label: '~C~onsole', cmd: CmConsole, hint: 'Everything the page and the DOS PC have done since it opened, errors too: copy it into a bug report' },
         { label: '~A~bout', cmd: CmAbout, hint: 'What this program is and what draws it' }),
     );
     owl.statusLine(
@@ -188,6 +199,10 @@ export class App {
       { label: 'DOSBox settings', about: 'Video card, CPU, sound, memory, network: a page each, written out as the dosbox.conf the ' +
         'DOS PC starts with - the dialog shows it.',
         go: show(DosCm.Settings) },
+      { label: 'What the page is doing', about: 'Help > Console: everything since the page opened - windows, the DOS PC switching ' +
+        'on, what DOSBox says, the network, every error - in a terminal window, coloured by ANSI sequences as a terminal is. ' +
+        'F4 adds the state of everything now; Ctrl+C copies it all for a bug report.',
+        go: show(CmConsole) },
       { label: 'Look around myself', about: 'F10 opens the menu bar; every item says on the status line what it does. ' +
         'Help > What to see brings this window back.',
         go: () => {} },
@@ -206,6 +221,42 @@ export class App {
       if (this.commander.left) this.owl.activate(this.commander.left.win);
       this.owl.refresh?.();
     });
+  }
+
+  /**
+   * What everything is doing now, a line each, for Console > State now
+   * (F4): the page, its windows, the DOS PC, the network.
+   */
+  async state() {
+    const owl = this.owl, dos = this.dos, box = dos.box;
+    const lines = [];
+    const m = globalThis.performance?.memory;
+    lines.push(`page: window ${innerWidth}x${innerHeight}, ${owl.width}x${owl.height} cells, device pixels ${devicePixelRatio}, ` +
+      `${document.hidden ? 'hidden' : 'visible'}, ${document.hasFocus() ? 'focused' : 'not focused'}` +
+      (m ? `, memory ${mb(m.usedJSHeapSize)} of ${mb(m.jsHeapSizeLimit)}` : ''));
+    const active = owl.active();
+    const open = [...this.windows].map(([id, title]) => `#${id} "${title}"${id === active ? ' (front)' : ''}`);
+    lines.push(`windows: ${open.length ? open.join(', ') : 'none'}`);
+    const est = await navigator.storage?.estimate?.().catch(() => null);
+    if (est) lines.push(`storage: ${mb(est.usage)} used of ${mb(est.quota)}`);
+    const s = dos.settings;
+    lines.push(`dos settings: ${s.machine}, ${s.memsize} MB, cpu ${s.core}/${s.cputype}, cycles ${s.cycles === 'fixed' ? `fixed ${s.fixed}` : s.cycles}, ` +
+      `${s.sbtype}, ems ${s.ems ? 'on' : 'off'}, umb ${s.umb ? 'on' : 'off'}, awake ${s.awake ? 'on' : 'off'}, picture ${s.picture}, ` +
+      `ipx ${s.ipx ? 'on' : 'off'}, relay ${s.relay}, room ${s.room}`);
+    if (!box.running) {
+      lines.push('dos: off');
+    } else {
+      lines.push(`dos: on, running ${dos.program?.name ?? dos.started}, keyboard ${box.hasKeys() ? 'in DOS' : 'on the page'}, ` +
+        `picture ${box.frameSize ? `${box.frameSize.w}x${box.frameSize.h}` : 'not yet'}, ${box.keepRunning ? 'awake' : 'pauses when hidden'}`);
+      const st = await box.stats().catch(() => null);
+      if (st) {
+        const { net, ...rest } = st;
+        lines.push(`dos emulator: ${Object.entries(rest).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+        lines.push(`net: ${dos.network.state}${dos.network.url ? ` ${dos.network.url}` : ''}; ` +
+          `sent ${net.packetsOut} packets (${net.sent} bytes), received ${net.packetsIn} (${net.received} bytes)`);
+      }
+    }
+    return lines;
   }
 
   /**
@@ -409,7 +460,7 @@ export class App {
   closeActive() {
     const owl = this.owl, a = owl.active();
     if (!a) return;
-    for (const t of [this.commander, this.dos, this.welcome]) if (t.owns(a)) { t.closeWindow(a); return; }
+    for (const t of [this.commander, this.dos, this.welcome, this.console]) if (t.owns(a)) { t.closeWindow(a); return; }
     const tool = this.tools.find(t => t.id === a);
     owl.close(a);
     if (tool) tool.closed();
@@ -426,6 +477,7 @@ export class App {
       case CmExit: return false;
       case CmHelp:
       case CmWelcome: this.welcome.show(); return true;
+      case CmConsole: this.console.show(); return true;
       case CmAbout:
         this.tell('OWLOS UI Demo', 'A text mode toolkit in the classic DOS style, with one portable core: this page is JavaScript, ' +
           'every window in it is drawn by a Rust core compiled to WebAssembly, and the same core runs on a ' +

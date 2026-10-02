@@ -18,6 +18,8 @@
   // The whole page: the core (lib/js/owlosui-wire.wasm, found beside
   // owlosui.js), a canvas, and the program in app.js - which opens on
   // What to see, so a first visit knows where to start.
+  // The log first: it is listening for errors before anything can make one.
+  import './log.js';
   import { run } from '../../../../lib/js/owlosui.js';
   import { App } from './app.js';
   run(document.getElementById('screen'), owl => {
