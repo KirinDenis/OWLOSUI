@@ -1,6 +1,6 @@
 // The page's log: everything that happens, from the first moment, kept in
 // memory - so that when something goes wrong the question is not "what did
-// you do?" but "show me what is in the console" (Help > Console).
+// you do?" but "show me what is in the console" (Tools > Console).
 //
 // Each line is a time, a source and the words, coloured with ANSI
 // sequences: the console window is a terminal and colours them itself, and

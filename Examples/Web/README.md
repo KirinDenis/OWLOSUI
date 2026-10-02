@@ -240,7 +240,7 @@ when it is isolated from other sites. RUN.CMD's server and GitHub Pages
 cannot say so in headers, so [coi-serviceworker.js](JavaScript/05-Demo/coi-serviceworker.js)
 does, and the page reloads itself once on the first visit.
 
-## Help > Console
+## Tools > Console
 
 Everything the page has done since it opened, in a terminal window: the
 browser and screen it is running on, every window opened and closed, the DOS
@@ -254,6 +254,16 @@ For a bug report: **F4** writes the state of everything now - windows,
 memory, storage, the DOS PC and its emulator's counters, the network's
 packets - then **Ctrl+C** copies the whole console as plain text, or **F2**
 saves it as a file. F8 empties the window; the page goes on recording.
+Dragged with its button down, the mouse selects; Ctrl+C then copies only
+that, Ctrl+A selects everything, Escape lets go of the selection, and a right
+click offers Copy and Select all.
+
+**The clipboard is the computer's.** Copy, Cut and Paste - from the Edit
+menu, the keys, or the menu a right click opens over any text - go to and
+come from the computer's own clipboard, so text moves between the page and
+any other program. Ctrl+V is the browser's paste and asks nothing; Paste from
+a menu reads the clipboard, which a browser lets a page do once it has been
+allowed to.
 
 The window is the toolkit's own `CONSOLE` view, the same in every client: the
 lines are written with ANSI colour sequences, and the core colours them as a

@@ -347,7 +347,13 @@ export class DosTool {
       if (what === 'stopped') { log.info('dos', 'switched off'); if (this.win) this.retitle(); }
       if (what === 'frame') log.info('dos', `picture ${box.frameSize.w}x${box.frameSize.h}`);
       if (what === 'stdout') log.info('dos out', detail.replace(/\s+$/, ''));
-      if (what === 'message') log.write('dos out', detail.text, detail.type === 'error' ? 'error' : detail.type === 'warn' ? 'warn' : 'info');
+      // DOSBox writes its own [LOG_...] lines to stderr and js-dos hands
+      // them on as errors; they are its diary, not its troubles, and shown
+      // red they would hide the real ones.
+      if (what === 'message') {
+        const level = /^\s*\[LOG_/.test(detail.text) ? 'info' : detail.type === 'error' ? 'error' : detail.type === 'warn' ? 'warn' : 'info';
+        log.write('dos out', detail.text, level);
+      }
     });
     this.monitors = new Monitors(owl, this);
     if (typeof setInterval !== 'undefined') setInterval(() => this.watchFloppy(), 1500);

@@ -16,6 +16,9 @@
 //             project's own examples, Volkov Commander's keys, upload and
 //             download (commander.js). Calculator (step 3's, imported as it
 //             is), Calendar, ASCII table, Puzzle - tools.js, one class each.
+//             Console - everything the page has done since it opened,
+//             errors included, in a terminal window, to copy into a bug
+//             report (log.js records it, console.js shows it).
 //   Options   A dialog of check boxes and radio buttons; the colour dialog,
 //             every role of the palette changed live; a ticked item.
 //   Window    Size/Move, Zoom, Next, Previous, Close, List, Cascade, Tile:
@@ -27,10 +30,7 @@
 //             settings, a network monitor and a machine monitor (dos.js,
 //             monitors.js; the machine is lib/js/dosbox/).
 //   Help      What to see - the window a first visit opens on
-//             (welcome.js); Console - everything the page has done since
-//             it opened, errors included, in a terminal window, to copy
-//             into a bug report (log.js records it, console.js shows it);
-//             and About.
+//             (welcome.js) - and About.
 //
 // Every tool owns a range of command numbers and answers handles(cmd), so
 // this file only routes: a menu command opens a tool, a tool's own buttons
@@ -144,7 +144,9 @@ export class App {
         { label: '~C~alculator', cmd: CmCalc, hint: 'Arithmetic, trigonometry, hex and binary' },
         { label: 'Ca~l~endar', cmd: CmCalendar, hint: 'A month at a time; click a day' },
         { label: '~A~SCII table', cmd: CmAscii, hint: 'Every glyph of the font, by its number' },
-        { label: '~P~uzzle', cmd: CmPuzzle, hint: 'The fifteen puzzle' }),
+        { label: '~P~uzzle', cmd: CmPuzzle, hint: 'The fifteen puzzle' },
+        line(),
+        { label: 'C~o~nsole', cmd: CmConsole, hint: 'Everything the page and the DOS PC have done since it opened, errors too: copy it into a bug report' }),
       sub('~D~OS', ...this.dos.menu()),
       sub('~O~ptions',
         { label: '~M~ouse...', cmd: CmOptions, hint: 'Check boxes and radio buttons, read back on OK' },
@@ -162,7 +164,6 @@ export class App {
         { label: '~T~ile', cmd: CmTile, hint: 'The windows share the desktop with no overlap' }),
       sub('~H~elp',
         { label: '~W~hat to see...', cmd: CmWelcome, hint: 'The window this page opened with: what there is, and Enter to see it' },
-        { label: '~C~onsole', cmd: CmConsole, hint: 'Everything the page and the DOS PC have done since it opened, errors too: copy it into a bug report' },
         { label: '~A~bout', cmd: CmAbout, hint: 'What this program is and what draws it' }),
     );
     owl.statusLine(
@@ -199,7 +200,7 @@ export class App {
       { label: 'DOSBox settings', about: 'Video card, CPU, sound, memory, network: a page each, written out as the dosbox.conf the ' +
         'DOS PC starts with - the dialog shows it.',
         go: show(DosCm.Settings) },
-      { label: 'What the page is doing', about: 'Help > Console: everything since the page opened - windows, the DOS PC switching ' +
+      { label: 'What the page is doing', about: 'Tools > Console: everything since the page opened - windows, the DOS PC switching ' +
         'on, what DOSBox says, the network, every error - in a terminal window, coloured by ANSI sequences as a terminal is. ' +
         'F4 adds the state of everything now; Ctrl+C copies it all for a bug report.',
         go: show(CmConsole) },

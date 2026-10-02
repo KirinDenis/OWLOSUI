@@ -80,6 +80,9 @@ pub struct Console {
     height: i16,
     dirty: bool,
     pub focused: bool,
+    /// Where a selection was started and where it reaches now, as (line,
+    /// column) in `lines`; the two may be either way round.
+    sel: Option<((usize, usize), (usize, usize))>,
 }
 
 impl Console {
@@ -100,6 +103,7 @@ impl Console {
             height: 0,
             dirty: true,
             focused: false,
+            sel: None,
         }
     }
 
@@ -333,16 +337,109 @@ impl Console {
         self.lines.push(Vec::new());
         self.col = 0;
         self.top = 0;
+        self.sel = None;
         self.dirty = true;
     }
 
     /// The oldest lines out, an eighth of the scrollback at a time, so that
-    /// a busy console is not shifting its whole history on every line.
+    /// a busy console is not shifting its whole history on every line. A
+    /// selection moves up with the lines it is on, and goes with them.
     fn trim(&mut self) {
         if self.lines.len() > self.scrollback + self.scrollback / 8 {
             let gone = self.lines.len() - self.scrollback;
             self.lines.drain(..gone);
+            self.sel = self.sel.and_then(|(a, b)| {
+                let up = |p: (usize, usize)| if p.0 < gone { (0, 0) } else { (p.0 - gone, p.1) };
+                (a.0.max(b.0) >= gone).then(|| (up(a), up(b)))
+            });
         }
+    }
+
+    // ------------------------------------------------------------ selection
+
+    /// The line and column under a cell of the view, `row` rows down from
+    /// its top. Above the first row is the start; below the last, the end.
+    pub fn point(&self, row: i16, col: i16) -> (usize, usize) {
+        let r = self.top as i32 + row as i32;
+        if r < 0 {
+            return (0, 0);
+        }
+        match self.rows.get(r as usize) {
+            Some(&(line, start)) => {
+                let len = self.lines[line as usize].len();
+                (line as usize, (start as usize + col.max(0) as usize).min(len))
+            }
+            None => {
+                let last = self.lines.len() - 1;
+                (last, self.lines[last].len())
+            }
+        }
+    }
+
+    /// A selection begins here: nothing is selected until it is dragged.
+    pub fn select_from(&mut self, p: (usize, usize)) {
+        self.sel = Some((p, p));
+    }
+
+    /// The far end of the selection moves here.
+    pub fn select_to(&mut self, p: (usize, usize)) {
+        if let Some((a, _)) = self.sel {
+            self.sel = Some((a, p));
+        }
+    }
+
+    pub fn select_all(&mut self) {
+        let last = self.lines.len() - 1;
+        self.sel = Some(((0, 0), (last, self.lines[last].len())));
+    }
+
+    pub fn select_none(&mut self) {
+        self.sel = None;
+    }
+
+    /// The selection, start first; `None` when nothing is selected.
+    pub fn selection(&self) -> Option<((usize, usize), (usize, usize))> {
+        let (a, b) = self.sel?;
+        if a == b {
+            return None;
+        }
+        Some(if a <= b { (a, b) } else { (b, a) })
+    }
+
+    /// Whether column `col` of line `line` is selected - what the drawing asks.
+    pub fn is_selected(&self, line: usize, col: usize) -> bool {
+        self.selection().is_some_and(|(a, b)| (line, col) >= a && (line, col) < b)
+    }
+
+    /// The selected glyphs, a line each, without the spaces a line ends
+    /// in - a terminal pads its lines, and nobody wants the padding pasted.
+    pub fn selected(&self) -> Vec<Vec<Glyph>> {
+        let Some((a, b)) = self.selection() else {
+            return Vec::new();
+        };
+        (a.0..=b.0)
+            .map(|i| {
+                let l = &self.lines[i];
+                let from = if i == a.0 { a.1.min(l.len()) } else { 0 };
+                let to = if i == b.0 { b.1.min(l.len()) } else { l.len() };
+                trimmed(&l[from..to.max(from)])
+            })
+            .collect()
+    }
+
+    /// Every line's glyphs, the last line too when something is on it.
+    pub fn all(&self) -> Vec<Vec<Glyph>> {
+        let mut v: Vec<Vec<Glyph>> = self.lines.iter().map(|l| trimmed(l)).collect();
+        if v.len() > 1 && v.last().is_some_and(|l| l.is_empty()) {
+            v.pop();
+        }
+        v
+    }
+
+    /// The line and first column of row `r` as laid out.
+    pub fn row_start(&self, r: i16) -> Option<(usize, usize)> {
+        let &(line, start) = self.rows.get(usize::try_from(r).ok()?)?;
+        Some((line as usize, start as usize))
     }
 
     pub fn lines(&self) -> &[Vec<Cell>] {
@@ -411,6 +508,12 @@ impl Console {
         self.top = self.max_top();
         self.follow = true;
     }
+}
+
+/// A run of cells as glyphs, the spaces at its end left off.
+fn trimmed(cells: &[Cell]) -> Vec<Glyph> {
+    let end = cells.iter().rposition(|c| c.ch != b' ' as Glyph).map_or(0, |i| i + 1);
+    cells[..end].iter().map(|c| c.ch).collect()
 }
 
 /// A 256-colour index onto the sixteen: the first sixteen are the sixteen,

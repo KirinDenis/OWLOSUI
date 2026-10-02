@@ -200,10 +200,13 @@ await test('Demo: menu bar, hints, and every tool opens', async () => {
   check(o.frame().find('Windows [modal]'), 'Alt+0 did not list the windows', o.frame());
 });
 
-await test('Demo: Help > Console shows what the page did, coloured, and gives it back as plain text', async () => {
+await test('Demo: Tools > Console shows what the page did, coloured, and gives it back as plain text', async () => {
   const o = await owl(100, 30);
   const app = new Demo.App(o);
   log.error('error', 'something broke before anyone looked');
+  o.press('t', { alt: true });
+  check(o.frame().find('Console'), 'Tools has no Console', o.frame());
+  o.press('Escape');
   app.onCommand(Demo.CmConsole);
   let f = o.frame();
   check(f.find(' Console ') && f.find('the core is running'), 'the console does not show the record from before it opened', f);

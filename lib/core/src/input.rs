@@ -114,6 +114,16 @@ impl InputLine {
             .collect()
     }
 
+    /// Words in at the caret, as many as the field has room for - what a
+    /// paste does here. A field is one line, so the paste is too.
+    pub fn insert(&mut self, s: &str) {
+        let room = self.max.saturating_sub(self.text.chars().count());
+        let s: String = s.chars().filter(|&c| c != '\n' && c != '\r').take(room).collect();
+        let at = byte_at(&self.text, self.cursor);
+        self.text.insert_str(at, &s);
+        self.cursor += s.chars().count();
+    }
+
     /// Handle a key. Returns true if it was used, so a caller can pass on what
     /// was not.
     pub fn key(&mut self, k: Key) -> bool {

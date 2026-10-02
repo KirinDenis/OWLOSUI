@@ -1478,3 +1478,38 @@ fn a_console_colours_what_is_written_and_gives_it_back_plain() {
     let e = c.err(0x68, &[u16(win).to_vec(), s("x")].concat());
     assert!(e.contains("not a console"), "{e}");
 }
+
+#[test]
+fn the_host_shares_its_clipboard_copy_goes_out_and_paste_comes_in() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(20)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 40, 10), vec![0x20], s("Doc")].concat()));
+    // TEXT: parent, rect, dock 0 (fill), flags 0 (editable).
+    let t = id_of(&c.ok(0x11, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s("hello world")].concat()));
+    // CLIPBOARD, host on: nothing copied yet, no paste waiting.
+    let r = c.ok(0x69, &[1]);
+    let before = u32::from_le_bytes([r[0], r[1], r[2], r[3]]);
+    assert_eq!(r[4], 0);
+    // Ctrl+A, Ctrl+C: the count goes up and CLIPBOARD_GET has the text.
+    let ctrl = |ch: u8| [vec![0], u16(ch as u16).to_vec(), vec![2]].concat();
+    c.ok(0x30, &ctrl(b'a'));
+    c.ok(0x30, &ctrl(b'c'));
+    let r = c.ok(0x69, &[1]);
+    assert_eq!(u32::from_le_bytes([r[0], r[1], r[2], r[3]]), before + 1);
+    let g = c.ok(0x6A, &[]);
+    let n = u16::from_le_bytes([g[0], g[1]]) as usize;
+    assert_eq!(String::from_utf8(g[2..2 + n].to_vec()).unwrap(), "hello world");
+    // The host's paste key: its clipboard, pasted now over the selection.
+    let p = c.ok(0x6B, &[vec![1], s("Привет\r\nмир")].concat());
+    assert_eq!(p[0], 1);
+    let body = c.ok(0x21, &u16(t));
+    let n = u16::from_le_bytes([body[0], body[1]]) as usize;
+    assert_eq!(String::from_utf8(body[2..2 + n].to_vec()).unwrap(), "Привет\nмир");
+    // Ctrl+V while the host shares its clipboard: the paste waits for it.
+    c.ok(0x30, &ctrl(b'v'));
+    assert_eq!(c.ok(0x69, &[1])[4], 1, "Ctrl+V should wait for the host's clipboard");
+    c.ok(0x6B, &[vec![0], s("!")].concat());
+    let body = c.ok(0x21, &u16(t));
+    let n = u16::from_le_bytes([body[0], body[1]]) as usize;
+    assert_eq!(String::from_utf8(body[2..2 + n].to_vec()).unwrap(), "Привет\nмир!");
+}

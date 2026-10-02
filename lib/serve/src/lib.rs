@@ -129,6 +129,9 @@ pub mod op {
     pub const SET_INDICATOR: u8 = 0x66;
     pub const CONSOLE: u8 = 0x67;
     pub const CONSOLE_WRITE: u8 = 0x68;
+    pub const CLIPBOARD: u8 = 0x69;
+    pub const CLIPBOARD_GET: u8 = 0x6A;
+    pub const CLIPBOARD_PASTE: u8 = 0x6B;
 }
 
 type Res<T> = Result<T, String>;
@@ -356,6 +359,9 @@ impl Out {
     }
     fn i16(&mut self, v: i16) {
         self.u16(v as u16);
+    }
+    fn u32(&mut self, v: u32) {
+        self.0.extend_from_slice(&v.to_le_bytes());
     }
     fn id(&mut self, v: ViewId) {
         self.u16(v.raw() as u16);
@@ -1384,6 +1390,46 @@ impl Server {
                     Kind::Console(c) => c.write(&text, &mut |ch| cp.cell_glyph(ch)),
                     _ => return Err(format!("view {} is not a console", id.raw())),
                 }
+            }
+
+            op::CLIPBOARD => {
+                // The host shares its clipboard - a browser's, a desktop's -
+                // and asks, after each input, whether the core copied
+                // (the count went up) or wants to paste.
+                let host = r.u8("host")? != 0;
+                let ui = self.ui()?;
+                ui.host_clip.on = host;
+                out.u32(ui.host_clip.copied);
+                out.u8(ui.host_clip.paste_wanted.is_some() as u8);
+            }
+
+            op::CLIPBOARD_GET => {
+                // What the core's clipboard holds, as text: what was copied.
+                // At most what one reply carries, cut at a character.
+                let ui = self.ui.as_ref().ok_or("INIT first")?;
+                let cp = &self.cp;
+                let mut s = ui.clipboard.iter().map(|l| cp.decode(l)).collect::<Vec<_>>().join("\n");
+                if s.len() > 60000 {
+                    let mut end = 60000;
+                    while !s.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    s.truncate(end);
+                }
+                out.str(&s);
+            }
+
+            op::CLIPBOARD_PASTE => {
+                // The host's clipboard in, and the paste that waited for it
+                // done. Bit 0: paste now, into the text with the focus - the
+                // host's own paste key. Bit 1: the host could not read its
+                // clipboard; paste what the core has.
+                let flags = r.u8("flags")?;
+                let text = r.str("text")?;
+                // An empty one leaves the core's as it was.
+                let lines = (flags & 2 == 0 && !text.is_empty()).then(|| lines_of(&mut self.cp, &text.replace("\r\n", "\n")));
+                let pasted = self.ui()?.host_paste(lines, flags & 1 != 0);
+                out.u8(pasted as u8);
             }
 
             op::CANVAS => {

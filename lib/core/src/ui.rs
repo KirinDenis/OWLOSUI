@@ -47,16 +47,36 @@ fn is_edit_menu(it: &crate::menu::MenuItem) -> bool {
     !it.items.is_empty() && it.label().eq_ignore_ascii_case("edit")
 }
 
+/// The text position under a cell of a text view, `row` rows and `col`
+/// columns into it, clamped to the text: past the end of a line is its end.
+fn text_point(t: &TextView, row: i16, col: i16) -> Point {
+    if t.wrapping() {
+        return t.point_at(col, row);
+    }
+    let y = (t.top + row).clamp(0, (t.line_count() - 1).max(0));
+    let len = t.lines.get(y as usize).map_or(0, |l| l.len()) as i16;
+    Point::new((t.left + col).clamp(0, len), y)
+}
+
+/// What a console's selection is drawn in.
+const CONSOLE_SELECTED: u8 = 0x70;
+
 /// A console: black, whatever the window around it is, because a terminal
 /// is black and the colours written into it were chosen against black.
 fn draw_console(c: &crate::console::Console, abs: Rect, buf: &mut Buffer, clip: Rect) {
     buf.fill(abs, SP, crate::console::CONSOLE_ATTR, clip);
+    let selecting = c.selection().is_some();
     for row in 0..abs.h {
         let Some(cells) = c.row(c.top + row) else {
             break;
         };
+        let (line, start) = c.row_start(c.top + row).unwrap_or((0, 0));
         for (col, cell) in cells.iter().enumerate() {
-            buf.put(abs.x + col as i16, abs.y + row, cell.ch, cell.attr, clip);
+            // Selected: one colour for the whole of it, black on grey, as a
+            // terminal shows it. Each cell's own colours turned round made
+            // a strip of every colour the lines happened to be in.
+            let a = if selecting && c.is_selected(line, start + col) { CONSOLE_SELECTED } else { cell.attr };
+            buf.put(abs.x + col as i16, abs.y + row, cell.ch, a, clip);
         }
     }
 }
@@ -190,6 +210,18 @@ impl Bar {
     }
 }
 
+/// The clipboard as a host program sees it: how many times the core has
+/// copied to it, and whether a Paste was chosen that the host should
+/// answer from its own clipboard - a browser's, a desktop's - before the
+/// core pastes. A host that never asks has the core's clipboard alone, as
+/// before.
+#[derive(Default)]
+pub struct HostClip {
+    pub on: bool,
+    pub copied: u32,
+    pub paste_wanted: Option<ViewId>,
+}
+
 struct Drag {
     id: ViewId,
     mode: DragMode,
@@ -245,6 +277,13 @@ const CM_SEARCH_REPLACE: Cmd = 0xFF51;
 const CM_SEARCH_ALL: Cmd = 0xFF52;
 const CM_SEARCH_CANCEL: Cmd = 0xFF53;
 const CM_NOTICE_OK: Cmd = 0xFF54;
+/// The context menu a right click opens over a text or a console: its
+/// commands act on that view, whichever window is in front by then.
+const CM_CTX_UNDO: Cmd = 0xFF58;
+const CM_CTX_CUT: Cmd = 0xFF59;
+const CM_CTX_COPY: Cmd = 0xFF5A;
+const CM_CTX_PASTE: Cmd = 0xFF5B;
+const CM_CTX_SELECT_ALL: Cmd = 0xFF5C;
 /// Edit > Syntax: 0xFF60 is None, 0xFF61 on the languages in list order.
 const CM_ED_SYNTAX: Cmd = 0xFF60;
 const SYNTAX_MENU_MAX: Cmd = 64;
@@ -320,6 +359,13 @@ pub struct Ui {
     /// the same name is found first.
     syntaxes: Vec<crate::syntax::Syntax>,
     syntaxes_loaded: bool,
+    /// A text or a console being selected with the mouse: the button went
+    /// down on it and has not come up.
+    selecting: Option<ViewId>,
+    /// The view a context menu was opened over, for the commands it sends.
+    context_for: Option<ViewId>,
+    /// The clipboard as the host program shares it. See `HostClip`.
+    pub host_clip: HostClip,
 }
 
 impl Ui {
@@ -351,6 +397,9 @@ impl Ui {
             chord: false,
             syntaxes: Vec::new(),
             syntaxes_loaded: false,
+            selecting: None,
+            context_for: None,
+            host_clip: HostClip::default(),
         }
     }
 
@@ -745,7 +794,7 @@ impl Ui {
             items.push(item("~C~opy", keys("Ctrl+C", "Ctrl+Ins"), CM_ED_COPY,
                 "The selected text to the clipboard", text && sel));
             items.push(item("~P~aste", keys("Ctrl+V", "Shift+Ins"), CM_ED_PASTE,
-                "What is on the clipboard, into the text at the caret", text && !ro && !self.clipboard.is_empty()));
+                "What is on the clipboard, into the text at the caret", text && !ro && (self.host_clip.on || !self.clipboard.is_empty())));
             items.push(item("Select ~a~ll", keys("Ctrl+A", ""), CM_ED_SELECT_ALL,
                 "The whole text, to copy it or type over it", text));
         }
@@ -917,13 +966,70 @@ impl Ui {
 
     /// An editing command, as if its key had been pressed.
     fn run_edit(&mut self, tid: ViewId, c: crate::edit::Cmd) {
+        self.edit(tid, c, false);
+    }
+
+    /// One editing command on a text, and what it means for the clipboard
+    /// the host shares: a copy or a cut is counted, so the host can carry
+    /// it to its own clipboard; a paste, while the host shares one, waits
+    /// for the host to put its clipboard in first (`host_paste`).
+    fn edit(&mut self, tid: ViewId, c: crate::edit::Cmd, extend: bool) {
+        use crate::edit::Cmd as E;
         let r = self.abs_rect(tid);
+        let selected = matches!(&self.nodes[tid.ix()].kind, Kind::Text(t) if t.selection().is_some());
+        if c == E::Paste && self.host_clip.on {
+            let ro = matches!(&self.nodes[tid.ix()].kind, Kind::Text(t) if t.readonly);
+            if !ro {
+                self.host_clip.paste_wanted = Some(tid);
+            }
+            return;
+        }
         let clip = &mut self.clipboard;
         if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
             t.width = r.w;
-            t.exec(c, false, r.h, clip);
+            t.exec(c, extend, r.h, clip);
+        }
+        if selected && matches!(c, E::Copy | E::Cut) {
+            self.host_clip.copied = self.host_clip.copied.wrapping_add(1);
         }
         self.follow_x(tid);
+    }
+
+    /// The host's clipboard, given: it becomes the core's, and a paste
+    /// that was waiting for it happens now. `now` pastes into the text
+    /// with the focus even when nothing was waiting - the host's own paste
+    /// key, Ctrl+V in a browser. True if something was pasted.
+    pub fn host_paste(&mut self, lines: Option<Vec<Vec<Glyph>>>, now: bool) -> bool {
+        if let Some(l) = lines {
+            if !l.is_empty() {
+                self.clipboard = l;
+            }
+        }
+        let target = self.host_clip.paste_wanted.take().filter(|t| self.is_alive(*t)).or_else(|| {
+            if !now {
+                return None;
+            }
+            // A field with the focus - Find, a file's name - before the
+            // window's text.
+            if let Some(f) = self.focused().filter(|f| matches!(self.nodes[f.ix()].kind, Kind::Input(_))) {
+                return Some(f);
+            }
+            let win = self.active_window()?;
+            self.window_editor(win)
+        });
+        let Some(tid) = target else { return false };
+        if let Kind::Input(i) = &mut self.nodes[tid.ix()].kind {
+            let Some(l) = self.clipboard.first() else { return false };
+            i.insert(&glyph_string(l));
+            return true;
+        }
+        if self.clipboard.is_empty() || !matches!(&self.nodes[tid.ix()].kind, Kind::Text(t) if !t.readonly && t.hex.is_none()) {
+            return false;
+        }
+        let on = core::mem::replace(&mut self.host_clip.on, false);
+        self.edit(tid, crate::edit::Cmd::Paste, false);
+        self.host_clip.on = on;
+        true
     }
 
     /// Scroll sideways to the caret, as the vertical scroll already does.
@@ -995,13 +1101,7 @@ impl Ui {
             _ => return,
         };
         let Some((cmd, extend)) = km.lookup(k) else { return };
-        let r = self.abs_rect(id);
-        let clip = &mut self.clipboard;
-        if let Kind::Text(t) = &mut self.nodes[id.ix()].kind {
-            t.width = r.w;
-            t.exec(cmd, extend, r.h, clip);
-        }
-        self.follow_x(id);
+        self.edit(id, cmd, extend);
     }
 
     /// The Find dialog, or the Replace dialog: a modal the core builds and
@@ -1751,7 +1851,9 @@ impl Ui {
     /// A command from the menu or the status line. An editor's own is done
     /// here and now; any other waits for the program to collect it.
     fn emit(&mut self, cmd: Cmd) {
-        if is_editor_cmd(cmd) {
+        if (CM_CTX_UNDO..=CM_CTX_SELECT_ALL).contains(&cmd) {
+            self.context_command(cmd);
+        } else if is_editor_cmd(cmd) {
             self.editor_command(cmd);
         } else {
             self.command = Some(cmd);
@@ -3916,6 +4018,9 @@ impl Ui {
                 }
             }
             MouseKind::Drag => {
+                if let Some(id) = self.selecting.filter(|id| self.is_alive(*id)) {
+                    return self.drag_selection(id, p);
+                }
                 // Dragging along the bar with a panel open switches between
                 // them. The classic menus did this and it is how a menu is actually
                 // used: press, slide, release.
@@ -3953,8 +4058,10 @@ impl Ui {
                 }
                 self.continue_drag(p)
             }
+            MouseKind::Down(Button::Right) => self.open_context(p),
             MouseKind::Up(_) => {
                 self.drag = None;
+                self.end_selection();
                 // Release over the button that went down does the thing;
                 // release anywhere else is how you change your mind.
                 if let Some(win) = self.active_window() {
@@ -4299,6 +4406,16 @@ impl Ui {
                 return;
             }
             if k.code == K::Esc {
+                // A console's selection is let go of first; the next
+                // Escape is the window's.
+                if let Some(f) = self.focused_or_first() {
+                    if let Kind::Console(c) = &mut self.nodes[f.ix()].kind {
+                        if c.selection().is_some() {
+                            c.select_none();
+                            return;
+                        }
+                    }
+                }
                 self.press_cancel(win);
                 return;
             }
@@ -4678,17 +4795,165 @@ impl Ui {
                     f.path.focused = false;
                 }
             }
-            Kind::Text(t) if t.wrapping() => {
-                t.cur = t.point_at(col, row);
-                t.anchor = None;
-            }
+            // The caret goes where the pointer is, and a selection starts
+            // there: dragging with the button down is how a hand selects.
             Kind::Text(t) => {
-                t.cur.y = (t.top + row).clamp(0, (t.line_count() - 1).max(0));
-                let len = t.lines.get(t.cur.y as usize).map_or(0, |l| l.len()) as i16;
-                t.cur.x = (t.left + col).clamp(0, len);
-                t.anchor = None;
+                t.cur = text_point(t, row, col);
+                t.anchor = Some(t.cur);
+                self.selecting = Some(id);
+            }
+            Kind::Console(c) => {
+                let p = c.point(row, col);
+                c.select_from(p);
+                self.selecting = Some(id);
             }
             _ => {}
+        }
+    }
+
+    /// The mouse dragged with its button down over a text or a console
+    /// being selected: the selection's far end follows it, and past the top
+    /// or the bottom the view scrolls a row towards it.
+    fn drag_selection(&mut self, id: ViewId, p: Point) {
+        let r = self.abs_rect(id);
+        let (row, col) = (p.y - r.y, p.x - r.x);
+        let step = if row < 0 { -1 } else if row >= r.h { 1 } else { 0 };
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Text(t) => {
+                if step != 0 {
+                    if t.wrapping() {
+                        t.scroll_rows(step, r.h);
+                    } else {
+                        t.top = (t.top + step).clamp(0, (t.line_count() - r.h).max(0));
+                    }
+                }
+                t.cur = text_point(t, row.clamp(0, (r.h - 1).max(0)), col.clamp(0, (r.w - 1).max(0)));
+            }
+            Kind::Console(c) => {
+                if step != 0 {
+                    c.scroll(step);
+                }
+                let q = c.point(row.clamp(0, (r.h - 1).max(0)), col.clamp(0, r.w.max(0)));
+                c.select_to(q);
+            }
+            _ => {}
+        }
+    }
+
+    /// A right click over a text or a console: its context menu, at the
+    /// pointer - what every program a person has used since does there.
+    /// A click outside the selection moves the caret there first, so what
+    /// is cut or copied is what was clicked on; inside it, the selection
+    /// stays to be acted on.
+    fn open_context(&mut self, p: Point) {
+        use crate::menu::MenuItem;
+        if !self.menu_boxes().is_empty() {
+            return self.close_menu();
+        }
+        if let Some(m) = self.modal() {
+            if !self.abs_rect(m).contains(p) {
+                return;
+            }
+        }
+        let Some(win) = self.window_at(p) else { return };
+        let target = self.nodes[win.ix()].children.iter().copied().find(|c| {
+            matches!(self.nodes[c.ix()].kind, Kind::Text(_) | Kind::Console(_)) && self.abs_rect(*c).contains(p)
+        });
+        let Some(id) = target else { return };
+        self.activate(win);
+        let chain = self.focus_chain(win);
+        if chain.contains(&id) {
+            for c in &chain {
+                self.set_view_focus(*c, *c == id);
+            }
+        }
+        let r = self.abs_rect(id);
+        let (row, col) = (p.y - r.y, p.x - r.x);
+        let host = self.host_clip.on;
+        let clip_full = !self.clipboard.is_empty();
+        let item = |label: &str, key: &str, cmd: Cmd, hint: &str, on: bool| {
+            let mut m = MenuItem::new(label, key, cmd).hint(hint);
+            m.enabled = on;
+            m
+        };
+        let items = match &mut self.nodes[id.ix()].kind {
+            Kind::Text(t) => {
+                let at = text_point(t, row, col);
+                let inside = t.selection().is_some_and(|(a, b)| !(at.y, at.x).lt(&(a.y, a.x)) && (at.y, at.x).lt(&(b.y, b.x)));
+                if !inside {
+                    t.cur = at;
+                    t.anchor = None;
+                }
+                let (ro, sel, text) = (t.readonly, t.selection().is_some(), t.hex.is_none());
+                vec![
+                    item("~U~ndo", "Ctrl+Z", CM_CTX_UNDO, "Take back the last change", text && !ro && !t.undo_stack.is_empty()),
+                    MenuItem::line(),
+                    item("Cu~t~", "Ctrl+X", CM_CTX_CUT, "The selected text to the clipboard, and out of the text", text && !ro && sel),
+                    item("~C~opy", "Ctrl+C", CM_CTX_COPY, "The selected text to the clipboard", text && sel),
+                    item("~P~aste", "Ctrl+V", CM_CTX_PASTE, "What is on the clipboard, into the text here", text && !ro && (host || clip_full)),
+                    MenuItem::line(),
+                    item("Select ~a~ll", "Ctrl+A", CM_CTX_SELECT_ALL, "The whole text", text),
+                ]
+            }
+            Kind::Console(c) => {
+                let sel = c.selection().is_some();
+                vec![
+                    item(if sel { "~C~opy" } else { "~C~opy all" }, "Ctrl+C", CM_CTX_COPY,
+                        if sel { "The selected lines to the clipboard" } else { "Everything in the console to the clipboard" }, true),
+                    item("Select ~a~ll", "Ctrl+A", CM_CTX_SELECT_ALL, "Everything in the console", true),
+                ]
+            }
+            _ => return,
+        };
+        self.close_menu();
+        let mut b = MenuBox::new(items);
+        b.parent = None;
+        let (w, h) = (b.width(), b.height());
+        let screen = self.nodes[self.root.ix()].rect;
+        let x = p.x.min((screen.w - w).max(0));
+        // Below the pointer when there is room, above it when there is not.
+        let y = if p.y + 1 + h <= screen.h { p.y + 1 } else { (p.y - h).max(0) };
+        let root = self.root;
+        self.insert(root, Rect::new(x, y, w, h), Kind::MenuBox(b));
+        self.context_for = Some(id);
+    }
+
+    /// A context menu's command, on the view it was opened over.
+    fn context_command(&mut self, cmd: Cmd) {
+        use crate::edit::Cmd as E;
+        let Some(id) = self.context_for.take().filter(|id| self.is_alive(*id)) else { return };
+        match (&self.nodes[id.ix()].kind, cmd) {
+            (Kind::Text(_), CM_CTX_UNDO) => self.edit(id, E::Undo, false),
+            (Kind::Text(_), CM_CTX_CUT) => self.edit(id, E::Cut, false),
+            (Kind::Text(_), CM_CTX_COPY) => self.edit(id, E::Copy, false),
+            (Kind::Text(_), CM_CTX_PASTE) => self.edit(id, E::Paste, false),
+            (Kind::Text(_), CM_CTX_SELECT_ALL) => self.edit(id, E::SelectAll, false),
+            (Kind::Console(_), CM_CTX_COPY) => self.console_copy(id),
+            (Kind::Console(_), CM_CTX_SELECT_ALL) => {
+                if let Kind::Console(c) = &mut self.nodes[id.ix()].kind {
+                    c.select_all();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The console's selection to the clipboard - or, with nothing
+    /// selected, everything in it: what a bug report wants.
+    fn console_copy(&mut self, id: ViewId) {
+        let Kind::Console(c) = &self.nodes[id.ix()].kind else { return };
+        let lines = if c.selection().is_some() { c.selected() } else { c.all() };
+        self.clipboard = lines;
+        self.host_clip.copied = self.host_clip.copied.wrapping_add(1);
+    }
+
+    /// The button came up: a press that never moved selected nothing.
+    fn end_selection(&mut self) {
+        let Some(id) = self.selecting.take() else { return };
+        if let Kind::Text(t) = &mut self.nodes[id.ix()].kind {
+            if t.anchor == Some(t.cur) {
+                t.anchor = None;
+            }
         }
     }
 
@@ -4754,6 +5019,14 @@ impl Ui {
                     // Out of the borrow first: the panel is a new node.
                     let id = id;
                     self.open_history(id);
+                } else if (k.code == K::Char('v') && k.mods.ctrl && !k.mods.alt) || (k.code == K::Insert && k.mods.shift) {
+                    // Paste: the first line of the clipboard, at the caret -
+                    // the host's clipboard first, when it shares one.
+                    if self.host_clip.on {
+                        self.host_clip.paste_wanted = Some(id);
+                    } else if let Some(l) = self.clipboard.first() {
+                        i.insert(&glyph_string(l));
+                    }
                 } else {
                     i.key(k);
                 }
@@ -4809,6 +5082,11 @@ impl Ui {
             K::PageDown => c.scroll(page),
             K::Home => c.home(),
             K::End => c.end(),
+            K::Char(ch) if k.mods.ctrl && !k.mods.alt && ch.eq_ignore_ascii_case(&'a') => c.select_all(),
+            K::Char(ch) if k.mods.ctrl && !k.mods.alt && ch.eq_ignore_ascii_case(&'c') => self.console_copy(id),
+            // Ctrl+Insert, the older key for the same.
+            K::Insert if k.mods.ctrl => self.console_copy(id),
+            K::Esc => c.select_none(),
             _ => {}
         }
     }

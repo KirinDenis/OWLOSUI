@@ -1,7 +1,9 @@
-// Help > Console: the page's log in a window - a terminal, black, coloured
+// Tools > Console: the page's log in a window - a terminal, black, coloured
 // by the ANSI sequences in each line - from the first moment of the visit,
 // not from when the window was opened. For a bug report: open it, F4 for
-// the state of everything now, then Ctrl+C or F2, and paste.
+// the state of everything now, then Ctrl+C or F2, and paste. The mouse
+// selects, dragged with its button down; a right click is Copy and Select
+// all - the core's own, as in every console.
 
 import { Style } from '../../../../lib/js/owlosui.js';
 import { log } from './log.js';
@@ -44,16 +46,18 @@ export class ConsoleWindow {
       if (this.queue.length === 1) setTimeout(() => this.flush(), 0);
     });
     // Short, beside the desktop's own keys on one line; F8 is a key with no
-    // words, said in the Console menu instead.
+    // words, said in the Console menu instead. Ctrl+C is the console's own:
+    // it copies what the mouse selected, or everything when nothing is,
+    // and the page carries it to the computer's clipboard.
     owl.windowStatus(this.win,
       { label: '~F4~ State', cmd: Cm.State, key: 'F4' },
-      { label: '~Ctrl+C~ Copy', cmd: Cm.Copy, key: 'c', ctrl: true },
+      { label: '~Ctrl+C~ Copy', cmd: 0 },
       { label: '~F2~ Save', cmd: Cm.Save, key: 'F2' },
       { label: '', cmd: Cm.Clear, key: 'F8' });
     owl.windowMenu(this.win, {
       label: '~C~onsole', items: [
         { label: '~S~tate now', cmd: Cm.State, shortcut: 'F4', hint: 'What the page, the DOS PC and the network are doing, written into the console' },
-        { label: '~C~opy all', cmd: Cm.Copy, shortcut: 'Ctrl+C', hint: 'The whole console as text, for a bug report' },
+        { label: '~C~opy all', cmd: Cm.Copy, hint: 'The whole console as text, for a bug report; Ctrl+C copies what the mouse selected' },
         { label: 'Sa~v~e as a file', cmd: Cm.Save, shortcut: 'F2', hint: 'The whole console, downloaded as a .txt file' },
         { label: 'C~l~ear', cmd: Cm.Clear, shortcut: 'F8', hint: 'Empty the window; the page goes on recording' },
       ],
