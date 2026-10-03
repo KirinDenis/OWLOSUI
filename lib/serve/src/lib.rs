@@ -133,7 +133,13 @@ pub mod op {
     pub const CLIPBOARD_GET: u8 = 0x6A;
     pub const CLIPBOARD_PASTE: u8 = 0x6B;
     pub const MINIMIZE: u8 = 0x6C;
+    pub const TEXT_APPEND: u8 = 0x6D;
+    pub const GET_TEXT_PART: u8 = 0x6E;
 }
+
+/// The most text one GET_TEXT or GET_TEXT_PART carries: a reply is at most
+/// 65535 bytes, with room left for its own few.
+const TEXT_PART: usize = 60000;
 
 type Res<T> = Result<T, String>;
 
@@ -412,6 +418,16 @@ impl Server {
     pub fn call(&mut self, op: u8, payload: &[u8]) -> (u8, Vec<u8>, bool) {
         let mut out = Out::default();
         match self.handle(op, payload, &mut out) {
+            // Every host frames a reply with a 16-bit length. A longer one
+            // would go out with its length wrapped round - the client would
+            // read the first few hundred bytes of a 66 KB text and take them
+            // for the whole of it, and a Save would write them back. An
+            // error instead, which a client cannot mistake for an answer.
+            Ok(_) if out.0.len() > 0xFFFF => {
+                let mut msg = Out::default();
+                msg.str(&format!("the reply is {} bytes, more than one reply carries (65535)", out.0.len()));
+                (1, msg.0, true)
+            }
             Ok(going) => (0, out.0, going),
             Err(e) => {
                 let mut msg = Out::default();
@@ -419,6 +435,25 @@ impl Server {
                 (1, msg.0, true)
             }
         }
+    }
+
+    /// The whole text of a view that has one, as the client's UTF-8: an
+    /// editor's lines, an input's words, a console's record without its
+    /// colours (what a bug report pastes).
+    fn text_of(&mut self, id: ViewId) -> Res<String> {
+        let id = self.alive(id)?;
+        let cp = &self.cp;
+        Ok(match self.ui.as_ref().ok_or("INIT first")?.kind(id) {
+            Kind::Text(t) => t.lines.iter().map(|l| cp.decode(l)).collect::<Vec<_>>().join("\n"),
+            Kind::Input(i) => cp.from_core(&i.text),
+            Kind::Console(c) => c
+                .lines()
+                .iter()
+                .map(|l| cp.decode(&l.iter().map(|cell| cell.ch).collect::<Vec<_>>()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => return Err(format!("view {} has no text", id.raw())),
+        })
     }
 
     /// The core, once INIT has made it. For a host that draws it itself.
@@ -429,6 +464,12 @@ impl Server {
     /// What a glyph index of this session's font looks like.
     pub fn glyph(&self, g: owlosui_core::Glyph) -> char {
         self.cp.to_char(g)
+    }
+
+    /// Text as this session's font has it, a line each: for a host putting
+    /// the computer's clipboard into the core's.
+    pub fn lines_of(&mut self, text: &str) -> Vec<Vec<owlosui_core::Glyph>> {
+        lines_of(&mut self.cp, &text.replace("\r\n", "\n"))
     }
 
     fn ui(&mut self) -> Res<&mut Ui> {
@@ -816,27 +857,44 @@ impl Server {
 
             op::GET_TEXT => {
                 let id = r.id("id")?;
-                let id = self.alive(id)?;
-                let cp = &self.cp;
-                let s = match self.ui.as_ref().ok_or("INIT first")?.kind(id) {
-                    Kind::Text(t) => t
-                        .lines
-                        .iter()
-                        .map(|l| cp.decode(l))
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                    Kind::Input(i) => cp.from_core(&i.text),
-                    // The record without its colours: what a bug report
-                    // pastes.
-                    Kind::Console(c) => c
-                        .lines()
-                        .iter()
-                        .map(|l| cp.decode(&l.iter().map(|cell| cell.ch).collect::<Vec<_>>()))
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                    _ => return Err(format!("view {} has no text", id.raw())),
-                };
+                let s = self.text_of(id)?;
+                if s.len() > TEXT_PART {
+                    return Err(format!("the text is {} bytes; read it in parts with GET_TEXT_PART", s.len()));
+                }
                 out.str(&s);
+            }
+
+            op::GET_TEXT_PART => {
+                // A text of any length, a part at a time: from byte `from`
+                // of its UTF-8, at most TEXT_PART bytes, cut where a
+                // character ends. The client asks again from where the
+                // part ended until it has `total`.
+                let id = r.id("id")?;
+                let from = r.u32("from")? as usize;
+                let s = self.text_of(id)?;
+                let from = from.min(s.len());
+                if !s.is_char_boundary(from) {
+                    return Err(format!("byte {from} is inside a character"));
+                }
+                let mut end = (from + TEXT_PART).min(s.len());
+                while !s.is_char_boundary(end) {
+                    end -= 1;
+                }
+                out.u32(s.len() as u32);
+                out.str(&s[from..end]);
+            }
+
+            op::TEXT_APPEND => {
+                // More text at the end of a TEXT, for one that does not fit
+                // in a request: the first line of it continues the last.
+                let id = r.id("id")?;
+                let text = r.str("text")?;
+                let lines = lines_of(&mut self.cp, &text);
+                let id = self.alive(id)?;
+                match self.ui()?.kind_mut(id) {
+                    Kind::Text(t) => t.append_lines(lines),
+                    _ => return Err(format!("view {} is not a text", id.raw())),
+                }
             }
 
             op::KEY => {

@@ -1516,3 +1516,45 @@ fn the_host_shares_its_clipboard_copy_goes_out_and_paste_comes_in() {
     let n = u16::from_le_bytes([body[0], body[1]]) as usize;
     assert_eq!(String::from_utf8(body[2..2 + n].to_vec()).unwrap(), "Привет\nмир!");
 }
+
+#[test]
+fn a_text_bigger_than_a_request_goes_in_and_comes_out_in_parts() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 60, 16), vec![0], s("BIG.ASM")].concat()));
+    // About 200 KB, two-byte characters in every line, so that parts are
+    // cut inside them unless the server cuts where a character ends.
+    let line = |i: usize| format!("        mov ax,{i:5}    ; строка {i}, Привет мир");
+    let whole: String = (0..4000).map(line).collect::<Vec<_>>().join("\n");
+    assert!(whole.len() > 150_000);
+    let mut chunks = Vec::new();
+    let mut at = 0;
+    while at < whole.len() {
+        let mut end = (at + 50_000).min(whole.len());
+        while !whole.is_char_boundary(end) {
+            end -= 1;
+        }
+        chunks.push(&whole[at..end]);
+        at = end;
+    }
+    // TEXT with the first part, TEXT_APPEND with the rest - a cut in the
+    // middle of a line continues it.
+    let t = id_of(&c.ok(0x11, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s(chunks[0])].concat()));
+    for part in &chunks[1..] {
+        c.ok(0x6D, &[u16(t).to_vec(), s(part)].concat());
+    }
+    // GET_TEXT refuses rather than wrapping its length round.
+    let e = c.err(0x21, &u16(t));
+    assert!(e.contains("GET_TEXT_PART"), "{e}");
+    // GET_TEXT_PART, part after part, gives back every byte.
+    let mut back = Vec::new();
+    let mut total = usize::MAX;
+    while back.len() < total {
+        let r = c.ok(0x6E, &[u16(t).to_vec(), (back.len() as u32).to_le_bytes().to_vec()].concat());
+        total = u32::from_le_bytes([r[0], r[1], r[2], r[3]]) as usize;
+        let n = u16::from_le_bytes([r[4], r[5]]) as usize;
+        assert!(n > 0 || total == back.len(), "an empty part before the end");
+        back.extend_from_slice(&r[6..6 + n]);
+    }
+    assert_eq!(String::from_utf8(back).unwrap(), whole);
+}

@@ -134,10 +134,19 @@ const STARTS = {
   prompt: { name: 'the DOS prompt', line: '' },
 };
 
-/** DOSBox's settings, as the dialog shows them; DEFAULTS is what a first visit gets. */
+/**
+ * DOSBox's settings, as the dialog shows them; DEFAULTS is what a first visit gets.
+ * The core is `normal`, not `auto`: on `auto` this build of DOSBox goes to its
+ * dynamic core in protected mode, and there FASM dies on its first macro
+ * (`RuntimeError: unreachable`, the emulator gone) - and every source of the
+ * course is macros, through E_8086.INC. On `normal` they build. `settings`
+ * counts the changes to these defaults that a saved setting must follow.
+ */
+const SETTINGS = 2;
 const DEFAULTS = {
+  settings: SETTINGS,
   machine: 'svga_s3', memsize: 16, picture: 'sharp',
-  core: 'auto', cputype: 'auto', cycles: 'auto', fixed: 20000,
+  core: 'normal', cputype: 'auto', cycles: 'auto', fixed: 20000,
   sbtype: 'sb16', gus: false, pcspeaker: true, rate: 44100,
   ems: true, umb: true,         // XMS is always on: see dosboxConf
   awake: true,
@@ -154,10 +163,15 @@ const DEFAULTS = {
 const MEMORY = [16, 32, 63];
 
 function loadSettings() {
-  let s;
-  try { s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('owlosui.dosbox') ?? '{}') }; } catch { s = { ...DEFAULTS }; }
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('owlosui.dosbox') ?? '{}') ?? {}; } catch { /* none, or not ours */ }
+  const s = { ...DEFAULTS, ...saved };
   // A size saved before the small ones were withdrawn: lift it.
   if (!MEMORY.includes(s.memsize)) s.memsize = DEFAULTS.memsize;
+  // Saved before the core's default became `normal`: an `auto` then was the
+  // default, not a choice, and it is the one FASM dies on.
+  if ((saved.settings ?? 1) < 2 && s.core === 'auto') s.core = 'normal';
+  s.settings = SETTINGS;
   return s;
 }
 function saveSettings(s) {

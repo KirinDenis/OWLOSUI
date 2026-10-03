@@ -103,6 +103,10 @@ impl<W: Write> Program for Hosted<W> {
         self.server.glyph(g)
     }
 
+    fn clip_lines(&mut self, text: &str) -> Vec<Vec<Glyph>> {
+        self.server.lines_of(text)
+    }
+
     /// Requests from the pipe, run on the window's thread.
     fn woken(&mut self) -> bool {
         while let Ok(request) = self.requests.try_recv() {

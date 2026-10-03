@@ -111,7 +111,9 @@ fn a_fixed_window_does_not_grow_with_the_desktop() {
     settle(&mut ui);
     ui.handle(Event::Resize(100, 30));
     settle(&mut ui);
-    assert_eq!(ui.rect(id), Rect::new(10, 3, 20, 5));
+    // Still 20 by 5; its middle stays at the same fraction of the screen
+    // (20/80 across, 5.5/25 down), so it moves, as everything else does.
+    assert_eq!(ui.rect(id), Rect::new(15, 4, 20, 5));
 }
 
 #[test]

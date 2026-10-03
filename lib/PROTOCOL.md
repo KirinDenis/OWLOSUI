@@ -27,6 +27,13 @@ and every request gets exactly one reply:
 `str` saying what went wrong. An error never ends the session: the server is
 still there, and the client may carry on.
 
+A payload is at most 65535 bytes either way. A reply that would be longer
+is an error instead - never a reply whose length has wrapped round, which a
+client would read as the first few hundred bytes of the answer and take for
+all of it. What can be bigger goes in parts: a text in with `TEXT` or
+`SET_TEXT` and then `TEXT_APPEND`, a text out with `GET_TEXT_PART`, a
+listing with `ADD_FILES`, a console with `CONSOLE_WRITE`.
+
 Types used below:
 
 | name   | bytes                                     |
@@ -218,7 +225,9 @@ name, for a commander that puts the folder in its window's title
 | op   | name     | payload   | reply |
 |------|----------|-----------|-------|
 | 0x20 | CLOSE    | `id`      | OK    |
-| 0x21 | GET_TEXT | `id`      | `str` — a `TEXT` view's lines joined with `\n`, or an `INPUT`'s text |
+| 0x21 | GET_TEXT | `id`      | `str` — a `TEXT` view's lines joined with `\n`, an `INPUT`'s text, or a `CONSOLE`'s record without its colours; an error when it is longer than 60000 bytes, which `GET_TEXT_PART` reads |
+| 0x6E | GET_TEXT_PART | `id from:u32` | `total:u32 text:str` — the same text, of any length: at most 60000 bytes of its UTF-8 from byte `from`, cut where a character ends; ask again from `from` plus what came until `total` is reached. `from` inside a character is an error |
+| 0x6D | TEXT_APPEND | `id text:str` | OK — more text at the end of a `TEXT`, for one bigger than a request: `TEXT` or `SET_TEXT` with the first part, this with the rest. The first line of it continues the last; the caret, the view and Undo are left as they are |
 | 0x22 | SET_PROGRESS | `id value:u32` | OK |
 | 0x23 | GET_MARKED   | `id`      | `n:u16` then `n × u16` — the marked items of a `LIST` |
 | 0x24 | GET_CURRENT  | `id`      | `u16` — the item under the cursor of a `LIST` |

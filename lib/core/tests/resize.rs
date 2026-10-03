@@ -3,8 +3,10 @@
 //! Found by a person dragging the console window: everything vanished. The
 //! old `resize` shrank every window to fit the new screen and never grew one
 //! back, so a console taken down to a sliver and restored came back empty.
-//! The classic answer was to grow with the desktop - a window keeps its top-left
-//! corner and its far edges follow the desktop's - and that is what this is.
+//! The next answer grew every window by the same number of cells, corners
+//! where they were, and a browser made a little narrower squeezed a laid-out
+//! page into its corners. Now a window keeps its proportions: its edges stay
+//! at the same fractions of the work area.
 
 use owlosui_core::{Buffer, Event, Kind, Rect, TextView, Ui, Window};
 use owlosui_core::cell::{glyphs, Glyph};
@@ -23,11 +25,13 @@ fn editor(ui: &mut Ui, r: Rect) -> owlosui_core::ViewId {
 }
 
 #[test]
-fn a_resizable_window_follows_the_far_edges() {
+fn a_resizable_window_keeps_its_proportions() {
     let mut ui = Ui::new(80, 25);
     let w = editor(&mut ui, Rect::new(2, 1, 76, 23));
     settle(&mut ui);
 
+    // Every edge is within two cells of the screen's: the margins are kept,
+    // and the window grows and shrinks with the desktop.
     ui.handle(Event::Resize(100, 30));
     settle(&mut ui);
     assert_eq!(ui.rect(w), Rect::new(2, 1, 96, 28), "grew with the desktop");
@@ -35,6 +39,38 @@ fn a_resizable_window_follows_the_far_edges() {
     ui.handle(Event::Resize(60, 20));
     settle(&mut ui);
     assert_eq!(ui.rect(w), Rect::new(2, 1, 56, 18), "shrank with the desktop");
+
+    // Worked out from where it was put, not from the last size: back to
+    // 80 by 25 is back to exactly where it was.
+    ui.handle(Event::Resize(80, 25));
+    settle(&mut ui);
+    assert_eq!(ui.rect(w), Rect::new(2, 1, 76, 23), "back where it was");
+}
+
+#[test]
+fn a_laid_out_page_keeps_its_layout_when_the_browser_narrows() {
+    // The pilot's page: an editor on the left two thirds, two windows
+    // stacked on the right. Made narrower, it used to keep every corner and
+    // shrink every window by the same amount - the right-hand ones down to
+    // slivers in the corner, the middle of the screen empty.
+    let mut ui = Ui::new(150, 40);
+    let left = editor(&mut ui, Rect::new(0, 0, 100, 40));
+    let top = editor(&mut ui, Rect::new(100, 0, 50, 20));
+    let bottom = editor(&mut ui, Rect::new(100, 20, 50, 20));
+    settle(&mut ui);
+
+    ui.handle(Event::Resize(96, 30));
+    settle(&mut ui);
+    assert_eq!(ui.rect(left), Rect::new(0, 0, 64, 30));
+    assert_eq!(ui.rect(top), Rect::new(64, 0, 32, 15));
+    assert_eq!(ui.rect(bottom), Rect::new(64, 15, 32, 15));
+
+    // And back: every window exactly where it was put.
+    ui.handle(Event::Resize(150, 40));
+    settle(&mut ui);
+    assert_eq!(ui.rect(left), Rect::new(0, 0, 100, 40));
+    assert_eq!(ui.rect(top), Rect::new(100, 0, 50, 20));
+    assert_eq!(ui.rect(bottom), Rect::new(100, 20, 50, 20));
 }
 
 #[test]
@@ -120,7 +156,8 @@ fn dragging_a_centred_window_makes_it_stay_put() {
 
     ui.handle(Event::Resize(120, 40));
     settle(&mut ui);
-    assert_eq!(ui.rect(w), Rect::new(10, 11, 40, 9), "where the hand put it, not the middle");
+    // Its middle was at 30/80 and 15/25; it stays there, not in the middle.
+    assert_eq!(ui.rect(w), Rect::new(25, 20, 40, 9), "where the hand put it, not the middle");
 }
 
 #[test]

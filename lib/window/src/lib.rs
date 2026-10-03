@@ -57,6 +57,38 @@ pub trait Program {
     fn woken(&mut self) -> bool {
         true
     }
+
+    /// The core's clipboard as text for Windows' clipboard: its lines, each
+    /// glyph as [`glyph`](Program::glyph) shows it.
+    fn clip_text(&mut self) -> String {
+        let lines = self.ui().clipboard.clone();
+        let text: Vec<String> = lines.iter().map(|l| l.iter().map(|&g| self.glyph(g)).collect()).collect();
+        text.join("\r\n")
+    }
+
+    /// Windows' clipboard as the core's lines: by default the core's own
+    /// convention again, code page 437 below 256 and the character's code
+    /// point above it.
+    fn clip_lines(&mut self, text: &str) -> Vec<Vec<Glyph>> {
+        text.replace("\r\n", "\n").split('\n').map(|l| l.chars().map(from_cp437).collect()).collect()
+    }
+}
+
+/// A character as a glyph index of the core's default font: the inverse of
+/// [`cp437`]. A character the code page has not got is its own code point,
+/// as the growing font has it, or `?` past what a glyph can hold.
+pub fn from_cp437(c: char) -> Glyph {
+    if (' '..='~').contains(&c) {
+        return c as u32 as Glyph;
+    }
+    if let Some(i) = CP437.iter().skip(1).position(|&u| u as u32 == c as u32) {
+        return (i + 1) as Glyph;
+    }
+    if (c as u32) >= 256 && (c as u32) <= Glyph::MAX as u32 {
+        c as u32 as Glyph
+    } else {
+        b'?' as Glyph
+    }
 }
 
 /// How the window looks when it opens.
@@ -280,6 +312,8 @@ struct State {
     /// Buttons held: motion with one held is a drag.
     buttons: u32,
     blink: bool,
+    /// The core's copy count when Windows' clipboard last had its text.
+    copied: u32,
 }
 
 static mut STATE: Option<State> = None;
@@ -370,6 +404,9 @@ pub fn run<P: Program + 'static>(options: &Options, make: impl FnOnce(Waker) -> 
 
         let mut program: Box<dyn Program> = Box::new(make(Waker(hwnd as isize)));
         let (cols, rows) = size_of(program.ui());
+        // Windows' clipboard is the core's from here on (share_clipboard).
+        program.ui().host_clip.on = true;
+        let copied = program.ui().host_clip.copied;
         STATE = Some(State {
             program,
             buf: Buffer::new(cols, rows),
@@ -379,6 +416,7 @@ pub fn run<P: Program + 'static>(options: &Options, make: impl FnOnce(Waker) -> 
             cell_h,
             buttons: 0,
             blink: true,
+            copied,
         });
 
         // The client area is the core's cells exactly; the system says how
@@ -409,6 +447,7 @@ pub fn run<P: Program + 'static>(options: &Options, make: impl FnOnce(Waker) -> 
 /// the window is redrawn, and it closes if the program said so.
 fn settle(hwnd: HWND) {
     let s = state();
+    share_clipboard(hwnd);
     unsafe {
         if !s.program.after_input() {
             DestroyWindow(hwnd);
@@ -424,6 +463,89 @@ fn settle(hwnd: HWND) {
 fn input(hwnd: HWND, ev: Event) {
     state().program.input(ev);
     settle(hwnd);
+}
+
+/// Windows' clipboard and the core's, kept as one: what the core copied
+/// goes out, and a Paste waiting for the computer's clipboard has it now.
+/// A clipboard that cannot be had leaves the core's as it is.
+fn share_clipboard(hwnd: HWND) {
+    let s = state();
+    let ui = s.program.ui();
+    if !ui.host_clip.on {
+        return;
+    }
+    let copied = ui.host_clip.copied;
+    let wanted = ui.host_clip.paste_wanted.is_some();
+    if copied != s.copied {
+        s.copied = copied;
+        let text = s.program.clip_text();
+        set_clipboard(hwnd, &text);
+    }
+    if wanted {
+        let lines = get_clipboard(hwnd).filter(|t| !t.is_empty()).map(|t| s.program.clip_lines(&t));
+        s.program.ui().host_paste(lines, false);
+    }
+}
+
+/// Another program may hold the clipboard for a moment; try a few times.
+fn open_clipboard(hwnd: HWND) -> bool {
+    for _ in 0..5 {
+        if unsafe { OpenClipboard(hwnd) } != 0 {
+            return true;
+        }
+        unsafe { Sleep(10) };
+    }
+    false
+}
+
+fn set_clipboard(hwnd: HWND, text: &str) {
+    let w = wide(text);
+    unsafe {
+        let mem = GlobalAlloc(GMEM_MOVEABLE, w.len() * 2);
+        if mem.is_null() {
+            return;
+        }
+        let p = GlobalLock(mem) as *mut u16;
+        if p.is_null() {
+            GlobalFree(mem);
+            return;
+        }
+        core::ptr::copy_nonoverlapping(w.as_ptr(), p, w.len());
+        GlobalUnlock(mem);
+        if !open_clipboard(hwnd) {
+            GlobalFree(mem);
+            return;
+        }
+        EmptyClipboard();
+        // Given, the memory is the system's; refused, it is still ours.
+        if SetClipboardData(CF_UNICODETEXT, mem).is_null() {
+            GlobalFree(mem);
+        }
+        CloseClipboard();
+    }
+}
+
+fn get_clipboard(hwnd: HWND) -> Option<String> {
+    unsafe {
+        if !open_clipboard(hwnd) {
+            return None;
+        }
+        let mut text = None;
+        let mem = GetClipboardData(CF_UNICODETEXT);
+        if !mem.is_null() {
+            let p = GlobalLock(mem) as *const u16;
+            if !p.is_null() {
+                let mut n = 0;
+                while *p.add(n) != 0 {
+                    n += 1;
+                }
+                text = Some(String::from_utf16_lossy(core::slice::from_raw_parts(p, n)));
+                GlobalUnlock(mem);
+            }
+        }
+        CloseClipboard();
+        text
+    }
 }
 
 fn mods() -> Mods {

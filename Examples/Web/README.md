@@ -224,16 +224,19 @@ show the page, so neither does the monitor.
 
 **DOS > Settings** is DOSBox's own: video card, how its picture is shown -
 sharp, every DOS pixel a whole square of screen pixels and the window sized
-round it, or stretched to 4:3 and smoothed like a monitor - memory (16 MB or
-more: the toolkit and DOS-extended games need it), CPU core, type and
-speed, sound cards, EMS and UMB (XMS is always on: the toolkit lives in it), what to start, the network card and
-the relay. It writes the `dosbox.conf` the PC boots with, and shows it.
+round it, or stretched to 4:3 and smoothed like a monitor - memory (16, 32
+or 63 MB; nothing less, because the toolkit and DOS-extended games need it),
+CPU core (`normal` unless chosen otherwise: on `auto` this DOSBox's dynamic
+core dies on FASM's macros, and every assembler source here has them),
+type and speed, sound cards, EMS and UMB (XMS is always on: the
+toolkit lives in it), what to start, the network card and the relay. It
+writes the `dosbox.conf` the PC boots with, and shows it.
 
 **Awake.** A browser pauses a hidden page's emulator; the PC does not let it,
 and says so with `[awake]` after its window's title, as a modal dialog says
 `[modal]`. A game played in step over the network - Duke Nukem 3D - waits
-for every player, so one hidden tab would stop it for all of them. Settings
-> DOS turns it off, to spare a laptop's battery.
+for every player, so one hidden tab would stop it for all of them. DOS >
+Settings, page DOS, turns it off, to spare a laptop's battery.
 
 DOSBox runs on threads that share memory, which a browser allows a page only
 when it is isolated from other sites. RUN.CMD's server and GitHub Pages

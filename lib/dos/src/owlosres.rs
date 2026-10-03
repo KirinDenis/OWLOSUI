@@ -73,6 +73,9 @@ struct Host {
     /// Sessions put aside by SUSPEND, newest last, with whether each had
     /// the screen: a commander's, while the program it ran has one of its own.
     saved: Vec<(Server, bool)>,
+    /// The core's copy count when the computer's clipboard last had its
+    /// text (share_clipboard).
+    copied: u32,
 }
 
 static mut HOST: Option<Host> = None;
@@ -91,6 +94,13 @@ impl Host {
                 if status == 0 && !self.screen {
                     self.screen = true;
                     self.mouse = Some(MouseState::detect());
+                }
+                // Windows' clipboard, where DOS runs under it, is the core's.
+                if status == 0 {
+                    if let Some(ui) = self.server.ui_mut() {
+                        ui.host_clip.on = clipboard_api();
+                        self.copied = ui.host_clip.copied;
+                    }
                 }
                 (status, body)
             }
@@ -127,6 +137,7 @@ impl Host {
                     }
                     self.server = server;
                     self.screen = screen;
+                    self.copied = self.server.ui_mut().map_or(0, |ui| ui.host_clip.copied);
                     self.queue.clear();
                     text_mode();
                     if screen {
@@ -148,6 +159,11 @@ impl Host {
             }
             _ => {
                 let (status, body, _) = self.server.call(op, payload);
+                // A key or a click the program sent may have copied, or
+                // asked to paste.
+                if let Some(ui) = self.server.ui_mut() {
+                    share_clipboard(ui, &mut self.copied);
+                }
                 (status, body)
             }
         }
@@ -166,6 +182,17 @@ impl Host {
     /// One event into the core - waited for, if none is queued - and what
     /// it pressed or chose: `pressed:u16 command:u16 w:i16 h:i16`.
     fn wait(&mut self) -> Vec<u8> {
+        // What the program's own requests set going is played out before
+        // the wait - a window put away with MINIMIZE falling into its
+        // corner - or it stands still, half fallen, until a key comes. If
+        // that chose something, it is the answer, and no key is waited for.
+        self.settle();
+        let ui = self.server.ui_mut().unwrap();
+        let (pressed, command) = (ui.take_pressed().unwrap_or(0), ui.take_command().unwrap_or(0));
+        if pressed != 0 || command != 0 {
+            self.draw();
+            return reply(pressed, command);
+        }
         if self.queue.is_empty() {
             let frame = self.draw();
             let mouse = self.mouse.as_mut().expect("the mouse is asked for at INIT");
@@ -175,22 +202,36 @@ impl Host {
         let ui = self.server.ui_mut().unwrap();
         ui.handle(ev);
         // A pressed button is seen down before it happens.
+        self.settle();
+        self.draw();
+        let ui = self.server.ui_mut().unwrap();
+        let pressed = ui.take_pressed().unwrap_or(0);
+        let command = ui.take_command().unwrap_or(0);
+        reply(pressed, command)
+    }
+
+    /// Whatever the core is holding on the screen for a moment - a button
+    /// down, a chosen item lit, a window in flight - shown, waited out,
+    /// and done, frame by frame. Then the computer's clipboard has what
+    /// that copied, and gives what a Paste waits for.
+    fn settle(&mut self) {
         while self.server.ui_mut().unwrap().pick_pending() {
             self.draw();
             hold();
             self.server.ui_mut().unwrap().complete_pick();
         }
-        self.draw();
-        let ui = self.server.ui_mut().unwrap();
-        let pressed = ui.take_pressed().unwrap_or(0);
-        let command = ui.take_command().unwrap_or(0);
-        let mut body = Vec::with_capacity(8);
-        body.extend_from_slice(&pressed.to_le_bytes());
-        body.extend_from_slice(&command.to_le_bytes());
-        body.extend_from_slice(&80i16.to_le_bytes());
-        body.extend_from_slice(&25i16.to_le_bytes());
-        body
+        share_clipboard(self.server.ui_mut().unwrap(), &mut self.copied);
     }
+}
+
+/// WAIT's answer: `pressed:u16 command:u16 w:i16 h:i16`.
+fn reply(pressed: u16, command: u16) -> Vec<u8> {
+    let mut body = Vec::with_capacity(8);
+    body.extend_from_slice(&pressed.to_le_bytes());
+    body.extend_from_slice(&command.to_le_bytes());
+    body.extend_from_slice(&80i16.to_le_bytes());
+    body.extend_from_slice(&25i16.to_le_bytes());
+    body
 }
 
 /// 80 by 25 text, through the BIOS: the screen cleared, the cursor home and
@@ -384,6 +425,9 @@ fn say(seg: u16, text: &[u8]) {
 pub extern "C" fn _start(base: u32, _flags: u32, psp: u32) -> ! {
     init(base);
     let Some(seg) = scratch() else { dos_exit(4) };
+    // The computer's clipboard, if DOS runs under one: its block is taken
+    // now, while there is memory to take it from.
+    clipboard_api();
 
     // The command tail: the program's name, then its own arguments.
     let tail_at = real(psp as u16, 0x80);
@@ -444,6 +488,7 @@ Usage: OWLOSRES PROGRAM.EXE [arguments]\r\n$");
             buf: Buffer::new(80, 25),
             screen: false,
             saved: Vec::new(),
+            copied: 0,
         });
     }
     let (old_seg, old_off) = get_vector(VECTOR);

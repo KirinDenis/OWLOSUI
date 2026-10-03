@@ -10,7 +10,7 @@ the right.
 
 | The two sides, three files marked | The editor, coloured as Pascal |
 |---|---|
-| ![The file manager asking before it copies three marked files](../../screens/dos_commander.png) | ![COMMANDR.PAS in the file manager's editor, in colour](../../screens/dos_editor.png) |
+| ![The file manager asking before it copies three marked files](../../screens/dos_commander.png) | ![The Pascal demo's DEMO.PAS in the file manager's editor, in colour](../../screens/dos_editor.png) |
 
 The same program for Windows is
 [Desktop/CSharp/03-Commander](../../Desktop/CSharp/03-Commander/Program.cs).
@@ -62,6 +62,11 @@ with, as they were in the classic file managers.
 The viewer and the editor bring an Edit menu to nobody - there is no menu
 bar here - but their keys work: Ctrl+F finds, Ctrl+L finds again, and the
 text is coloured as the language its name says, `.PAS`, `.BAT`, `.ASM`.
+The mouse does the rest: dragging with the left button selects, and a
+right click opens Undo, Cut, Copy, Paste and Select all where the pointer
+is. In DOSBox-X, and in a DOS box under Windows, the clipboard is the
+computer's: text copied here pastes into Notepad and back. On a DOS with
+nothing above it the toolkit keeps a clipboard of its own.
 
 ## What to know
 

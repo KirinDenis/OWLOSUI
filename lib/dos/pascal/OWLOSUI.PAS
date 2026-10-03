@@ -35,7 +35,9 @@ const
   OwlBlue     = $00;                    { a document }
   OwlCyan     = $10;                    { help }
   OwlGrey     = $20;                    { a dialog }
+  OwlBlack    = $30;                    { a terminal: a console's window, frame and all }
   OwlNoShadow = $40;                    { windows that tile the screen cast none }
+  OwlNoMinimize = $80;                  { no minimize box; a modal window has none anyway }
   OwlDialog   = OwlGrey or OwlFixed or OwlNoZoom;
 
   { a button's flags }
@@ -141,12 +143,28 @@ procedure OwlClose(Id: Word);
 procedure OwlActivate(Id: Word);
 function  OwlActive: Word;
 procedure OwlZoom(Id: Word);
+procedure OwlMinimize(Id: Word);        { into a bar in the bottom right corner; OwlActivate brings it back }
 procedure OwlCycle;
 procedure OwlCycleBack;
 procedure OwlCascade;
 procedure OwlTile;
 procedure OwlWindowList;
+procedure OwlWindowTag(Window: Word; const Tag: string);
+                                        { a word in brackets after the title, as [modal]; '' for none }
+procedure OwlWindowIndicator(Window: Word; const Text: string);
+                                        { words at the right of the status line while it is in
+                                          front; a part between tildes lit green: '[~A:~ B:]' }
+function  OwlPlace(Window: Word; var X, Y, W, H: Integer): Boolean;
+                                        { its inside, in cells, as last drawn; True if anything
+                                          is over it - a window, a shadow, an open menu }
 function  OwlClick(Canvas: Word; var X, Y: Integer): Boolean;{ True if it was clicked }
+
+{ a console: text that keeps arriving, coloured by its ANSI sequences
+  (#27'[31m' red, #27'[0m' back) - a log. It fills its window, keeps
+  Scrollback lines (0: a thousand), follows the newest until scrolled
+  back; the mouse selects, Ctrl+C copies, OwlGetText reads it plain. }
+function  OwlConsole(Parent: Word; Scrollback: Word): Word;
+procedure OwlConsoleWrite(Console: Word; const Text: string);
 procedure OwlGlyphs(var Table: TGlyphs);
 
 { files: DOS reads the folder (FindFirst, FindNext), the panel shows it }
@@ -510,6 +528,41 @@ end;
 procedure OwlClose(Id: Word);    begin WithId($20, Id); end;
 procedure OwlActivate(Id: Word); begin WithId($27, Id); end;
 procedure OwlZoom(Id: Word);     begin WithId($44, Id); end;
+procedure OwlMinimize(Id: Word); begin WithId($6C, Id); end;
+
+procedure OwlWindowTag(Window: Word; const Tag: string);
+begin
+  OwlBegin($65); OwlU16(Window); OwlStr(Tag);
+  OwlSend;
+end;
+
+procedure OwlWindowIndicator(Window: Word; const Text: string);
+begin
+  OwlBegin($66); OwlU16(Window); OwlStr(Text);
+  OwlSend;
+end;
+
+function OwlPlace(Window: Word; var X, Y, W, H: Integer): Boolean;
+begin
+  WithId($62, Window);
+  X := Integer(ReplyU16(0)); Y := Integer(ReplyU16(2));
+  W := Integer(ReplyU16(4)); H := Integer(ReplyU16(6));
+  OwlPlace := Rep[3 + 8] <> 0;
+end;
+
+function OwlConsole(Parent: Word; Scrollback: Word): Word;
+begin
+  OwlBegin($67); OwlU16(Parent);
+  OwlU16(0); OwlU16(0); OwlU16(0); OwlU16(0);         { the rect: it fills its window anyway }
+  OwlU16(Scrollback);
+  OwlConsole := OwlEnd;
+end;
+
+procedure OwlConsoleWrite(Console: Word; const Text: string);
+begin
+  OwlBegin($68); OwlU16(Console); OwlStr(Text);
+  OwlSend;
+end;
 procedure OwlCycle;              begin Simple($43); end;
 procedure OwlCycleBack;          begin Simple($4D); end;
 procedure OwlCascade;            begin Simple($47); end;

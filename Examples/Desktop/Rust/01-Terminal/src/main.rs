@@ -163,6 +163,9 @@ fn build(w: i16, h: i16) -> (Ui, owlosui_core::Buffer) {
         StatusItem::new("~F5~ Zoom", f(5), CM_ZOOM),
         StatusItem::new("~F6~ Next", f(6), CM_NEXT),
         StatusItem::new("~Alt-F3~ Close", Some(Key::new(KeyCode::F(3), Mods::alt())), CM_CLOSE),
+        // F3 is what File > Open says beside it; a menu's shortcut is only
+        // words, so the key is bound here, with no words of its own.
+        StatusItem::new("", f(3), CM_FILES),
     ]);
     ui.insert(root, Rect::new(0, h - 1, w, 1), Kind::Status(status));
 

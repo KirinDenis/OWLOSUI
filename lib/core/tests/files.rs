@@ -5,7 +5,7 @@
 //! entries are made up, and on DOS they would come out of a DTA, on Unix out
 //! of `read_dir`, and in a browser out of whatever that browser has.
 
-use owlosui_core::files::{matches, ATTR_ARCHIVE, ATTR_DIR, ATTR_READONLY};
+use owlosui_core::files::{self, matches, ATTR_ARCHIVE, ATTR_DIR, ATTR_READONLY};
 use owlosui_core::{Buffer, FileEntry, FileKind, FileList, Kind, Rect, Ui, Window};
 
 fn f(name: &str, size: u32, attrs: u8) -> FileEntry {
@@ -404,4 +404,21 @@ fn going_into_a_folder_starts_on_its_first_name_not_on_dot_dot() {
     let mut p = FileList::new(vec![dir("..")], "*.*");
     p.cursor_to_first_name();
     assert_eq!(p.selected().map(|e| e.name.clone()).as_deref(), Some(".."));
+}
+
+#[test]
+fn a_drives_root_has_no_dot_dot() {
+    // DOSBox gives `..` in a mounted folder's root; there is nothing above it.
+    let mut p = FileList::new(vec![dir(".."), dir("GAMES"), f("A.TXT", 1, 0)], "*.*");
+    p.set_path(r"C:\*.*");
+    assert_eq!(p.len(), 2);
+    assert_eq!(p.selected().map(|e| e.name.clone()).as_deref(), Some("GAMES"));
+    p.set_path(r"C:\GAMES\*.*");
+    assert_eq!(p.at(0).map(|e| e.name.clone()).as_deref(), Some(".."));
+    for root in [r"C:\", r"c:\*.*", r"\", "/", "C:/"] {
+        assert!(files::is_root(root), "{root}");
+    }
+    for not in [r"C:\GAMES", r"C:\GAMES\*.*", "C:", "", "/home", r"\SERVER"] {
+        assert!(!files::is_root(not), "{not}");
+    }
 }

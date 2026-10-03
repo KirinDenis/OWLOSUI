@@ -140,3 +140,17 @@ fn a_dialog_has_no_minimize_box_and_a_modal_window_is_not_put_away() {
     assert!(!ui.animating());
     assert_eq!(ui.active_window(), Some(m));
 }
+
+#[test]
+fn a_title_too_long_for_the_room_loses_its_front_not_itself() {
+    let mut ui = desk();
+    let root = ui.root();
+    // A commander's panel: no shadow, so no minimize box; 40 wide.
+    let mut w = Window::new(r"C:\Users\someone\AppData\Local\Temp\left-panel");
+    w.shadow = false;
+    w.minimizable = false;
+    ui.insert(root, Rect::new(0, 1, 40, 10), Kind::Window(w));
+    let top = row(&frame(&mut ui), 1);
+    assert!(top.contains("..") && top.contains("left-panel"), "the folder's name is gone from the title: {top:?}");
+    assert!(top.contains("[\u{2191}][\u{25A0}]"), "the boxes were pushed off: {top:?}");
+}

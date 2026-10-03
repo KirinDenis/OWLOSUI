@@ -3,9 +3,9 @@
 //! Views live in one flat `Vec` and refer to each other by `ViewId`. There are
 //! no parent pointers to keep alive, no reference counting and no interior
 //! mutability — and, not by accident, the same handle that makes the borrow
-//! checker happy here is the `u16` that will cross an interrupt boundary or a
-//! WebAssembly import later. Designing for the hardest boundary first paid for
-//! itself before the boundary exists.
+//! checker happy here is the `u16` that crosses DOS's INT 60h and the
+//! WebAssembly boundary. Designing for the hardest boundary first paid for
+//! itself before either boundary existed.
 
 // `no_std` needs these named; with `std` they are the prelude's.
 #[allow(unused_imports)]
@@ -56,6 +56,58 @@ fn text_point(t: &TextView, row: i16, col: i16) -> Point {
     let y = (t.top + row).clamp(0, (t.line_count() - 1).max(0));
     let len = t.lines.get(y as usize).map_or(0, |l| l.len()) as i16;
     Point::new((t.left + col).clamp(0, len), y)
+}
+
+/// A window's rectangle laid out in `from` moved to the same place in `to`,
+/// in proportion: a resizable window's edges at the same fractions of the
+/// work area, within its smallest and largest size; a fixed-size one the
+/// same size, its middle at the same fraction. An edge at the work area's
+/// own edge, or within two cells of it, stays that far from it: an editor
+/// with a margin round it keeps the margin, and a window against the right
+/// edge stays against it, while the edges between windows divide the
+/// screen as they did.
+fn rescale(r: Rect, from: Rect, to: Rect, w: &Window) -> Rect {
+    const NEAR: i16 = 2;
+    let at = |v: i16, f0: i16, flen: i16, t0: i16, tlen: i16| -> i16 {
+        if flen <= 0 {
+            return v;
+        }
+        if (0..=NEAR).contains(&(v - f0)) {
+            return t0 + (v - f0);
+        }
+        if (0..=NEAR).contains(&(f0 + flen - v)) {
+            return t0 + tlen - (f0 + flen - v);
+        }
+        let d = (v - f0) as i32 * tlen as i32;
+        // Rounded to the nearest cell, either side of zero alike.
+        let q = if d >= 0 { (2 * d + flen as i32) / (2 * flen as i32) } else { -((-2 * d + flen as i32) / (2 * flen as i32)) };
+        t0 + q as i16
+    };
+    let x = |v| at(v, from.x, from.w, to.x, to.w);
+    let y = |v| at(v, from.y, from.h, to.y, to.h);
+    if !w.resizable {
+        return Rect::new(x(r.x + r.w / 2) - r.w / 2, y(r.y + r.h / 2) - r.h / 2, r.w, r.h);
+    }
+    let (min_w, min_h) = (w.min_w.max(6), w.min_h.max(3));
+    let max_w = if w.max_w > 0 { w.max_w } else { i16::MAX };
+    let max_h = if w.max_h > 0 { w.max_h } else { i16::MAX };
+    let (x0, y0) = (x(r.x), y(r.y));
+    let nw = (x(r.x + r.w) - x0).clamp(min_w, max_w.max(min_w));
+    let nh = (y(r.y + r.h) - y0).clamp(min_h, max_h.max(min_h));
+    Rect::new(x0, y0, nw, nh)
+}
+
+/// The scroll bar a list or a tree draws in its own last column: that
+/// column and the row of its marker, or `None` when everything fits and
+/// there is no bar. One place for the drawing and the clicking alike.
+fn inner_bar(abs: Rect, top: i16, total: i16, page: i16) -> Option<(i16, i16)> {
+    if total <= page || abs.w < 4 || abs.h < 3 {
+        return None;
+    }
+    let track = abs.h - 2;
+    let span = (total - page).max(1);
+    let thumb = (top as i32 * (track - 1) as i32 / span as i32).clamp(0, (track - 1) as i32);
+    Some((abs.right() - 1, abs.y + 1 + thumb as i16))
 }
 
 /// What a console's selection is drawn in.
@@ -406,6 +458,8 @@ pub struct Ui {
     selecting: Option<ViewId>,
     /// The view a context menu was opened over, for the commands it sends.
     context_for: Option<ViewId>,
+    /// A list or a tree whose scroll bar marker is held by the mouse.
+    bar_drag: Option<ViewId>,
     /// The clipboard as the host program shares it. See `HostClip`.
     pub host_clip: HostClip,
     /// Minimized windows, in the order their bars stack up from the
@@ -446,6 +500,7 @@ impl Ui {
             syntaxes_loaded: false,
             selecting: None,
             context_for: None,
+            bar_drag: None,
             host_clip: HostClip::default(),
             minimized: Vec::new(),
             anim: None,
@@ -526,18 +581,22 @@ impl Ui {
     /// their place but are pushed back inside if they would fall off.
     /// The desktop changed size.
     ///
-    /// A window keeps its top-left corner and follows the desktop's far
-    /// edges: grow the console by ten columns and every resizable window is
-    /// ten columns wider. That is the classic grow-with-the-desktop rule, and it is what
-    /// makes an editor that filled the screen still fill it. A window with a
-    /// fixed size keeps it, and if it was centred it is centred again by the
-    /// measure pass.
+    /// Every window keeps its proportions: its edges sit at the same
+    /// fractions of the work area as before, so a layout of three windows
+    /// side by side is still three windows side by side, each its share of
+    /// the screen, and an editor that filled the screen still fills it. A
+    /// window with a fixed size keeps that size and its middle stays at the
+    /// same fraction; a centred one is centred again by the measure pass.
+    /// The new place is worked out from where the window was put, not from
+    /// the last resize, so a browser made smaller and back puts it back.
     ///
-    /// It used to shrink every window to fit and never grow one back, so a
-    /// console taken down to a sliver and restored came back empty.
+    /// It used to grow and shrink every window by the same number of cells,
+    /// corners where they were: a page made a little narrower pushed every
+    /// window into its corner and left the middle empty. Before that it
+    /// shrank windows to fit and never grew one back, so a console taken
+    /// down to a sliver and restored came back empty.
     pub fn resize(&mut self, w: i16, h: i16) {
-        let old = self.nodes[self.root.ix()].rect;
-        let (dw, dh) = (w - old.w, h - old.h);
+        let old_work = self.work_area();
         self.nodes[self.root.ix()].rect = Rect::sized(w, h);
         let kids: Vec<ViewId> = self.nodes[self.root.ix()].children.clone();
         for id in kids {
@@ -552,26 +611,28 @@ impl Ui {
                 }
                 _ => {}
             }
-            let Kind::Window(win) = &self.nodes[id.ix()].kind else {
+        }
+        // The bars are in place: the work area is the new one.
+        let new_work = self.work_area();
+        for id in self.nodes[self.root.ix()].children.clone() {
+            let cur = self.nodes[id.ix()].rect;
+            let Kind::Window(win) = &mut self.nodes[id.ix()].kind else {
                 continue;
             };
-            // A zoomed window is the work area; it follows by definition.
-            if win.is_zoomed() {
-                let full = self.work_area();
-                self.nodes[id.ix()].rect = full;
+            // A zoomed window is the work area; it follows by definition,
+            // and the place it goes back to keeps its proportions.
+            if let Some(prev) = win.unzoomed {
+                win.unzoomed = Some(rescale(prev, old_work, new_work, win));
+                win.home = None;
+                self.nodes[id.ix()].rect = new_work;
                 continue;
             }
-            // A window that will not be resized by hand is not resized by
-            // the desktop either; if it was centred, measure re-centres it.
-            if !win.resizable {
-                continue;
-            }
-            let (min_w, min_h) = (win.min_w.max(6), win.min_h.max(3));
-            let max_w = if win.max_w > 0 { win.max_w } else { i16::MAX };
-            let max_h = if win.max_h > 0 { win.max_h } else { i16::MAX };
-            let mut r = self.nodes[id.ix()].rect;
-            r.w = (r.w + dw).clamp(min_w, max_w.max(min_w));
-            r.h = (r.h + dh).clamp(min_h, max_h.max(min_h));
+            let (base, base_work) = match win.home {
+                Some((base, base_work, fitted)) if fitted == cur => (base, base_work),
+                _ => (cur, old_work),
+            };
+            let r = rescale(base, base_work, new_work, win);
+            win.home = Some((base, base_work, r));
             self.nodes[id.ix()].rect = r;
         }
     }
@@ -2502,9 +2563,39 @@ impl Ui {
     /// and it would fight the selection for the same cell.
     ///
     /// `None` means hide it: no editable view has focus, or the caret has been
-    /// scrolled out of its own window.
+    /// scrolled out of its own window, or something is drawn over it - an
+    /// open menu, a right-click menu, a window going away or coming back.
+    /// The card's cursor is above every cell, so a caret under a menu
+    /// blinked through it.
     pub fn cursor(&self) -> Option<Point> {
         let win = self.active_window()?;
+        let p = self.caret_point(win)?;
+        if self.anim.is_some() {
+            return None;
+        }
+        let mut order: Vec<ViewId> = self.nodes[self.root.ix()].children.clone();
+        order.sort_by_key(|c| self.nodes[c.ix()].kind.layer());
+        let at = order.iter().position(|&c| c == win)?;
+        let covered = order[at + 1..].iter().any(|&c| {
+            let mut r = self.abs_rect(c);
+            match &self.nodes[c.ix()].kind {
+                Kind::Window(_) if self.is_minimized(c) => return false,
+                Kind::Window(w) if w.shadow => {
+                    r.w += 2;
+                    r.h += 1;
+                }
+                Kind::MenuBox(_) => {
+                    r.w += 2;
+                    r.h += 1;
+                }
+                _ => {}
+            }
+            r.contains(p)
+        });
+        (!covered).then_some(p)
+    }
+
+    fn caret_point(&self, win: ViewId) -> Option<Point> {
 
         // A file panel's path field has a caret of its own while it is being
         // typed into. Without it, editing a path is typing into a box with no
@@ -2589,7 +2680,17 @@ impl Ui {
             }
             r.y = r.y.clamp(work.y, (work.bottom() - 1).max(work.y));
             r.x = r.x.clamp(1 - r.w, (work.right() - 1).max(0));
+            let before = self.nodes[id.ix()].rect;
             self.nodes[id.ix()].rect = r;
+            // Nudged by this pass, not moved by a hand: the window is still
+            // where the last resize put it, as far as resizing goes.
+            if let Kind::Window(w) = &mut self.nodes[id.ix()].kind {
+                if let Some((_, _, fitted)) = &mut w.home {
+                    if *fitted == before {
+                        *fitted = r;
+                    }
+                }
+            }
         }
         for i in 0..self.nodes.len() {
             if !matches!(self.nodes[i].kind, Kind::Window(_)) {
@@ -2881,14 +2982,28 @@ impl Ui {
             // learned on, and the word is how the two are told apart.
             let tag = self.title_tag(id, w);
             let extra = tag.map_or(0, |t| t.chars().count() as i16 + 3);
-            let n = w.title.chars().count() as i16 + 2 + extra;
             let start = abs.x + 2;
-            if n <= title_end - start {
+            let room = title_end - start;
+            // Too long for the room left of the boxes: cut from the front,
+            // `..` in place of what went - a commander's title is a folder,
+            // and the end of a path is the part that says where you are.
+            let full = w.title.chars().count() as i16;
+            let keep = room - 2 - extra;
+            let title: String = if full <= keep {
+                w.title.clone()
+            } else if keep >= 6 {
+                let tail: String = w.title.chars().skip((full - (keep - 2)) as usize).collect();
+                format!("..{tail}")
+            } else {
+                String::new()
+            };
+            let n = title.chars().count() as i16 + 2 + extra;
+            if !title.is_empty() && n <= room {
                 // Centred on the window when that clears the boxes; pushed
                 // left of them when it does not.
                 let tx = (abs.x + (abs.w - n) / 2).min(title_end - n).max(start);
                 buf.put(tx, abs.y, b' ', ta, clip);
-                let mut used = buf.text(tx + 1, abs.y, &w.title, ta, clip);
+                let mut used = buf.text(tx + 1, abs.y, &title, ta, clip);
                 if let Some(t) = tag {
                     let bg = fa & 0xF0;
                     let bracket = bg | crate::cell::Color::White as u8;
@@ -3523,18 +3638,14 @@ impl Ui {
         buf: &mut Buffer,
         clip: Rect,
     ) -> i16 {
-        if total <= page || abs.w < 4 || abs.h < 3 {
+        let Some((x, thumb_y)) = inner_bar(abs, top, total, page) else {
             return abs.w;
-        }
+        };
         let p = &self.palette;
-        let x = abs.right() - 1;
         buf.put(x, abs.y, glyph::ARROW_UP, p.list_selected, clip);
         buf.put(x, abs.bottom() - 1, glyph::ARROW_DOWN, p.list_selected, clip);
-        let track = abs.h - 2;
-        buf.vline(x, abs.y + 1, track, glyph::MEDIUM_SHADE, p.list, clip);
-        let span = (total - page).max(1);
-        let thumb = (top as i32 * (track - 1) as i32 / span as i32).clamp(0, (track - 1) as i32);
-        buf.put(x, abs.y + 1 + thumb as i16, glyph::SQUARE, p.list_selected, clip);
+        buf.vline(x, abs.y + 1, abs.h - 2, glyph::MEDIUM_SHADE, p.list, clip);
+        buf.put(x, thumb_y, glyph::SQUARE, p.list_selected, clip);
         abs.w - 1
     }
 
@@ -4299,6 +4410,9 @@ impl Ui {
                 if let Some(id) = self.selecting.filter(|id| self.is_alive(*id)) {
                     return self.drag_selection(id, p);
                 }
+                if let Some(id) = self.bar_drag.filter(|id| self.is_alive(*id)) {
+                    return self.inner_bar_drag(id, p);
+                }
                 // Dragging along the bar with a panel open switches between
                 // them. The classic menus did this and it is how a menu is actually
                 // used: press, slide, release.
@@ -4339,6 +4453,7 @@ impl Ui {
             MouseKind::Down(Button::Right) => self.open_context(p),
             MouseKind::Up(_) => {
                 self.drag = None;
+                self.bar_drag = None;
                 self.end_selection();
                 // Release over the button that went down does the thing;
                 // release anywhere else is how you change your mind.
@@ -4534,13 +4649,25 @@ impl Ui {
         }
     }
 
+    /// The wheel: whatever scrolls under the pointer - a list or a tree in a
+    /// dialog, a memo, a console - and, over the rest of a window, the
+    /// window's own text. People turn the wheel before they read anything.
     fn scroll_at(&mut self, p: Point, delta: i16) {
+        if !self.menu_boxes().is_empty() {
+            return;
+        }
         let Some(id) = self.window_at(p) else { return };
-        let Some(first) = self.nodes[id.ix()].children.first().copied() else {
+        let under = self.nodes[id.ix()].children.iter().copied().find(|c| {
+            matches!(
+                self.nodes[c.ix()].kind,
+                Kind::List(_) | Kind::Tree(_) | Kind::Text(_) | Kind::Console(_) | Kind::Html(_) | Kind::Hex(_) | Kind::Files(_)
+            ) && self.abs_rect(*c).contains(p)
+        });
+        let Some(target) = under.or_else(|| self.nodes[id.ix()].children.first().copied()) else {
             return;
         };
-        let page = self.abs_rect(first).h;
-        match &mut self.nodes[first.ix()].kind {
+        let page = self.abs_rect(target).h;
+        match &mut self.nodes[target.ix()].kind {
             Kind::Text(t) if t.wrapping() => t.scroll_rows(delta, page),
             Kind::Text(t) => {
                 let max = (t.lines.len() as i16 - page).max(0);
@@ -4549,6 +4676,11 @@ impl Ui {
             Kind::Html(h) => h.scroll(delta, page),
             Kind::Hex(h) => h.scroll(delta),
             Kind::Console(c) => c.scroll(delta),
+            Kind::List(l) => l.scroll(delta),
+            Kind::Tree(t) => t.scroll(delta),
+            // A file panel's names flow down and then across: the wheel moves
+            // the cursor through them, as a file manager's does.
+            Kind::Files(f) => f.step(delta),
             _ => {}
         }
     }
@@ -5009,7 +5141,65 @@ impl Ui {
     /// Separate from the focus it also gives, because the two are one action
     /// to the hand and two to the program: the focus moves for every control,
     /// and what happens next is different for each.
+    /// Where a list or a tree is scrolled to and how many rows it has.
+    fn inner_scroll_of(&self, id: ViewId) -> Option<(i16, i16)> {
+        match &self.nodes[id.ix()].kind {
+            Kind::List(l) => Some((l.top, l.items.len().min(i16::MAX as usize) as i16)),
+            Kind::Tree(t) => Some((t.top, t.len().min(i16::MAX as usize) as i16)),
+            _ => None,
+        }
+    }
+
+    /// A list's or a tree's view by `delta` rows, its cursor left where it is.
+    fn inner_scroll(&mut self, id: ViewId, delta: i16) {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::List(l) => l.scroll(delta),
+            Kind::Tree(t) => t.scroll(delta),
+            _ => {}
+        }
+    }
+
+    /// A press on the scroll bar a list or a tree draws in its last column:
+    /// an arrow is a row, the track either side of the marker a page, and
+    /// the marker itself is taken hold of. True if the press was on it.
+    fn inner_bar_click(&mut self, id: ViewId, at: Point) -> bool {
+        let r = self.abs_rect(id);
+        let Some((top, total)) = self.inner_scroll_of(id) else { return false };
+        let Some((x, thumb_y)) = inner_bar(r, top, total, r.h) else { return false };
+        if at.x != x {
+            return false;
+        }
+        let page = (r.h - 1).max(1);
+        if at.y == r.y {
+            self.inner_scroll(id, -1);
+        } else if at.y == r.bottom() - 1 {
+            self.inner_scroll(id, 1);
+        } else if at.y < thumb_y {
+            self.inner_scroll(id, -page);
+        } else if at.y > thumb_y {
+            self.inner_scroll(id, page);
+        } else {
+            self.bar_drag = Some(id);
+        }
+        true
+    }
+
+    /// The marker of a list's or a tree's bar, dragged: the view goes where
+    /// the marker would be under the pointer.
+    fn inner_bar_drag(&mut self, id: ViewId, p: Point) {
+        let r = self.abs_rect(id);
+        let Some((top, total)) = self.inner_scroll_of(id) else { return };
+        let track = (r.h - 2).max(1);
+        let span = (total - r.h).max(0);
+        let off = (p.y - r.y - 1).clamp(0, track - 1);
+        let pos = if track > 1 { (off as i32 * span as i32 / (track - 1) as i32) as i16 } else { 0 };
+        self.inner_scroll(id, pos - top);
+    }
+
     fn control_click(&mut self, id: ViewId, at: Point) {
+        if self.inner_bar_click(id, at) {
+            return;
+        }
         let r = self.abs_rect(id);
         let (row, col) = (at.y - r.y, at.x - r.x);
 

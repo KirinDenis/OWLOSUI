@@ -59,9 +59,12 @@ need nothing but the emulator. In DOSBox-X the repository is drive C:.
 When a DOS program has ended, close DOSBox-X's window.
 
 In the demos **F10** opens the menu bar and **Alt+X** leaves; in the file
-managers the keys along the bottom say what they do, and **F10** quits.
+managers the keys along the bottom say what they do, and on DOS and in the
+Windows console **F10** quits - in the page, where F10 is the menu bar's,
+the commander is a window like the others and **Alt+F3** closes it.
 Everywhere **Tab** moves between the parts of a dialog, **F1** is help,
-and the mouse works.
+and the mouse works: the wheel scrolls, dragging selects text, a right
+click opens Cut, Copy and Paste.
 
 ## What is where
 
@@ -291,21 +294,31 @@ in `pending`; resolving it belongs to the application.
 ## Status
 
 Working: desktop, overlapping framed windows (move, resize, zoom, close,
-z-order, modal, following the desktop when it resizes), scrolling text
-views with working scrollbars, editing with undo, selection and a
-clipboard, two keymaps, a help viewer, menu bar with panels, submenus and
-ticked items, a status line that shows its keys and binds them, a file-open
-dialog with a path/mask line, a hex viewer, buttons (docked rows and
-placed ones, so a keypad is buttons too; normal, accent and danger
-colours), labels with hotkeys,
-input lines, check boxes and radio buttons, lists with Insert-marks, trees,
-static text, a progress bar, a message box, a canvas of cells the program
-draws itself (a game board, a chart); four backends - the terminal, a
-native Windows window, a browser canvas and DOS; the pipe server, its C#
-client (published as one .exe with the core inside, on a console or in a
-window) and its JavaScript client (the server as WebAssembly); the
-resident, the same server behind INT 60h on DOS, with clients in
-assembler, C and Pascal; comparison against reference DOS screens.
+minimize into a bar in the corner, z-order, modal, following the desktop
+when it resizes - the minimize, zoom and close boxes together at the right
+of the top edge), scrolling text views with working scrollbars, editing
+with undo, selection by keys and by dragging the mouse, a right-click
+menu (Undo, Cut, Copy, Paste, Select all) and a clipboard that is the
+computer's own - in the browser, in the C# client on a console and in its
+window, in a Rust program's window, and on DOS under Windows or in
+DOSBox-X - files of any size
+(sent and read in parts), two keymaps, a help viewer, menu bar with
+panels, submenus and ticked items, a status line that shows its keys and
+binds them, a file-open dialog with a path/mask line, a hex viewer, a
+console that colours what is written to it by its ANSI sequences, keeps a
+scrollback and copies plain, buttons (docked rows and placed ones, so a
+keypad is buttons too; normal, accent and danger colours), labels with
+hotkeys, input lines, check boxes and radio buttons, lists with
+Insert-marks, trees, lists and trees that scroll with the wheel and their
+own bar, static text, a progress bar, a message box, a canvas of cells the
+program draws itself (a game board, a chart); four window colours
+(documents, help, dialogs, a terminal's black); four backends - the
+terminal, a native Windows window, a browser canvas and DOS; the pipe
+server, its C# client (published as one .exe with the core inside, on a
+console or in a window) and its JavaScript client (the server as
+WebAssembly); the resident, the same server behind INT 60h on DOS, with
+clients in assembler, C and Pascal; comparison against reference DOS
+screens.
 
 Also there, as the classic DOS desktops had them: numbered windows and Alt+1..9,
 the window list on Alt+0, Shift+F6, Ctrl+F5 to move or resize from the
@@ -314,9 +327,11 @@ status line, input-line history, a colour dialog over the palette, a tree
 filled as it opens (a drive as folders, with a drive chooser, in the
 Commander), and find/replace in the editor.
 
-Not yet at all: a grid, tabs, a drop-down list, a masked field, an ANSI
-viewer; a resident that stays after its program ends, so several DOS
-programs can share one.
+Not yet at all: a grid, tabs, a drop-down list, a masked field; cursor
+movement up and down in the console (it colours a log, it does not lay out
+a full-screen ANSI drawing); the computer's clipboard in the page's DOS,
+whose emulator gives a program none; a resident that stays after
+its program ends, so several DOS programs can share one.
 
 ## Licence
 

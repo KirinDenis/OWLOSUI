@@ -368,3 +368,28 @@ fn without_a_menu_bar_the_keys_go_on_the_status_line() {
     ui.set_editor(t, offer::FIND, 0);
     assert!(!screen(&mut ui)[24].contains("Ctrl+F"));
 }
+
+#[test]
+fn a_menu_dropped_over_the_caret_hides_it() {
+    // The card's cursor is above every cell: left on, it blinked through the menu.
+    let mut ui = desk(true);
+    let (_, t) = editor(&mut ui, "hello", 60, 10);
+    ui.set_editor(t, 0, 0);
+    screen(&mut ui);
+    assert_eq!(ui.cursor().map(|p| (p.x, p.y)), Some((1, 2)));
+    alt(&mut ui, 'f');
+    screen(&mut ui);
+    assert!(ui.menu_open().is_some());
+    assert_eq!(ui.cursor(), None, "the caret is under the File menu");
+    key(&mut ui, KeyCode::Esc);
+    key(&mut ui, KeyCode::Esc);
+    assert!(ui.menu_open().is_none());
+    screen(&mut ui);
+    assert_eq!(ui.cursor().map(|p| (p.x, p.y)), Some((1, 2)), "and back when it closes");
+    // A caret the menu does not reach stays where it is.
+    typed(&mut ui, &" ".repeat(40));
+    alt(&mut ui, 'f');
+    screen(&mut ui);
+    assert!(ui.menu_open().is_some());
+    assert_eq!(ui.cursor().map(|p| (p.x, p.y)), Some((41, 2)));
+}

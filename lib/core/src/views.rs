@@ -110,6 +110,12 @@ pub struct Window {
     pub(crate) minimized: bool,
     /// Set while zoomed; holds the rectangle to restore.
     pub(crate) unzoomed: Option<Rect>,
+    /// Where the window was put, the work area it was put in, and where the
+    /// last change of the desktop's size moved it. Each new size is worked
+    /// out from the first two, not from the last result, so a browser made
+    /// smaller and then big again puts every window back exactly; a window
+    /// moved or resized since (the third no longer matches) starts afresh.
+    pub(crate) home: Option<(Rect, Rect, Rect)>,
     /// What this window adds to the status line while it is the active
     /// one: its own keys, bound and shown, and gone when it is not.
     /// The classic DOS toolkits changed the status line by help context; a window
@@ -145,6 +151,7 @@ impl Window {
             minimizable: true,
             minimized: false,
             unzoomed: None,
+            home: None,
             status: Vec::new(),
             menu: Vec::new(),
         }
@@ -280,6 +287,24 @@ impl TextView {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.states_valid = 0;
+    }
+
+    /// More text at the end, as loading a file in parts does: the first of
+    /// `lines` continues the last line, the rest follow it. The caret,
+    /// the view and the undo history stay where they are - this is the
+    /// same text arriving, not an edit.
+    pub fn append_lines(&mut self, lines: Vec<Vec<crate::cell::Glyph>>) {
+        // The colouring is known up to the line that was last: from there
+        // on it has to be worked out again.
+        self.states_valid = self.states_valid.min(self.lines.len().saturating_sub(1));
+        let mut it = lines.into_iter();
+        if let Some(first) = it.next() {
+            match self.lines.last_mut() {
+                Some(last) => last.extend(first),
+                None => self.lines.push(first),
+            }
+        }
+        self.lines.extend(it);
     }
 
     /// Convenience for ASCII-only text. Anything else must be encoded to the

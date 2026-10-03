@@ -157,9 +157,12 @@ public sealed class Owlosui : IDisposable
     /// screen with another has nothing to float above.
     /// </summary>
     public ushort Window(string title, int w, int h, int x = -1, int y = -1,
-                         Style style = Style.Document, ushort parent = 0, ushort closeCmd = 0, bool shadow = true)
+                         Style style = Style.Document, ushort parent = 0, ushort closeCmd = 0, bool shadow = true,
+                         bool minimize = true)
     {
-        var flags = (byte)((byte)style | (shadow ? 0 : 0x40));
+        // minimize false: no [↓] box. A modal window or one without a
+        // shadow has none anyway.
+        var flags = (byte)((byte)style | (shadow ? 0 : 0x40) | (minimize ? 0 : 0x80));
         var r = Call(Op.Window, W.U16(parent), W.Rect(x, y, w, h), new[] { flags }, W.Str(title), W.U16(closeCmd));
         return R.U16(r);
     }
@@ -168,8 +171,34 @@ public sealed class Owlosui : IDisposable
     public ushort Text(ushort parent, string text = "", bool readOnly = false)
     {
         var flags = (byte)(readOnly ? 1 : 0);
-        var r = Call(Op.Text, W.U16(parent), W.Rect(0, 0, 0, 0), new byte[] { 0, flags }, W.Str(text));
-        return R.U16(r);
+        var parts = Pieces(text);
+        var id = R.U16(Call(Op.Text, W.U16(parent), W.Rect(0, 0, 0, 0), new byte[] { 0, flags }, W.Str(parts[0])));
+        AppendText(id, parts);
+        return id;
+    }
+
+    /// <summary>
+    /// A text in pieces that each fit one request: 15000 UTF-16 units are at
+    /// most 60000 bytes of UTF-8, and no piece ends between the two halves
+    /// of a surrogate pair.
+    /// </summary>
+    private static List<string> Pieces(string s, int max = 15000)
+    {
+        var v = new List<string>();
+        for (int at = 0; at < s.Length || v.Count == 0;)
+        {
+            var end = Math.Min(at + max, s.Length);
+            if (end < s.Length && char.IsHighSurrogate(s[end - 1])) end--;
+            v.Add(s.Substring(at, end - at));
+            at = end;
+        }
+        return v;
+    }
+
+    /// <summary>The pieces after the first, onto the end of a text: a file of any size.</summary>
+    private void AppendText(ushort id, List<string> parts)
+    {
+        for (var i = 1; i < parts.Count; i++) Call(Op.TextAppend, W.U16(id), W.Str(parts[i]));
     }
 
     /// <summary>
@@ -394,8 +423,10 @@ public sealed class Owlosui : IDisposable
     public ushort Memo(ushort parent, int x, int y, int w, int h, string text = "", bool readOnly = false)
     {
         var flags = (byte)((readOnly ? 1 : 0) | 2);
-        var r = Call(Op.Text, W.U16(parent), W.Rect(x, y, w, h), new byte[] { 1, flags }, W.Str(text));
-        return R.U16(r);
+        var parts = Pieces(text);
+        var id = R.U16(Call(Op.Text, W.U16(parent), W.Rect(x, y, w, h), new byte[] { 1, flags }, W.Str(parts[0])));
+        AppendText(id, parts);
+        return id;
     }
 
     /// <summary>Words. Wrapped to the width given; one line if no height.</summary>
@@ -771,6 +802,85 @@ public sealed class Owlosui : IDisposable
     /// </summary>
     public void Minimize(ushort window) => Call(Op.Minimize, W.U16(window));
 
+    /// <summary>
+    /// Where a window's inside is, in cells from the screen's top left, as
+    /// the last frame laid it out, and whether anything is drawn over any of
+    /// it - a window above, its shadow, an open menu. For a program that lays
+    /// a picture of its own over a window and must hide it while covered.
+    /// </summary>
+    public (int x, int y, int w, int h, bool covered) Place(ushort window)
+    {
+        var r = Call(Op.Place, W.U16(window));
+        return (R.I16(r, 0), R.I16(r, 2), R.I16(r, 4), R.I16(r, 6), r[8] != 0);
+    }
+
+    /// <summary>
+    /// A word in brackets after a window's title, drawn as [modal] is: what
+    /// the window is doing that its name does not say. "" takes it away.
+    /// </summary>
+    public void WindowTag(ushort window, string tag) => Call(Op.SetTag, W.U16(window), W.Str(tag));
+
+    /// <summary>
+    /// Words at the right end of the status line while the window is in
+    /// front, where an editor shows its line and column; a part between
+    /// tildes is lit green: "[~A:~ B: C:]". "" for none.
+    /// </summary>
+    public void WindowIndicator(ushort window, string text) => Call(Op.SetIndicator, W.U16(window), W.Str(text));
+
+    // ------------------------------------------------------- the clipboard
+
+    /// <summary>
+    /// The program shares a clipboard of its own with the core (host true):
+    /// how many times the core has copied - Copy, Cut, a console's Ctrl+C -
+    /// and whether a Paste was chosen that waits for that clipboard.
+    /// <see cref="Run(Func{ushort, bool})"/> asks after every input and
+    /// shares Windows' clipboard; a program with its own loop does the same.
+    /// </summary>
+    public (uint copied, bool paste) ClipboardState(bool host = true)
+    {
+        var r = Call(Op.Clipboard, new[] { (byte)(host ? 1 : 0) });
+        return (BitConverter.ToUInt32(r, 0), r[4] != 0);
+    }
+
+    /// <summary>What the core's clipboard holds, as text, lines joined by \n.</summary>
+    public string ClipboardText() => R.Str(Call(Op.ClipboardGet));
+
+    /// <summary>
+    /// The program's clipboard in, and the paste that waited for it done.
+    /// <paramref name="now"/>: paste into whatever has the focus even if
+    /// nothing waited. <paramref name="keep"/>: the program could not read
+    /// its clipboard; paste what the core has. True if something was pasted.
+    /// </summary>
+    public bool ClipboardPaste(string text, bool now = false, bool keep = false)
+    {
+        var flags = (byte)((now ? 1 : 0) | (keep ? 2 : 0));
+        return Call(Op.ClipboardPaste, new[] { flags }, W.Str(text ?? ""))[0] != 0;
+    }
+
+    private uint clipCopied;
+
+    /// <summary>
+    /// Windows' clipboard and the core's, kept as one: what the core copied
+    /// goes out, and a Paste it was asked for comes in. A clipboard another
+    /// program is holding for a moment is tried again a few times; one that
+    /// cannot be had leaves the core's clipboard as it is.
+    /// </summary>
+    private void ShareClipboard()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var (copied, paste) = ClipboardState(true);
+        if (copied != clipCopied)
+        {
+            clipCopied = copied;
+            SystemClipboard.SetText(ClipboardText().Replace("\n", "\r\n"));
+        }
+        if (paste)
+        {
+            var text = SystemClipboard.GetText();
+            ClipboardPaste(text ?? "", keep: text == null);
+        }
+    }
+
     // ------------------------------------------------------------- clusters
 
     /// <summary>
@@ -889,12 +999,33 @@ public sealed class Owlosui : IDisposable
     /// its label) or a Text (starts over). Cheaper than closing and making
     /// another, and the view keeps its handle.
     /// </summary>
-    public void SetText(ushort id, string text) => Call(Op.SetText, W.U16(id), W.Str(text));
+    public void SetText(ushort id, string text)
+    {
+        var parts = Pieces(text);
+        Call(Op.SetText, W.U16(id), W.Str(parts[0]));
+        AppendText(id, parts);
+    }
 
     public void Close(ushort id) => Call(Op.Close, W.U16(id));
 
-    /// <summary>What a Text, Memo or Input holds right now.</summary>
-    public string GetText(ushort id) => R.Str(Call(Op.GetText, W.U16(id)));
+    /// <summary>
+    /// What a Text, Memo, Input or console holds right now, however long:
+    /// read a part at a time, each cut where a character ends.
+    /// </summary>
+    public string GetText(ushort id)
+    {
+        var all = new List<byte>();
+        uint total;
+        do
+        {
+            var r = Call(Op.GetTextPart, W.U16(id), W.U32((uint)all.Count));
+            total = BitConverter.ToUInt32(r, 0);
+            var n = BitConverter.ToUInt16(r, 4);
+            if (n == 0 && all.Count < total) throw new InvalidOperationException($"the text of view {id} stopped at byte {all.Count} of {total}");
+            all.AddRange(new ArraySegment<byte>(r, 6, n));
+        } while (all.Count < total);
+        return Encoding.UTF8.GetString(all.ToArray());
+    }
 
     // -------------------------------------------------------------- events
 
@@ -1118,6 +1249,8 @@ public sealed class Owlosui : IDisposable
         // it has seen one; the pseudo console then turns them into the same
         // input records. Ask both ways and every console answers.
         var vt = VtMouse.On();
+        // Windows' clipboard is the core's from here on (ShareClipboard).
+        clipCopied = ClipboardState(true).copied;
         try
         {
             while (true)
@@ -1131,6 +1264,8 @@ public sealed class Owlosui : IDisposable
                     Thread.Sleep(90);
                     Tick();
                     var (p, c) = Take();
+                    // A context menu's Copy or Paste happens on this tick.
+                    ShareClipboard();
                     if (p != 0 && !onCommand(p)) return;
                     if (c != 0 && !onCommand(c)) return;
                     continue;
@@ -1146,6 +1281,7 @@ public sealed class Owlosui : IDisposable
                     };
                     if (!sent) continue;
                     var (pressed, command) = Take();
+                    ShareClipboard();
                     if (pressed != 0 && !onCommand(pressed)) return;
                     if (command != 0 && !onCommand(command)) return;
                     afterInput?.Invoke();
@@ -1543,7 +1679,9 @@ public sealed class Owlosui : IDisposable
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
         public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E, Syntax = 0x5F, SyntaxDefine = 0x60, Unmark = 0x61;
         public const byte OpenWindow = 0x5B, Wait = 0x5C;
-        public const byte Console = 0x67, ConsoleWrite = 0x68, Minimize = 0x6C;
+        public const byte Console = 0x67, ConsoleWrite = 0x68, Minimize = 0x6C, TextAppend = 0x6D, GetTextPart = 0x6E;
+        public const byte Place = 0x62, SetTag = 0x65, SetIndicator = 0x66;
+        public const byte Clipboard = 0x69, ClipboardGet = 0x6A, ClipboardPaste = 0x6B;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;
         public const byte Frame = 0x40, Take = 0x41, GetGlyphs = 0x42;
     }

@@ -137,6 +137,10 @@ pub struct ListBox {
     /// answer, and a mark on it would be a second one.
     pub multi: bool,
     marked: Vec<bool>,
+    /// Scrolled by the wheel or the bar while the cursor was on this item:
+    /// the view stays where it was put, the cursor out of it if need be,
+    /// until the cursor moves - as in every list since the mouse wheel.
+    scrolled_at: Option<usize>,
 }
 
 impl ListBox {
@@ -149,7 +153,15 @@ impl ListBox {
             rows: 1,
             multi: false,
             marked: Vec::new(),
+            scrolled_at: None,
         }
+    }
+
+    /// The view by `delta` rows, the cursor left where it is.
+    pub fn scroll(&mut self, delta: i16) {
+        let max = (self.items.len() as i16 - self.rows).max(0);
+        self.top = (self.top.saturating_add(delta)).clamp(0, max);
+        self.scrolled_at = Some(self.current);
     }
 
     /// Mark or unmark the current item and step to the next, so that
@@ -176,7 +188,14 @@ impl ListBox {
 
     pub fn set_rows(&mut self, rows: i16) {
         self.rows = rows.max(1);
-        self.follow();
+        if self.scrolled_at == Some(self.current) {
+            // Scrolled, and the cursor has not moved since: stay put.
+            let max = (self.items.len() as i16 - self.rows).max(0);
+            self.top = self.top.clamp(0, max);
+        } else {
+            self.scrolled_at = None;
+            self.follow();
+        }
     }
 
     pub fn rows(&self) -> i16 {
@@ -189,6 +208,7 @@ impl ListBox {
         }
         let n = self.items.len() as i16;
         self.current = (self.current as i16 + d).clamp(0, n - 1) as usize;
+        self.scrolled_at = None;
         self.follow();
     }
 

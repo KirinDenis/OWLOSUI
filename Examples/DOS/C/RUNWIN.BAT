@@ -20,4 +20,5 @@ if "%1"=="" (
   exit /b 1
 )
 for %%R in ("%~dp0..\..\..") do set ROOT=%%~fR
-"%DOSBOXX%" -noautoexec %DOSBOXX_OPTS% -c "mount c %ROOT%" -c "c:" -c "cd \EXAMPLES\DOS\C" -c "RUN %1 %2" >nul 2>&1
+rem The clipboard API is how the toolkit shares Windows' clipboard.
+"%DOSBOXX%" -noautoexec -set "dos clipboard api=true" %DOSBOXX_OPTS% -c "mount c %ROOT%" -c "c:" -c "cd \EXAMPLES\DOS\C" -c "RUN %1 %2" >nul 2>&1

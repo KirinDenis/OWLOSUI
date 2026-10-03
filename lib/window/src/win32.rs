@@ -235,6 +235,29 @@ extern "system" {
     pub fn FillRect(dc: HDC, r: *const RECT, b: HBRUSH) -> i32;
 }
 
+// The clipboard: text as UTF-16 in a block of global memory, which the
+// system owns once it has been given.
+pub const CF_UNICODETEXT: UINT = 13;
+pub const GMEM_MOVEABLE: UINT = 0x0002;
+
+#[link(name = "user32")]
+extern "system" {
+    pub fn OpenClipboard(owner: HWND) -> BOOL;
+    pub fn CloseClipboard() -> BOOL;
+    pub fn EmptyClipboard() -> BOOL;
+    pub fn SetClipboardData(format: UINT, mem: HANDLE) -> HANDLE;
+    pub fn GetClipboardData(format: UINT) -> HANDLE;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    pub fn GlobalAlloc(flags: UINT, bytes: usize) -> HANDLE;
+    pub fn GlobalFree(mem: HANDLE) -> HANDLE;
+    pub fn GlobalLock(mem: HANDLE) -> *mut c_void;
+    pub fn GlobalUnlock(mem: HANDLE) -> BOOL;
+    pub fn Sleep(ms: DWORD);
+}
+
 /// A NUL-terminated UTF-16 string for the API.
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(core::iter::once(0)).collect()

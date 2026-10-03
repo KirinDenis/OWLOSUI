@@ -190,4 +190,96 @@ internal static class Win32
                                              out PROCESS_INFORMATION lpProcessInformation);
 
     public static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
+
+    // The clipboard: text as UTF-16 in a block of global memory, the way
+    // every Windows program has handed it over since 3.1.
+    public const uint CF_UNICODETEXT = 13;
+    public const uint GMEM_MOVEABLE = 0x0002;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool CloseClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool EmptyClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr GetClipboardData(uint uFormat);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GlobalLock(IntPtr hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GlobalUnlock(IntPtr hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GlobalFree(IntPtr hMem);
+}
+
+/// <summary>
+/// Windows' clipboard, as text. Another program may hold it open for a
+/// moment - a clipboard manager, a remote desktop - so opening it is tried
+/// a few times; a clipboard that cannot be had is a null, not an exception.
+/// </summary>
+internal static class SystemClipboard
+{
+    private static bool Open()
+    {
+        for (var i = 0; i < 10; i++)
+        {
+            if (Win32.OpenClipboard(IntPtr.Zero)) return true;
+            Thread.Sleep(20);
+        }
+        return false;
+    }
+
+    public static bool SetText(string text)
+    {
+        if (!Open()) return false;
+        try
+        {
+            Win32.EmptyClipboard();
+            var bytes = (text.Length + 1) * 2;
+            var mem = Win32.GlobalAlloc(Win32.GMEM_MOVEABLE, (UIntPtr)bytes);
+            if (mem == IntPtr.Zero) return false;
+            var p = Win32.GlobalLock(mem);
+            if (p == IntPtr.Zero) { Win32.GlobalFree(mem); return false; }
+            Marshal.Copy(text.ToCharArray(), 0, p, text.Length);
+            Marshal.WriteInt16(p, text.Length * 2, 0);
+            Win32.GlobalUnlock(mem);
+            // The clipboard owns the block from here; only a failure is ours to free.
+            if (Win32.SetClipboardData(Win32.CF_UNICODETEXT, mem) == IntPtr.Zero) { Win32.GlobalFree(mem); return false; }
+            return true;
+        }
+        finally
+        {
+            Win32.CloseClipboard();
+        }
+    }
+
+    public static string? GetText()
+    {
+        if (!Open()) return null;
+        try
+        {
+            var mem = Win32.GetClipboardData(Win32.CF_UNICODETEXT);
+            if (mem == IntPtr.Zero) return "";
+            var p = Win32.GlobalLock(mem);
+            if (p == IntPtr.Zero) return null;
+            try { return Marshal.PtrToStringUni(p) ?? ""; }
+            finally { Win32.GlobalUnlock(mem); }
+        }
+        finally
+        {
+            Win32.CloseClipboard();
+        }
+    }
 }

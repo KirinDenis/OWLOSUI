@@ -302,11 +302,17 @@ impl FileList {
     }
 
     /// Directories first, then names. `..` before everything, because it is
-    /// the one entry people reach for without looking.
+    /// the one entry people reach for without looking. A drive's root shows
+    /// none: there is nothing above it. DOS gives none there, but DOSBox's
+    /// mounted folders do, and it led back to the same root.
     fn rebuild(&mut self) {
+        let root = is_root(&self.path.text);
         let mut v: Vec<usize> = (0..self.entries.len())
             .filter(|&i| {
                 let e = &self.entries[i];
+                if root && e.name == ".." {
+                    return false;
+                }
                 e.is_dir() || matches(&e.name, &self.mask)
             })
             .collect();
@@ -570,9 +576,17 @@ impl FileList {
         self.current = self.current.min(self.view.len().saturating_sub(1));
     }
 
+    /// The path decides whether `..` is shown, so the list is built again;
+    /// the cursor stays on the name it was on.
     pub fn set_path(&mut self, path: &str) {
+        let was = self.selected().map(|e| e.name.clone());
         self.path.set_text(path);
         self.error = None;
+        self.rebuild();
+        if let Some(i) = was.and_then(|n| (0..self.view.len()).find(|&i| self.entries[self.view[i]].name == n)) {
+            self.current = i;
+        }
+        self.reveal();
     }
 
     pub fn path_text(&self) -> &str {
@@ -679,6 +693,18 @@ fn trim_to(s: &str, n: usize) -> String {
 /// The dots are not decoration. A name silently cut at the edge of its column
 /// reads as a shorter name, and two files whose names differ only past the cut
 /// become one file listed twice.
+/// `C:\`, `C:\*.*`, `\` or `/`: a folder with nothing above it. A last part
+/// with `*` or `?` in it is a mask, not a folder, and is left off first.
+pub fn is_root(path: &str) -> bool {
+    let p = path.trim();
+    let p = match p.rfind(['\\', '/']) {
+        Some(i) if p[i + 1..].contains(['*', '?']) => &p[..=i],
+        _ => p,
+    };
+    let rest = p.trim_end_matches(['\\', '/']);
+    rest.len() < p.len() && (rest.is_empty() || (rest.len() == 2 && rest.ends_with(':')))
+}
+
 pub fn fit(name: &str, width: i16) -> String {
     let w = width.max(1) as usize;
     if name.chars().count() <= w {

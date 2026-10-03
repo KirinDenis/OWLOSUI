@@ -201,8 +201,8 @@ internal static class Tests
             var app = new NotesApp(owl, notesFile);
             owl.GetFrame();
             owl.Type("x");
-            // [■] sits at x+2..x+4 on the title row; the window is at (2,1).
-            owl.Click(5, 1);
+            // [■] sits in the right-hand corner of the title row.
+            owl.Click(owl.GetFrame().Row(1).IndexOf('■'), 1);
             var (_, command) = owl.Take();
             Check(command == NotesApp.CmExit, $"the close box sent {command}, not Exit");
             Check(app.OnCommand(command), "closing with unsaved text should ask, not leave");
@@ -217,12 +217,12 @@ internal static class Tests
             using var owl = Owl();
             _ = new NotesApp(owl, notesFile);
             var f = owl.GetFrame();
-            // [↑] sits at right-5..right-3 on the title row; right edge is 78.
-            owl.Click(74, 1);
+            // [↑] sits left of the close box on the title row.
+            owl.Click(f.Row(1).IndexOf('↑'), 1);
             var g = owl.GetFrame();
             Check(IsCorner(g, 79, 24), "zoom did not fill the desktop", g);
-            // Zoomed, the title row is row 0 and the box has moved with it.
-            owl.Click(76, 0);
+            // Zoomed, the title row is row 0 and the box - now ↕ - has moved with it.
+            owl.Click(g.Row(0).IndexOf('↕'), 0);
             var h = owl.GetFrame();
             Check(IsCorner(h, 77, 23), "unzoom did not put the window back", h);
         });
@@ -353,15 +353,65 @@ internal static class Tests
             Check(owl.Take().pressed == NotesApp.CmStay, "Stay does not answer after the resizes");
         });
 
+        Case("A window's tag, indicator and place; no [↓] when asked; the clipboard as a host shares it", () =>
+        {
+            using var owl = Owl();
+            owl.StatusLine(new Owlosui.StatusItem("~F1~ Help", 1, ConsoleKey.F1));
+            var w = owl.Window("DOS", 40, 10, x: 10, y: 3);
+            owl.WindowTag(w, "awake");
+            owl.WindowIndicator(w, "[~A:~ B: C:]");
+            var f = owl.GetFrame();
+            Check(f.Find("DOS [awake]") != null, "no tag after the title", f);
+            Check(f.Row(f.H - 1).TrimEnd().EndsWith("[A: B: C:]"), "no indicator at the right of the status line", f);
+            var p = owl.Place(w);
+            Check(p == (11, 4, 38, 8, false), $"the inside is {p}");
+            var plain = owl.Window("Plain", 30, 6, x: 0, y: 14, minimize: false);
+            f = owl.GetFrame();
+            Check(f.Row(14).Contains('■') && !f.Row(14).Contains('↓'), "a window made with minimize: false has a [↓]", f);
+            Check(owl.Place(w).covered == false, "a window below covers it");
+
+            // The clipboard: a copy is counted, its text is there, and a paste
+            // from the host lands in the text that has the focus.
+            var t = owl.Text(plain, "hello");
+            var (before, _) = owl.ClipboardState(true);
+            // As a console delivers them: Ctrl+A is the control character 1.
+            owl.Press(ConsoleKey.A, ctrl: true, ch: '\x01');
+            owl.Press(ConsoleKey.C, ctrl: true, ch: '\x03');
+            var (after, waiting) = owl.ClipboardState(true);
+            Check(after == before + 1 && !waiting, $"copied {before} -> {after}, waiting {waiting}");
+            Check(owl.ClipboardText() == "hello", $"the core's clipboard holds '{owl.ClipboardText()}'");
+            owl.Press(ConsoleKey.End, ctrl: true);
+            Check(owl.ClipboardPaste(" world", now: true), "the host's paste did not land");
+            Check(owl.GetText(t) == "hello world", $"the text is '{owl.GetText(t)}'");
+        });
+
+        Case("A file of 200 KB goes in whole, grows, and comes back to the last character", () =>
+        {
+            // A request carries 64 KB. In pieces it goes in, in parts it comes
+            // out - and a text grown past 64 KB in the editor is read back
+            // whole, where it used to come back as the few hundred bytes its
+            // wrapped length said.
+            using var owl = Owl();
+            var big = string.Join("\n", Enumerable.Range(0, 4000).Select(i => $"        mov ax,{i,5}    ; строка {i}, \U0001F989 owl"));
+            Check(System.Text.Encoding.UTF8.GetByteCount(big) > 180000, "the text is not big enough to test anything");
+            var w = owl.Window("BIG.ASM", 60, 16);
+            var t = owl.Text(w, big);
+            Check(owl.GetText(t) == big, "the text did not come back as it went in");
+            owl.Press(ConsoleKey.End, ctrl: true);
+            owl.Type(new string('x', 300));
+            Check(owl.GetText(t) == big + new string('x', 300), "what was typed at the end is not all there");
+            owl.SetText(t, big + "\nreplaced");
+            Check(owl.GetText(t) == big + "\nreplaced", "SetText of a big text did not keep all of it");
+        });
+
         Case("HelloWorld: the close box closes it", () =>
         {
             using var owl = Owl();
             HW.Build(owl);
             var f = owl.GetFrame();
             var (x, y) = Locate(f, " Hello ");
-            // The frame's left edge is where the row's first non-desktop cell is.
-            var left = f.Row(y).IndexOf('╔');
-            owl.Click(left + 3, y);
+            // The close box is the square in the right-hand corner of the title row.
+            owl.Click(f.Row(y).IndexOf('■'), y);
             Check(owl.GetFrame().Find("Hello, world!") == null, "the close box did nothing");
         });
 

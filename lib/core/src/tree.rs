@@ -78,6 +78,9 @@ pub struct TreeView {
     /// A lazy node somebody tried to open: its path, until the program
     /// gives its children with `set_children`.
     pub pending: Option<Vec<usize>>,
+    /// Scrolled by the wheel or the bar while the cursor was on this row:
+    /// the view stays where it was put until the cursor moves.
+    scrolled_at: Option<usize>,
 }
 
 impl TreeView {
@@ -89,7 +92,15 @@ impl TreeView {
             focused: false,
             rows: 1,
             pending: None,
+            scrolled_at: None,
         }
+    }
+
+    /// The view by `delta` rows, the cursor left where it is.
+    pub fn scroll(&mut self, delta: i16) {
+        let max = (self.flatten().len() as i16 - self.rows).max(0);
+        self.top = (self.top.saturating_add(delta)).clamp(0, max);
+        self.scrolled_at = Some(self.current);
     }
 
     /// The children of a node, given by the program - usually in answer to
@@ -135,7 +146,14 @@ impl TreeView {
 
     pub fn set_rows(&mut self, rows: i16) {
         self.rows = rows.max(1);
-        self.follow();
+        if self.scrolled_at == Some(self.current) {
+            // Scrolled, and the cursor has not moved since: stay put.
+            let max = (self.flatten().len() as i16 - self.rows).max(0);
+            self.top = self.top.clamp(0, max);
+        } else {
+            self.scrolled_at = None;
+            self.follow();
+        }
     }
 
     pub fn rows(&self) -> i16 {
@@ -189,6 +207,7 @@ impl TreeView {
             return;
         }
         self.current = (self.current as i16 + d).clamp(0, n as i16 - 1) as usize;
+        self.scrolled_at = None;
         self.follow();
     }
 

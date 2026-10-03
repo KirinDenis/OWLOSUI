@@ -777,6 +777,125 @@ pub fn shot(bytes: &[u8]) {
     real_int(0x21, &mut c);
 }
 
+// ------------------------------------------------- the computer's clipboard
+
+/// The clipboard of the system DOS runs under, through WinOldAp's INT 2Fh
+/// AX=17xxh: what Windows 3.x and 9x give a DOS box, and what DOSBox-X
+/// gives with `dos clipboard api=true`. Plain DOS has none, and the core
+/// keeps its own. The text goes as CF_OEMTEXT, the card's code page - which
+/// is what a glyph on DOS already is - through a block below a megabyte.
+const CF_OEMTEXT: u32 = 7;
+const CF_TEXT: u32 = 1;
+const CLIP_SIZE: usize = 16384;
+static mut CLIP: u16 = 0;
+
+fn clip_call(ax: u32, r: RealRegs) -> RealRegs {
+    let mut r = RealRegs { eax: ax, ..r };
+    real_int(0x2F, &mut r);
+    r
+}
+
+/// Whether there is a clipboard to share: 1700h answers with the API's
+/// version, and leaves AX as it was where nobody is listening. Asked once,
+/// and the block below a megabyte the text goes through is taken then -
+/// so ask before running another program: once it runs, it has all the
+/// memory DOS had, and there is none left to take.
+static mut CLIP_API: Option<bool> = None;
+
+pub fn clipboard_api() -> bool {
+    unsafe {
+        if CLIP_API.is_none() {
+            let there = clip_call(0x1700, RealRegs::default()).eax & 0xFFFF != 0x1700;
+            CLIP_API = Some(there && clip_block().is_some());
+        }
+        CLIP_API == Some(true)
+    }
+}
+
+fn clip_block() -> Option<u16> {
+    unsafe {
+        if CLIP == 0 {
+            CLIP = dos_alloc((CLIP_SIZE / 16) as u16)?;
+        }
+        Some(CLIP)
+    }
+}
+
+/// Text onto the system's clipboard; as much as the block holds.
+pub fn clipboard_set(text: &[u8]) -> bool {
+    let Some(seg) = clip_block() else { return false };
+    let n = text.len().min(CLIP_SIZE - 1);
+    let mut b = Vec::with_capacity(n + 1);
+    b.extend_from_slice(&text[..n]);
+    b.push(0);
+    write_real(real(seg, 0), &b);
+    if clip_call(0x1701, RealRegs::default()).eax & 0xFFFF == 0 {
+        return false;
+    }
+    clip_call(0x1702, RealRegs::default());
+    let size = b.len() as u32;
+    let set = clip_call(0x1703, RealRegs { edx: CF_OEMTEXT, es: seg, ebx: 0, esi: size >> 16, ecx: size & 0xFFFF, ..Default::default() });
+    clip_call(0x1708, RealRegs::default());
+    set.eax & 0xFFFF != 0
+}
+
+/// The system's clipboard as text, if it holds any.
+pub fn clipboard_get() -> Option<Vec<u8>> {
+    let seg = clip_block()?;
+    if clip_call(0x1701, RealRegs::default()).eax & 0xFFFF == 0 {
+        return None;
+    }
+    let mut got = None;
+    for format in [CF_OEMTEXT, CF_TEXT] {
+        let s = clip_call(0x1704, RealRegs { edx: format, ..Default::default() });
+        let size = ((s.edx & 0xFFFF) << 16 | (s.eax & 0xFFFF)) as usize;
+        if size == 0 || size > CLIP_SIZE {
+            continue;
+        }
+        if clip_call(0x1705, RealRegs { edx: format, es: seg, ebx: 0, ..Default::default() }).eax & 0xFFFF == 0 {
+            continue;
+        }
+        let mut b = alloc::vec![0u8; size];
+        read_real(real(seg, 0), &mut b);
+        if let Some(end) = b.iter().position(|&c| c == 0) {
+            b.truncate(end);
+        }
+        got = Some(b);
+        break;
+    }
+    clip_call(0x1708, RealRegs::default());
+    got
+}
+
+/// The system's clipboard and the core's, kept as one, after any input:
+/// what the core copied goes out, a Paste waiting for the computer's
+/// clipboard has it now. `copied` is the core's copy count when the system
+/// last had its text. Nothing to do unless the core was told it shares
+/// (`ui.host_clip.on`), which a program does once it has found
+/// [`clipboard_api`].
+pub fn share_clipboard(ui: &mut Ui, copied: &mut u32) {
+    if !ui.host_clip.on {
+        return;
+    }
+    if ui.host_clip.copied != *copied {
+        *copied = ui.host_clip.copied;
+        let mut text = Vec::new();
+        for (i, line) in ui.clipboard.iter().enumerate() {
+            if i > 0 {
+                text.extend_from_slice(b"\r\n");
+            }
+            text.extend_from_slice(line);
+        }
+        clipboard_set(&text);
+    }
+    if ui.host_clip.paste_wanted.is_some() {
+        let lines = clipboard_get().filter(|t| !t.is_empty()).map(|t| {
+            t.split(|&c| c == b'\n').map(|l| l.strip_suffix(b"\r").unwrap_or(l).to_vec()).collect::<Vec<_>>()
+        });
+        ui.host_paste(lines, false);
+    }
+}
+
 // ----------------------------------------------------------- a program's loop
 
 /// What stands behind the screen: a core, and whoever acts on what it
@@ -796,8 +915,12 @@ pub fn run(program: &mut dyn Program) -> ! {
     let mut buf = Buffer::new(80, 25);
     let mut mouse = MouseState::detect();
     let mut queue = VecDeque::new();
+    let ui = program.ui();
+    ui.host_clip.on = clipboard_api();
+    let mut copied = ui.host_clip.copied;
     loop {
         let ui = program.ui();
+        share_clipboard(ui, &mut copied);
         ui.draw(&mut buf);
         let bytes = frame_bytes(&buf, mouse.pointer());
         show(&bytes);

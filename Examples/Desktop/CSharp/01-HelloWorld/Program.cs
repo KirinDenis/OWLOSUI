@@ -18,7 +18,7 @@
 //  * There are no callbacks. A button does not "have an OnClick"; it has a
 //    number, and `Run` hands that number back when the button is pressed.
 //    This is the classic DOS toolkits' design and it is what lets the same core sit
-//    behind a pipe today and behind a DOS interrupt later - a number crosses
+//    behind this pipe and behind a DOS interrupt, INT 60h - a number crosses
 //    both, a closure crosses neither.
 //
 //  * Handles are numbers too. `Window` returns a `ushort` and every other

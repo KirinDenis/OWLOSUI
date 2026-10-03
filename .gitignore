@@ -11,11 +11,13 @@ Examples/Desktop/CSharp/**/obj/
 # The browser module is a build artefact: Examples/Web/Rust/01-Linked/build.cmd makes it.
 Examples/Web/Rust/01-Linked/web/*.wasm
 
-# The DOS build: the flat binary and what a run leaves behind. The two
-# .COM files are tracked, like the sources they come from; the .BIN is
-# the Rust build, made by Examples/DOS/Rust/build.cmd.
+# The DOS build: what a run leaves behind. The programs are tracked - the
+# loader .COM files and the flat binaries they load, OWLOS.BIN, HELLO.BIN
+# and DEMO.BIN, which Examples/DOS/Rust/build.cmd makes - so that
+# DOS_Rust_Demo.cmd runs from a fresh clone without a nightly Rust, as
+# OWLOSRES.BIN does below. The screens a run dumps are .BIN too, and are
+# named here one by one.
 Examples/DOS/Rust/target/
-Examples/DOS/Rust/*.BIN
 Examples/DOS/Rust/*.LOG
 Examples/DOS/Rust/OWLOS.OUT
 Examples/DOS/Rust/TRACE.TXT

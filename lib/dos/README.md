@@ -84,6 +84,14 @@ F12 is the resident's own key: the screen into `SHOT.BIN` and `SHOT.TXT`,
 and onto the end of `SHOTS.TXT`, in the current folder. That is how the
 tests look at a program.
 
+Copy and Paste reach the computer's clipboard where DOS runs under
+something that has one: WinOldAp's INT 2Fh, AX 17xxh, which a DOS box
+under Windows answers, and DOSBox-X with `dos clipboard api=true` (every
+`RUNWIN.BAT` in the examples sets it). The resident asks once, before it
+starts the program, and keeps 16 KB below a megabyte for the text while
+it can still get them; the program writes nothing for it. On a DOS with
+nothing above it the core keeps its own clipboard.
+
 ## Running another program from one
 
 A program may run another - the commander does, on Enter - and the other
@@ -93,8 +101,10 @@ to DOS in text mode; then the program runs the other through DOS's EXEC,
 which finds the resident still there; then RESUME (0x64) brings text mode
 back - a game may have left graphics - and the first session, drawn. Asked
 to, RESUME first leaves what a plain DOS program printed on the screen until
-a key. In Pascal, `OwlRun(Path, Args, Pause)` is all of it; the program's
-`$M` must leave DOS the memory the other program needs.
+a key. In Pascal, `OwlRun(Path, Args, Pause)` is all of it, and in C
+`owl_run(path, args, pause)`; a Pascal program's `$M` must leave DOS the
+memory the other program needs, and `owl_run` gives a C program's freed far
+heap back to DOS before it starts the other.
 
 ## How it works
 
@@ -141,6 +151,15 @@ and they are named alike, so a program reads the same in all three:
 | a file panel | `call owl_files` - BX, DX, SI | `owl_files(win, 1, dir)` | `OwlFiles(Win, 1, Dir)` |
 | what it reports | `call owl_take_files` - AL | `owl_take_files(panel, text, n)` | `OwlTakeFiles(Panel, Text)` |
 | a file as text | `call owl_text_dos` | `owl_text_dos(win, bytes, n, 1)` | `OwlTextDos(Win, Buf, N, 1)` |
+| a console | `owl_op OP_CONSOLE` ... `OP_CONSOLE_WRITE` | `owl_console(win, 0); owl_console_write(c, "\33[31mred\33[0m\n")` | `OwlConsole(Win, 0); OwlConsoleWrite(C, #27'[31mred'#27'[0m'#10)` |
+| put a window away | `owl_op OP_MINIMIZE` | `owl_minimize(win)` | `OwlMinimize(Win)` |
+| another program | - | `owl_run(path, args, 1)` | `OwlRun(Path, Args, True)` |
+
+C and Pascal have the same calls, one for one - lists, input lines,
+progress bars, trees, the file panel's marks, running another program. The
+assembler file has a constant for every request of
+[PROTOCOL.md](../PROTOCOL.md), and routines for the ones that take work:
+waiting, the glyph table, a folder's listing, a file's text.
 
 The server reads no disks, on any platform: a program reads the folder
 and sends it. The bindings do that part through DOS - FindFirst and

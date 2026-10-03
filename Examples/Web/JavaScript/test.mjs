@@ -9,7 +9,7 @@
 // Exits 1 if any case failed. No test framework: a line per case.
 
 import { readFileSync } from 'node:fs';
-import { Wire, Owlosui } from '../../../lib/js/owlosui.js';
+import { Wire, Owlosui, Style } from '../../../lib/js/owlosui.js';
 import * as Hello from './01-HelloWorld/app.js';
 import * as Notes from './02-Notes/app.js';
 import * as Calc from './03-Calculator/app.js';
@@ -219,6 +219,56 @@ await test('Demo: Tools > Console shows what the page did, coloured, and gives i
   check(f.find('switching on'), 'a new line did not arrive', f);
   const text = o.getText(app.console.view);
   check(text.includes('something broke before anyone looked') && !text.includes('\x1b'), 'the text is not the record without its colours');
+});
+
+await test('A tree opens a lazy node by asking, a list gives its marks, a window can go without [\u2193]', async () => {
+  const o = await owl();
+  const w = o.window('Folders', 40, 12);
+  const t = o.tree(w, [{ text: 'C:', open: true, children: [{ text: 'DOS', lazy: true }, { text: 'GAMES' }] }]);
+  let f = o.frame();
+  check(f.find('DOS') && f.find('GAMES'), 'the tree is not drawn', f);
+  // Down to DOS, Right opens it: the lazy node is asked for, once.
+  o.press('ArrowDown');
+  o.press('ArrowRight');
+  const asked = o.treeExpand(t);
+  check(asked && asked.path.join() === '0,0' && asked.texts.join('\\') === 'C:\\DOS', `the wrong node was asked for: ${JSON.stringify(asked)}`);
+  check(o.treeExpand(t) === null, 'the same node was asked for twice');
+  o.treeChildren(t, asked.path, [{ text: 'UTILS' }]);
+  o.press('ArrowDown');
+  check(o.treePath(t).join('\\') === 'C:\\DOS\\UTILS', `the path is ${o.treePath(t).join('\\')}`);
+
+  const d = o.window('Pick', 30, 10, { style: Style.Dialog });
+  const l = o.list(d, 1, 1, 26, 5, ['one', 'two', 'three'], { multi: true });
+  o.focus(l);
+  o.press('Insert');
+  o.press('Insert');
+  check(o.marked(l).join() === '0,1', `marked: ${o.marked(l).join()}`);
+
+  const plain = o.window('Plain', 40, 6, { minimize: false });
+  check(!o.frame().find('[\u2193]'), 'a window made with minimize: false has a minimize box', o.frame());
+  o.close(plain);
+  o.window('With', 40, 6);
+  check(o.frame().find('[\u2193]'), 'an ordinary window has no minimize box', o.frame());
+});
+
+await test('A file of 200 KB opens whole, grows, and comes back to the last character', async () => {
+  // A request carries 64 KB; a lesson's source is three times that. The
+  // text goes in in pieces and comes out in parts, and a text that grew
+  // past 64 KB in the editor is read back whole - it used to come back as
+  // the few hundred bytes its wrapped length said, and Save wrote those.
+  const o = await owl();
+  const line = i => `        mov ax,${String(i).padStart(5)}    ; строка ${i}, \u{1F989} owl`;
+  const big = Array.from({ length: 4000 }, (_, i) => line(i)).join('\n');
+  check(new TextEncoder().encode(big).length > 180000, 'the text is not big enough to test anything');
+  const w = o.window('BIG.ASM', 60, 16);
+  const t = o.text(w, big);
+  check(o.getText(t) === big, 'the text did not come back as it went in');
+  check(o.syntax(t, 'BIG.ASM') === 'Assembler', 'not coloured as assembler');
+  o.press('End', { ctrl: true });
+  for (let i = 0; i < 300; i++) o.press('x');
+  check(o.getText(t) === big + 'x'.repeat(300), 'what was typed at the end is not all there');
+  o.setText(t, big + '\nreplaced');
+  check(o.getText(t) === big + '\nreplaced', 'setText of a big text did not keep all of it');
 });
 
 await test('Demo: an editor brings an Edit menu the core answers - Word wrap, Find', async () => {

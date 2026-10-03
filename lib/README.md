@@ -78,6 +78,78 @@ An editor that offers nothing - the default - leaves both bars alone, and
 the primitives underneath (`FIND`, `REPLACE`, `SET_READONLY`) are still
 there for a program that builds its own.
 
+## The mouse and the clipboard
+
+What the core does by itself, in every client, with nothing to write:
+dragging with the left button selects in a text or a console, and scrolls
+when the pointer goes past the edge; a right click over a text opens Undo,
+Cut, Copy, Paste and Select all at the pointer (what cannot be done greyed
+out), over a console Copy and Select all; the wheel scrolls whatever is
+under the pointer - a text, a list or a tree in a dialog, a console - and
+moves a file panel's cursor; a list's or a tree's own bar answers its
+arrows, its track and its marker. The wheel and the bar move the view and
+leave the cursor on its item, until a key or a click moves it.
+
+The clipboard is the core's, one for every view. A client that has a
+clipboard of its own shares it with `CLIPBOARD` (0x69-0x6B): what the core
+copies goes out, and a Paste waits for the computer's clipboard to come in.
+The page's `run()` does it with the browser's clipboard, and the C#
+client's `Run` on a console with Windows' (`ShareClipboard`); a program
+with its own loop calls `clipboard` / `ClipboardState` after each input.
+The native window (`window/`) shares Windows' clipboard by itself, so a
+C# program in a window and a Rust program in one have it with nothing to
+call. So does DOS, where it runs under something that has a clipboard:
+OWLOSRES and the Rust machine layer ask WinOldAp's INT 2Fh (AX 17xxh),
+which a DOS box under Windows answers, and DOSBox-X with
+`dos clipboard api=true` - every `RUNWIN.BAT` here sets it. The text goes
+in the card's code page. A plain DOS, and the page's DOS, keep the core's.
+
+## Windows
+
+The top edge carries minimize `[↓]`, zoom `[↑]` and close `[■]` together at
+the right, the close box in the corner. Minimize puts a window into a bar in
+the bottom right corner, the bars stacking upwards; a click on a bar, or
+activating the window, brings it back. A modal window has no minimize box,
+nor has one without a shadow (a commander's panel), nor one made without it:
+
+```
+Rust        window.minimizable = false
+C#          owl.Window(..., minimize: false)
+JavaScript  owl.window(..., { minimize: false })
+C           flags | OWL_NO_MINIMIZE
+Pascal      Flags or OwlNoMinimize
+assembler   WF_NO_MINIMIZE
+```
+
+`MINIMIZE` (`minimize`, `Minimize`, `owl_minimize`, `OwlMinimize`) does it
+from a program. A window's colours are one of four families: blue for
+documents, cyan for help, grey for dialogs, and black for a terminal - a
+console's window, its frame the colour of what is in it (`Style.Terminal`,
+`OWL_BLACK`, `OwlBlack`, `WF_BLACK`). `SET_TAG` puts a word after the title
+as `[modal]` is, `SET_INDICATOR` words at the right of the status line,
+`PLACE` says where a window's inside is and whether anything covers it.
+
+## The console
+
+A view for text that keeps arriving - a log: `CONSOLE` makes one filling
+its window, `CONSOLE_WRITE` adds text at its end, and the ANSI sequences in
+the text colour it (SGR, the 256 and 24-bit colours folded onto the
+sixteen, carriage return, tab, erase-line, clear). It keeps a scrollback,
+folds long lines, follows the newest one until scrolled back, and gives its
+record back plain through `GET_TEXT`. In the clients: `console` /
+`consoleWrite`, `ConsoleView` / `ConsoleWrite`, `owl_console` /
+`owl_console_write`, `OwlConsole` / `OwlConsoleWrite`. The web demo's
+Tools > Console is one.
+
+## Big texts
+
+A request and a reply carry 65535 bytes each. A text bigger than that goes
+in parts - `TEXT` or `SET_TEXT` with the first, `TEXT_APPEND` with the rest
+- and comes back in parts with `GET_TEXT_PART`; the JavaScript and C#
+clients do both by themselves, so `text`, `setText` and `getText` take a
+file of any size. A reply that would be longer than a reply can be is an
+error, never a length that wrapped round.
+
 ## Building
 
 From the repository root, with [Rust](https://rustup.rs):
