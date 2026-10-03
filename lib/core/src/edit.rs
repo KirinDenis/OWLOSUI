@@ -71,6 +71,11 @@ pub mod state {
     pub const POSITION: u8 = 64;
 }
 
+/// The most lines whose rows a folding view counts for its scroll bar
+/// (`TextView::row_counts`): every frame folds them all, which is nothing
+/// for a page of text and too much for a long file.
+pub const ROWS_COUNTED: usize = 2000;
+
 /// Where each row of a line starts when it is folded at `width`.
 ///
 /// A row ends after the last space that fits, so a word is not cut in two;
@@ -323,6 +328,40 @@ impl TextView {
             }
         }
         self.at_row(at.0, at.1, col)
+    }
+
+    /// The rows of the whole folded text, and the row the view starts on,
+    /// for the scroll bar - when that is cheap: up to `ROWS_COUNTED` lines.
+    /// Counted by lines, one long line folded into ten rows was one line,
+    /// and the bar said there was nothing to scroll; past the limit the bar
+    /// counts lines again, and no key ever counts rows.
+    pub fn row_counts(&self) -> Option<(i16, i16)> {
+        if !self.wrapping() || self.lines.len() > ROWS_COUNTED {
+            return None;
+        }
+        let (top, top_row) = self.first_row();
+        let (mut total, mut at) = (0i32, 0i32);
+        for y in 0..self.lines.len() {
+            if y as i16 == top {
+                at = total + top_row as i32;
+            }
+            total += self.rows_of(y as i16).len() as i32;
+        }
+        Some((total.min(i16::MAX as i32) as i16, at as i16))
+    }
+
+    /// Row `n` of the whole folded text, as (line, row within it).
+    pub fn row_named(&self, n: i16) -> (i16, i16) {
+        let mut left = n.max(0) as i32;
+        for y in 0..self.lines.len() {
+            let rows = self.rows_of(y as i16).len() as i32;
+            if left < rows {
+                return (y as i16, left as i16);
+            }
+            left -= rows;
+        }
+        let last = self.last_line();
+        (last, self.rows_of(last).len() as i16 - 1)
     }
 
     /// Scroll a folding view by rows; it stops with the last row showing.

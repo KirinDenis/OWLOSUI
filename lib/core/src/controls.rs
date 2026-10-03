@@ -160,6 +160,12 @@ impl ListBox {
     /// The view by `delta` rows, the cursor left where it is.
     pub fn scroll(&mut self, delta: i16) {
         let max = (self.items.len() as i16 - self.rows).max(0);
+        // Everything is showing: there is nothing to scroll, and a wheel
+        // that did nothing would look broken. It moves the cursor instead,
+        // one item a notch, as the arrow keys do.
+        if max == 0 {
+            return self.step(delta.signum());
+        }
         self.top = (self.top.saturating_add(delta)).clamp(0, max);
         self.scrolled_at = Some(self.current);
     }
@@ -235,13 +241,30 @@ impl ListBox {
 /// and a dialog that cannot say so is a dialog people cancel.
 pub struct StaticText {
     pub text: String,
+    /// The first line shown: words longer than their box scroll with the
+    /// wheel, and an arrow in the last column says there is more.
+    pub top: i16,
 }
 
 impl StaticText {
     pub fn new(text: &str) -> Self {
         StaticText {
             text: text.to_string(),
+            top: 0,
         }
+    }
+
+    /// New words, read from their first line.
+    pub fn set_text(&mut self, text: &str) {
+        self.text = text.to_string();
+        self.top = 0;
+    }
+
+    /// The wheel: `delta` lines, within the words broken to `width` and a
+    /// box `rows` high.
+    pub fn scroll(&mut self, delta: i16, width: i16, rows: i16) {
+        let max = (self.lines(width).len() as i16 - rows).max(0);
+        self.top = (self.top + delta).clamp(0, max);
     }
 
     /// Broken to a width, keeping words whole.

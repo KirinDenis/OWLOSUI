@@ -114,3 +114,67 @@ fn the_wheel_scrolls_a_tree_and_moves_a_file_panels_cursor() {
         _ => unreachable!(),
     }
 }
+
+#[test]
+fn the_wheel_moves_the_cursor_of_a_list_that_shows_everything() {
+    // The pilot's "What to see": eight choices in a list eight rows high.
+    // Nothing to scroll, and a wheel that did nothing looked broken.
+    let mut ui = Ui::new(80, 25);
+    let root = ui.root();
+    let w = ui.insert(root, Rect::new(0, 0, 40, 12), Kind::Window(Window::new("Pick")));
+    let l = ui.insert(w, Rect::new(1, 1, 20, 5), Kind::List(ListBox::new(&["one", "two", "three"])));
+    ui.set_dock(l, Dock::Manual);
+    ui.activate(w);
+    frame(&mut ui);
+    mouse(&mut ui, 5, 3, MouseKind::ScrollDown);
+    mouse(&mut ui, 5, 3, MouseKind::ScrollDown);
+    assert_eq!(list_of(&ui, l), (0, 2), "the wheel did not move the cursor");
+    mouse(&mut ui, 5, 3, MouseKind::ScrollUp);
+    assert_eq!(list_of(&ui, l).1, 1);
+}
+
+#[test]
+fn words_longer_than_their_box_scroll_with_the_wheel_and_say_so() {
+    let mut ui = Ui::new(80, 25);
+    let root = ui.root();
+    let w = ui.insert(root, Rect::new(0, 0, 30, 8), Kind::Window(Window::new("About")));
+    let s = ui.insert(w, Rect::new(1, 1, 20, 2), Kind::Static(owlosui_core::StaticText::new("one two three four five six seven eight nine ten eleven twelve")));
+    ui.set_dock(s, Dock::Manual);
+    ui.activate(w);
+    let mut b = Buffer::new(80, 25);
+    ui.draw(&mut b);
+    // Its cells are (2,2)..(21,3): the last column says there is more below.
+    assert_eq!(b.get(21, 3).unwrap().to_char(), '\u{1F}', "no arrow saying there is more");
+    let first = |b: &Buffer| (2..21).map(|x| b.get(x, 2).unwrap().to_char()).collect::<String>();
+    let before = first(&b);
+    mouse(&mut ui, 5, 2, MouseKind::ScrollDown);
+    let mut b = Buffer::new(80, 25);
+    ui.draw(&mut b);
+    assert_ne!(first(&b), before, "the wheel did not scroll the words");
+    assert_eq!(b.get(21, 2).unwrap().to_char(), '\u{1E}', "no arrow saying there is more above");
+}
+
+#[test]
+fn folded_text_gets_a_bar_that_counts_rows() {
+    // One long line, folded into many rows in a small window: counted by
+    // lines it was one line, and there was no bar at all.
+    let mut ui = Ui::new(80, 25);
+    let root = ui.root();
+    let w = ui.insert(root, Rect::new(0, 0, 20, 8), Kind::Window(Window::new("Notes")));
+    let line = owlosui_core::cell::glyphs(&"word ".repeat(40));
+    let t = ui.insert(w, Rect::default(), Kind::Text(owlosui_core::TextView::new(vec![line])));
+    ui.activate(w);
+    ui.set_editor(t, 0, owlosui_core::edit::state::WRAP);
+    let mut b = Buffer::new(80, 25);
+    ui.draw(&mut b);
+    // Inside 18 by 6; the bar in column 19, its arrows at rows 1 and 6.
+    assert_eq!(b.get(19, 1).unwrap().to_char(), '\u{1E}', "no bar on folded text");
+    assert_eq!(b.get(19, 6).unwrap().to_char(), '\u{1F}');
+    // Its down arrow scrolls a row.
+    mouse(&mut ui, 19, 6, MouseKind::Down(Button::Left));
+    mouse(&mut ui, 19, 6, MouseKind::Up(Button::Left));
+    match ui.kind(t) {
+        Kind::Text(t) => assert_eq!((t.top, t.top_row), (0, 1), "the arrow did not scroll one row"),
+        _ => unreachable!(),
+    }
+}

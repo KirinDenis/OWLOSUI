@@ -99,6 +99,10 @@ impl TreeView {
     /// The view by `delta` rows, the cursor left where it is.
     pub fn scroll(&mut self, delta: i16) {
         let max = (self.flatten().len() as i16 - self.rows).max(0);
+        // Everything is showing: the wheel moves the cursor, as in a list.
+        if max == 0 {
+            return self.step(delta.signum());
+        }
         self.top = (self.top.saturating_add(delta)).clamp(0, max);
         self.scrolled_at = Some(self.current);
     }

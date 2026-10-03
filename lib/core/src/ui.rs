@@ -3443,10 +3443,13 @@ impl Ui {
         // panel's width holds. For text that is characters and for a file
         // panel it is whole columns, which is why it cannot just be `inner.w`.
         let (top, rows, left, cols, hpage) = match &self.nodes[tid.ix()].kind {
-            // Folded text has nothing to scroll sideways, and its vertical
-            // bar counts lines, not rows: counting rows would mean folding
-            // the whole text on every frame to place one square.
-            Kind::Text(t) if t.wrapping() => (t.top, t.line_count(), 0, 0, inner.w),
+            // Folded text has nothing to scroll sideways. Its vertical bar
+            // counts rows while the text is short enough to fold whole on
+            // every frame (`row_counts`), and lines past that.
+            Kind::Text(t) if t.wrapping() => match t.row_counts() {
+                Some((total, top)) => (top, total, 0, 0, inner.w),
+                None => (t.top, t.line_count(), 0, 0, inner.w),
+            },
             Kind::Text(t) => (t.top, t.line_count(), t.left, t.longest(), inner.w),
             Kind::Html(h) => (h.top, h.line_count(), 0, 0, inner.w),
             // Folded to its width, like a help page: nothing sideways.
@@ -3784,11 +3787,18 @@ impl Ui {
         // colour everywhere, a caption on a blue window was a grey bar.
         let a = wc.text;
         buf.fill(abs, b' ', a, clip);
-        for (i, line) in t.lines(abs.w).iter().enumerate() {
-            if i as i16 >= abs.h {
-                break;
-            }
+        let lines = t.lines(abs.w);
+        let top = t.top.clamp(0, (lines.len() as i16 - abs.h).max(0));
+        for (i, line) in lines.iter().skip(top as usize).take(abs.h.max(0) as usize).enumerate() {
             buf.text(abs.x, abs.y + i as i16, line, a, clip);
+        }
+        // More than the box holds: an arrow in the last column at the end
+        // that goes on, and the wheel scrolls it.
+        if top > 0 {
+            buf.put(abs.right() - 1, abs.y, 0x1Eu8, a, clip);
+        }
+        if (lines.len() as i16 - top) > abs.h {
+            buf.put(abs.right() - 1, abs.bottom() - 1, 0x1Fu8, a, clip);
         }
     }
 
@@ -4633,7 +4643,7 @@ impl Ui {
             return 0;
         };
         match (&self.nodes[tid.ix()].kind, axis) {
-            (Kind::Text(t), Axis::Vertical) => t.top,
+            (Kind::Text(t), Axis::Vertical) => t.row_counts().map_or(t.top, |(_, top)| top),
             (Kind::Text(t), Axis::Horizontal) => t.left,
             (Kind::Html(h), Axis::Vertical) => h.top,
             (Kind::Console(c), Axis::Vertical) => c.top,
@@ -4680,12 +4690,20 @@ impl Ui {
             return;
         };
         match axis {
-            // The bar of folded text counts lines: the square is on a line
-            // and the view starts at that line's first row.
-            Axis::Vertical if t.wrapping() => {
-                t.top = pos.clamp(0, (t.line_count() - 1).max(0));
-                t.top_row = 0;
-            }
+            // The bar of folded text counts rows while it can, and stops
+            // with the last row at the bottom; past that it counts lines,
+            // the square on a line and the view at its first row.
+            Axis::Vertical if t.wrapping() => match t.row_counts() {
+                Some((total, _)) => {
+                    let (y, r) = t.row_named(pos.clamp(0, (total - page).max(0)));
+                    t.top = y;
+                    t.top_row = r;
+                }
+                None => {
+                    t.top = pos.clamp(0, (t.line_count() - 1).max(0));
+                    t.top_row = 0;
+                }
+            },
             Axis::Horizontal if t.wrapping() => {}
             Axis::Vertical => {
                 let max = (t.line_count() - page).max(0);
@@ -4770,13 +4788,16 @@ impl Ui {
             matches!(
                 self.nodes[c.ix()].kind,
                 Kind::List(_) | Kind::Tree(_) | Kind::Text(_) | Kind::Console(_) | Kind::Html(_) | Kind::Hex(_) | Kind::Files(_)
+                    | Kind::Static(_)
             ) && self.abs_rect(*c).contains(p)
         });
         let Some(target) = under.or_else(|| self.nodes[id.ix()].children.first().copied()) else {
             return;
         };
-        let page = self.abs_rect(target).h;
+        let r = self.abs_rect(target);
+        let page = r.h;
         match &mut self.nodes[target.ix()].kind {
+            Kind::Static(s) => s.scroll(delta, r.w, r.h),
             Kind::Text(t) if t.wrapping() => t.scroll_rows(delta, page),
             Kind::Text(t) => {
                 let max = (t.lines.len() as i16 - page).max(0);

@@ -1586,7 +1586,7 @@ impl Server {
                 let lines = lines_of(&mut self.cp, &text);
                 let id = self.alive(id)?;
                 match self.ui()?.kind_mut(id) {
-                    Kind::Static(t) => t.text = core,
+                    Kind::Static(t) => t.set_text(&core),
                     Kind::Input(i) => i.set_text(&core),
                     // A window's title: a commander's panel says in it which
                     // folder it is showing, and changes it as it goes.
