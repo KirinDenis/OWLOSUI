@@ -158,3 +158,22 @@ fn a_windows_key_takes_the_place_of_the_programs_same_key() {
     ui.handle(Event::Key(f3));
     assert_eq!(ui.take_command(), Some(CM_OPEN));
 }
+
+#[test]
+fn into_a_menu_with_lines_they_go_above_the_last_one() {
+    // File: New, Open, a line, Exit. An editor's Save belongs above Exit,
+    // set apart from it as Exit is set apart from the rest - not under it.
+    use owlosui_core::menu::merge_items;
+    let base = vec![MenuItem::sub(
+        "~F~ile",
+        vec![MenuItem::new("~N~ew", "", 1), MenuItem::new("~O~pen", "", 2), MenuItem::line(), MenuItem::new("E~x~it", "", 3)],
+    )];
+    let extra = vec![MenuItem::sub("~F~ile", vec![MenuItem::new("~S~ave", "F2", 4)])];
+    let merged = merge_items(&base, &extra);
+    let file: Vec<(bool, u16)> = merged[0].items.iter().map(|i| (i.separator, i.cmd)).collect();
+    assert_eq!(file, vec![(false, 1), (false, 2), (true, 0), (false, 4), (true, 0), (false, 3)]);
+    // A menu with no line takes them at its end, after one, as before.
+    let merged = merge_items(&[MenuItem::sub("~F~ile", vec![MenuItem::new("~N~ew", "", 1)])], &extra);
+    let file: Vec<(bool, u16)> = merged[0].items.iter().map(|i| (i.separator, i.cmd)).collect();
+    assert_eq!(file, vec![(false, 1), (true, 0), (false, 4)]);
+}

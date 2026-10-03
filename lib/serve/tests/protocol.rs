@@ -1558,3 +1558,24 @@ fn a_text_bigger_than_a_request_goes_in_and_comes_out_in_parts() {
     }
     assert_eq!(String::from_utf8(back).unwrap(), whole);
 }
+
+#[test]
+fn a_file_opened_as_bytes_comes_back_byte_for_byte() {
+    // Every byte as the character code page 437 draws for it - below 128
+    // the byte itself, so 0 is U+0000 - and GET_TEXT_BYTES gives the bytes
+    // back: 0 stays 0, where GET_TEXT would make it a space like 20h, and
+    // FFh stays FFh.
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(80), i16(25)].concat());
+    let win = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 60, 16), vec![0], s("BYTES.BIN")].concat()));
+    let g = c.ok(0x42, &[]);
+    let table: Vec<char> =
+        (0..256).map(|i| char::from_u32(u16::from_le_bytes([g[3 + i * 2], g[4 + i * 2]]) as u32).unwrap()).collect();
+    let text: String = (0..=255u8).map(|b| if b < 128 { b as char } else { table[b as usize] }).collect();
+    let t = id_of(&c.ok(0x11, &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s(&text)].concat()));
+    let r = c.ok(0x6F, &[u16(t).to_vec(), 0u32.to_le_bytes().to_vec()].concat());
+    let total = u32::from_le_bytes([r[0], r[1], r[2], r[3]]) as usize;
+    let n = u16::from_le_bytes([r[4], r[5]]) as usize;
+    assert_eq!((total, n), (256, 256));
+    assert_eq!(r[6..6 + n].to_vec(), (0..=255u8).collect::<Vec<_>>());
+}

@@ -43,7 +43,7 @@ import { BrowserStorage, split } from '../../../../lib/js/files/browser.js';
 import { ServerFolder } from '../../../../lib/js/files/server.js';
 import { WebDavFolder } from '../../../../lib/js/files/webdav.js';
 import { Repository } from '../../../../lib/js/files/repository.js';
-import { CommanderTool } from './commander.js';
+import { CommanderTool, binary } from './commander.js';
 import { DosTool, DosCm } from './dos.js';
 import { Welcome } from './welcome.js';
 import { ConsoleWindow } from './console.js';
@@ -74,6 +74,7 @@ export const CmAbout = 40, CmHelp = 41, CmWelcome = 42, CmConsole = 43;
 export const CmOk = 60, CmCancel = 61, CmDismiss = 62;
 export const CmOpenBrowser = 50, CmOpenServer = 51, CmOpenDav = 52, CmSave = 53;
 export const CmFileOpen = 54, CmFileCancel = 55, CmDavConnect = 56, CmDavCancel = 57;
+export const CmSaveAsBrowser = 64, CmSaveAsServer = 65, CmSaveAsDav = 66, CmSaveAsOk = 67, CmReplace = 68, CmKeep = 69;
 
 export class App {
   constructor(owl) {
@@ -135,7 +136,9 @@ export class App {
             hint: 'Examples/Web/files on the computer running RUN.CMD' },
           { label: 'A ~W~ebDAV folder...', cmd: CmOpenDav,
             hint: 'A folder shared the way a NAS or Nextcloud shares one; RUN.CMD shares one too' }),
-        { label: '~S~ave', cmd: CmSave, shortcut: 'F2', hint: 'The file in front, back where it came from' },
+        // Save and Save as are not here: an editor window brings them, above
+        // Exit, while it is in front (addDoc). With no file in front there
+        // is nothing to save, and the menu does not offer it.
         line(),
         { label: 'E~x~it', cmd: CmExit, shortcut: 'Alt+X', hint: 'Leave the program' }),
       sub('~T~ools',
@@ -169,7 +172,6 @@ export class App {
     );
     owl.statusLine(
       { label: '~F1~ Help', cmd: CmHelp, key: 'F1' },
-      { label: '~F2~ Save', cmd: CmSave, key: 'F2' },
       { label: '~F3~ New', cmd: CmNew, key: 'F3' },
       { label: '~F5~ Zoom', cmd: CmZoom, key: 'F5' },
       { label: '~F6~ Next', cmd: CmNext, key: 'F6' },
@@ -289,28 +291,47 @@ export class App {
       "F2 saves it in this browser's storage.\n", null, null);
   }
 
-  /** An editor window for a file; `source` and `path` say where Save puts it back. */
+  /**
+   * An editor window for a file; `source` and `path` say where Save puts it
+   * back. `text` is a string, or the file's bytes: a program, a picture,
+   * anything that is not a text opens as its bytes, one glyph each, as a
+   * DOS editor opened one - garbage on the screen, Edit > Hex view to see
+   * the numbers - and is saved back byte for byte.
+   */
   addDoc(name, text, source, path, { readOnly = false } = {}) {
+    const owl = this.owl;
     const n = this.editors.length + 1;
-    const title = source ? `${name} - ${source.title}` : name;
-    const w = this.owl.window(title, 60, 16, { x: 2 + (n % 8), y: 1 + (n % 8), closeCmd: CmClose });
+    const w = owl.window(this.docTitle(name, source), 60, 16, { x: 2 + (n % 8), y: 1 + (n % 8), closeCmd: CmClose });
+    const binary = text instanceof Uint8Array;
     // A DOS or Windows file ends its lines with CR LF. The editor wants LF
     // alone - a CR would show as a glyph - so the CRs come off here and go
     // back on in save(), and the file keeps the line ends it came with.
-    const crlf = text.includes('\r\n');
-    const t = this.owl.text(w, crlf ? text.replace(/\r\n/g, '\n') : text);
+    // A file opened as bytes keeps its CRs: they are bytes like the others.
+    const crlf = !binary && text.includes('\r\n');
+    const t = owl.text(w, binary ? owl.textOfBytes(text) : crlf ? text.replace(/\r\n/g, '\n') : text);
     // Everything the editor has, on an Edit menu of its own while this
     // window is in front: Find, Replace, Word wrap, Read only, Hex view,
     // Classic keys. The core runs all of it; nothing comes back here.
-    this.owl.editor(t, Offer.All, { readOnly });
+    owl.editor(t, Offer.All, { readOnly });
     // Coloured as its language, which its name says: DEMO.PAS is Pascal.
     // A name no language answers to stays plain, and Edit > Syntax can
     // still choose one.
-    this.owl.syntax(t, name);
+    if (!binary) owl.syntax(t, name);
+    // Save and Save as, on the File menu above Exit and F2 on the status
+    // line, while this window is in front - and only then.
+    owl.windowMenu(w, sub('~F~ile',
+      { label: '~S~ave', cmd: CmSave, shortcut: 'F2', hint: 'This file, back where it came from' },
+      sub('Save ~a~s',
+        { label: "~T~his browser's storage...", cmd: CmSaveAsBrowser, hint: 'Under a name and in a folder you choose, in this browser' },
+        { label: "The ~s~erver's folder...", cmd: CmSaveAsServer, hint: 'Into Examples/Web/files on the computer running RUN.CMD' },
+        { label: 'A ~W~ebDAV folder...', cmd: CmSaveAsDav, hint: 'Into a folder shared the way a NAS or Nextcloud shares one' })));
+    owl.windowStatus(w, { label: '~F2~ Save', cmd: CmSave, key: 'F2' });
     this.editors.push(w);
-    this.docs.set(w, { text: t, source, path, name, crlf });
+    this.docs.set(w, { text: t, source, path, name, crlf, binary });
     return w;
   }
+
+  docTitle(name, source) { return source ? `${name} - ${source.title}` : name; }
 
   // ---------------------------------------------------------------- files
   //
@@ -324,18 +345,31 @@ export class App {
     return this.pending;
   }
 
-  /** File > Open from: the Open dialog, the source explained above the panel. */
-  openFrom(source) {
+  /**
+   * File > Open from: the Open dialog, the source explained above the
+   * panel. With `saveAs`, File > Save as: the same dialog, walking the
+   * folders, with a line for the name the file in front is saved under.
+   */
+  openFrom(source, saveAs = null) {
     const owl = this.owl;
     this.closeOpen();
-    const d = owl.window(`Open - ${source.title}`, 72, 21, { style: Style.ModalDialog, closeCmd: CmFileCancel });
+    const d = owl.window(`${saveAs ? 'Save as' : 'Open'} - ${source.title}`, 72, saveAs ? 23 : 21,
+      { style: Style.ModalDialog, closeCmd: CmFileCancel });
     // The panel first: the core gives a window's keys to a file panel only
     // when it is the window's first part. The words about the source go in
     // the rows it leaves free above itself.
-    const panel = owl.files(d, `${source.prefix}/*.*`, [], { top: 3 });
+    const panel = owl.files(d, `${source.prefix}/*.*`, [], { top: saveAs ? 5 : 3 });
     owl.staticText(d, 2, 1, source.about, 66, 2);
-    owl.buttons(d, { label: '~O~pen', cmd: CmFileOpen, default: true }, { label: '~C~ancel', cmd: CmFileCancel, cancel: true });
-    this.open = { dialog: d, panel, source, dir: '/', entries: [] };
+    let name = 0;
+    if (saveAs) {
+      // Between the words and the panel: a name chosen in the panel goes
+      // here, and Save writes into the folder the panel shows.
+      name = owl.input(d, 2, 3, 50, 'File name', saveAs.name);
+      owl.buttons(d, { label: '~S~ave', cmd: CmSaveAsOk, default: true }, { label: '~C~ancel', cmd: CmFileCancel, cancel: true });
+    } else {
+      owl.buttons(d, { label: '~O~pen', cmd: CmFileOpen, default: true }, { label: '~C~ancel', cmd: CmFileCancel, cancel: true });
+    }
+    this.open = { dialog: d, panel, source, dir: '/', entries: [], saveAs, name };
     return this.track(this.showFolder('/'));
   }
 
@@ -360,14 +394,22 @@ export class App {
     }
   }
 
-  /** A file into an editor window; the dialog closes. */
+  /**
+   * A file into an editor window; the dialog closes. Read as bytes: a text
+   * opens as text, anything else as its bytes (addDoc). In Save as, a file
+   * chosen in the panel is the name to save under instead.
+   */
   async openFile(path) {
     const o = this.open;
     if (!o) return;
+    if (o.saveAs) {
+      this.owl.setText(o.name, split(path).name);
+      return this.saveAsHere();
+    }
     try {
-      const text = await o.source.read(path);
+      const bytes = await o.source.readBytes(path);
       this.closeOpen();
-      this.addDoc(split(path).name, text, o.source, path);
+      this.addDoc(split(path).name, binary(bytes) ? bytes : new TextDecoder().decode(bytes), o.source, path);
     } catch (e) {
       if (this.open === o) this.owl.filesError(o.panel, e.message);
     }
@@ -399,28 +441,92 @@ export class App {
     return p.endsWith('/') ? this.track(this.showFolder(p)) : this.track(this.openFile(p));
   }
 
-  /** File > Save: back where it came from; a new file goes to this browser's storage. */
-  save() {
-    const doc = this.docs.get(this.owl.active());
-    if (!doc) {
-      this.tell('Save', 'The window in front is not a file. Open one with File > Open from, or make one with File > New.');
-      return null;
-    }
+  /** What a document holds, as the file will have it: its text with its own line ends, or its bytes. */
+  contentOf(doc) {
+    if (doc.binary) return this.owl.getTextBytes(doc.text);
     const typed = this.owl.getText(doc.text);
-    const text = doc.crlf ? typed.replace(/\r?\n/g, '\r\n') : typed;
+    return doc.crlf ? typed.replace(/\r?\n/g, '\r\n') : typed;
+  }
+
+  /**
+   * File > Save (F2): back where it came from; a new file goes to this
+   * browser's storage. Only an editor's window offers it, so there is
+   * always a file in front - the check is for a program that calls this.
+   */
+  save() {
+    const w = this.owl.active();
+    const doc = this.docs.get(w);
+    if (!doc) return null;
     if (!doc.source) {
       doc.source = this.browser;
       doc.path = `/${doc.name}`;
+      this.owl.setText(w, this.docTitle(doc.name, doc.source));
     }
+    const content = this.contentOf(doc);
     return this.track((async () => {
-      await doc.source.write(doc.path, text);
+      await doc.source.write(doc.path, content);
       this.tell('Saved', `${doc.name} is saved in ${doc.source.title}, as ${doc.path}. File > Open from finds it there.`);
     })());
   }
 
+  /** File > Save as: the dialog over a source, for the file in front. */
+  saveAs(source) {
+    const w = this.owl.active();
+    const doc = this.docs.get(w);
+    if (!doc) return null;
+    return this.openFrom(source, { window: w, name: doc.name });
+  }
+
+  /**
+   * Save in the Save as dialog: the name typed, in the folder the panel
+   * shows. A name already there is asked about first; a folder's name is
+   * walked into, as Enter on it would.
+   */
+  saveAsHere(replace = false) {
+    const o = this.open;
+    if (!o?.saveAs || o.saving || (o.asking && !replace)) return null;
+    o.asking = false;
+    const name = this.owl.getText(o.name).trim();
+    if (!name || /[\\:*?"<>|]/.test(name)) {
+      this.owl.filesError(o.panel, name ? `"${name}" cannot be a file's name.` : 'Type a name to save under.');
+      return null;
+    }
+    if (name.includes('/')) return this.typed(name);
+    const there = o.entries.find(e => e.name.toLowerCase() === name.toLowerCase());
+    if (there?.dir) return this.track(this.showFolder(`${o.dir}${there.name}/`));
+    if (there && !replace) {
+      o.asking = true;
+      this.box = this.owl.messageBox('Save as', `${there.name} is already in ${o.source.title}${o.dir}. Replace it?`,
+        { label: '~R~eplace', cmd: CmReplace }, { label: '~K~eep it', cmd: CmKeep, default: true, cancel: true });
+      return null;
+    }
+    const doc = this.docs.get(o.saveAs.window);
+    if (!doc) { this.closeOpen(); return null; }
+    const path = `${o.dir}${there?.name ?? name}`;
+    const content = this.contentOf(doc);
+    o.saving = true;
+    return this.track((async () => {
+      try {
+        await o.source.write(path, content);
+      } catch (e) {
+        o.saving = false;
+        if (this.open === o) this.owl.filesError(o.panel, e.message);
+        return;
+      }
+      this.closeOpen();
+      // From now on the window is that file: Save goes there, and the
+      // title says so.
+      Object.assign(doc, { source: o.source, path, name: split(path).name });
+      this.owl.setText(o.saveAs.window, this.docTitle(doc.name, doc.source));
+      if (!doc.binary) this.owl.syntax(doc.text, doc.name);
+      this.tell('Saved', `${doc.name} is saved in ${doc.source.title}, as ${path}.`);
+    })());
+  }
+
   /** File > Open from > A WebDAV folder: where the share is, first. */
-  davAsk() {
+  davAsk(forSave = false) {
     const owl = this.owl;
+    this.davForSave = forSave;
     if (this.dav) { owl.activate(this.dav.dialog); return; }
     const d = owl.window('A WebDAV folder', 68, 16, { style: Style.ModalDialog, closeCmd: CmDavCancel });
     owl.staticText(d, 2, 1, 'WebDAV is how NAS boxes, Nextcloud and many servers share folders. The address ' +
@@ -443,8 +549,9 @@ export class App {
   davConnect() {
     const v = id => this.owl.getText(id).trim();
     const source = new WebDavFolder(v(this.dav.url), { user: v(this.dav.user), password: v(this.dav.password) });
+    const forSave = this.davForSave;
     this.closeDav();
-    return this.openFrom(source);
+    return forSave ? this.saveAs(source) : this.openFrom(source);
   }
 
   showOptions() {
@@ -493,6 +600,22 @@ export class App {
       case CmDavConnect: this.davConnect(); return true;
       case CmDavCancel: this.closeDav(); return true;
       case CmSave: this.save(); return true;
+      case CmSaveAsBrowser: this.saveAs(this.browser); return true;
+      case CmSaveAsServer: this.saveAs(new ServerFolder()); return true;
+      case CmSaveAsDav: this.davAsk(true); return true;
+      case CmSaveAsOk: {
+        // Enter on a name in the panel presses Save too, and before the
+        // panel's own report is collected: take that first, so the name
+        // under the cursor is the one saved to, not the one in the line.
+        const o = this.open;
+        const { kind, text } = o ? owl.takeFiles(o.panel) : { kind: 0 };
+        if (kind === 1) this.chosen(text);
+        else if (kind === 2) this.typed(text);
+        else this.saveAsHere();
+        return true;
+      }
+      case CmReplace: this.closeBox(); this.saveAsHere(true); return true;
+      case CmKeep: this.closeBox(); if (this.open) this.open.asking = false; return true;
       case CmFileCancel: this.closeOpen(); return true;
       case CmFileOpen: {
         // The Open button: whatever is under the cursor.

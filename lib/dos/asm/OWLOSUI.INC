@@ -131,6 +131,7 @@ OP_CLIPBOARD_PASTE = 6Bh
 OP_MINIMIZE     = 6Ch           ; id: into a bar in the bottom right corner
 OP_TEXT_APPEND  = 6Dh           ; id, str: more text at the end of a TEXT
 OP_GET_TEXT_PART = 6Eh          ; id, from: u32 -> total: u32, str
+OP_GET_TEXT_BYTES = 6Fh         ; id, from: u32 -> total: u32, n: u16, n bytes
 
 ; ---- what an editor offers (owl_editor): the core then runs each by itself --
 OFFER_EDIT      = 01h           ; Undo, Redo, Cut, Copy, Paste, Select all

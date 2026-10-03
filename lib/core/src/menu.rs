@@ -261,9 +261,14 @@ impl MenuBox {
 /// design exists to avoid.
 /// The application's menus with a window's items folded in. A window
 /// item that is a submenu with the same name as one on the bar (`~E~dit`
-/// and `Edit` are the same name) goes INTO that menu, after a line; any
-/// other goes on the end of the bar. So a window puts "Edit / view"
+/// and `Edit` are the same name) goes INTO that menu, set off by a line;
+/// any other goes on the end of the bar. So a window puts "Edit / view"
 /// under Options without owning Options, and only while it is active.
+///
+/// Into a menu that has lines, the window's items go before its last
+/// line: a File menu ends with Exit, set apart, and an editor's Save and
+/// Save as belong above it, not under it. A menu with no line takes them
+/// at its end.
 pub fn merge_items(base: &[MenuItem], extra: &[MenuItem]) -> Vec<MenuItem> {
     let name = |t: &str| t.replace('~', "").to_lowercase();
     let mut out = clone_items(base);
@@ -275,8 +280,15 @@ pub fn merge_items(base: &[MenuItem], extra: &[MenuItem]) -> Vec<MenuItem> {
         };
         match into {
             Some(ix) => {
-                out[ix].items.push(MenuItem::line());
-                out[ix].items.extend(clone_items(&it.items));
+                let items = &mut out[ix].items;
+                let mut added = vec![MenuItem::line()];
+                added.extend(clone_items(&it.items));
+                match items.iter().rposition(|m| m.separator) {
+                    Some(last) => {
+                        items.splice(last..last, added);
+                    }
+                    None => items.extend(added),
+                }
             }
             None => out.extend(clone_items(core::slice::from_ref(it))),
         }

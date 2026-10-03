@@ -1027,6 +1027,35 @@ public sealed class Owlosui : IDisposable
         return Encoding.UTF8.GetString(all.ToArray());
     }
 
+    /// <summary>
+    /// A file's bytes as a text the editor shows one glyph a byte, the way a
+    /// DOS editor showed a binary: each byte the code page's character for
+    /// it, 0Ah the end of a line. With <see cref="GetTextBytes"/> it comes
+    /// back byte for byte.
+    /// </summary>
+    public string TextOfBytes(byte[] data)
+    {
+        var s = new StringBuilder(data.Length);
+        foreach (var b in data) s.Append(b < 128 ? (char)b : b < Glyphs.Length ? Glyphs[b] : '?');
+        return s.ToString();
+    }
+
+    /// <summary>A text's glyphs as bytes, the lines joined by 0Ah: what <see cref="TextOfBytes"/> put in.</summary>
+    public byte[] GetTextBytes(ushort id)
+    {
+        var all = new List<byte>();
+        uint total;
+        do
+        {
+            var r = Call(Op.GetTextBytes, W.U16(id), W.U32((uint)all.Count));
+            total = BitConverter.ToUInt32(r, 0);
+            var n = BitConverter.ToUInt16(r, 4);
+            if (n == 0 && all.Count < total) throw new InvalidOperationException($"the bytes of view {id} stopped at byte {all.Count} of {total}");
+            all.AddRange(new ArraySegment<byte>(r, 6, n));
+        } while (all.Count < total);
+        return all.ToArray();
+    }
+
     // -------------------------------------------------------------- events
 
     public enum MouseKind : byte { Down = 0, Up = 1, Drag = 2, Move = 3, WheelUp = 4, WheelDown = 5, Double = 6 }
@@ -1679,7 +1708,7 @@ public sealed class Owlosui : IDisposable
         public const byte Tree = 0x53, TreeChildren = 0x54, TreeExpand = 0x55, TreePath = 0x56;
         public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E, Syntax = 0x5F, SyntaxDefine = 0x60, Unmark = 0x61;
         public const byte OpenWindow = 0x5B, Wait = 0x5C;
-        public const byte Console = 0x67, ConsoleWrite = 0x68, Minimize = 0x6C, TextAppend = 0x6D, GetTextPart = 0x6E;
+        public const byte Console = 0x67, ConsoleWrite = 0x68, Minimize = 0x6C, TextAppend = 0x6D, GetTextPart = 0x6E, GetTextBytes = 0x6F;
         public const byte Place = 0x62, SetTag = 0x65, SetIndicator = 0x66;
         public const byte Clipboard = 0x69, ClipboardGet = 0x6A, ClipboardPaste = 0x6B;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;

@@ -227,6 +227,7 @@ name, for a commander that puts the folder in its window's title
 | 0x20 | CLOSE    | `id`      | OK    |
 | 0x21 | GET_TEXT | `id`      | `str` — a `TEXT` view's lines joined with `\n`, an `INPUT`'s text, or a `CONSOLE`'s record without its colours; an error when it is longer than 60000 bytes, which `GET_TEXT_PART` reads |
 | 0x6E | GET_TEXT_PART | `id from:u32` | `total:u32 text:str` — the same text, of any length: at most 60000 bytes of its UTF-8 from byte `from`, cut where a character ends; ask again from `from` plus what came until `total` is reached. `from` inside a character is an error |
+| 0x6F | GET_TEXT_BYTES | `id from:u32` | `total:u32 n:u16 n×u8` — a `TEXT` as bytes: each glyph its code page number, one byte, the lines joined by `0x0A`; a glyph past 255 is `?`. At most 60000 from byte `from`, asked again as `GET_TEXT_PART` is. What a file opened byte for byte is saved back as: a text with a NUL in it puts it into `TEXT` as the character U+0000, which is glyph 0, and this gives back 0 where `GET_TEXT` would give a space |
 | 0x6D | TEXT_APPEND | `id text:str` | OK — more text at the end of a `TEXT`, for one bigger than a request: `TEXT` or `SET_TEXT` with the first part, this with the rest. The first line of it continues the last; the caret, the view and Undo are left as they are |
 | 0x22 | SET_PROGRESS | `id value:u32` | OK |
 | 0x23 | GET_MARKED   | `id`      | `n:u16` then `n × u16` — the marked items of a `LIST` |

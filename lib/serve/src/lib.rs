@@ -135,6 +135,7 @@ pub mod op {
     pub const MINIMIZE: u8 = 0x6C;
     pub const TEXT_APPEND: u8 = 0x6D;
     pub const GET_TEXT_PART: u8 = 0x6E;
+    pub const GET_TEXT_BYTES: u8 = 0x6F;
 }
 
 /// The most text one GET_TEXT or GET_TEXT_PART carries: a reply is at most
@@ -882,6 +883,37 @@ impl Server {
                 }
                 out.u32(s.len() as u32);
                 out.str(&s[from..end]);
+            }
+
+            op::GET_TEXT_BYTES => {
+                // A text as the bytes it was made of: each glyph one byte -
+                // the code page's own number for it - and the lines joined
+                // by 0Ah. What a file opened as bytes is saved back as, byte
+                // for byte, where GET_TEXT's Unicode would turn glyph 0 and
+                // a space into the same character. A glyph the code page has
+                // no byte for (one a growing font added) is `?`. A part at a
+                // time, as GET_TEXT_PART: from byte `from`, at most TEXT_PART.
+                let id = r.id("id")?;
+                let from = r.u32("from")? as usize;
+                let id = self.alive(id)?;
+                let b: Vec<u8> = match self.ui.as_ref().ok_or("INIT first")?.kind(id) {
+                    Kind::Text(t) => {
+                        let mut b = Vec::new();
+                        for (i, l) in t.lines.iter().enumerate() {
+                            if i > 0 {
+                                b.push(b'\n');
+                            }
+                            b.extend(l.iter().map(|&g| u8::try_from(g as u32).unwrap_or(b'?')));
+                        }
+                        b
+                    }
+                    _ => return Err(format!("view {} is not a text", id.raw())),
+                };
+                let from = from.min(b.len());
+                let end = (from + TEXT_PART).min(b.len());
+                out.u32(b.len() as u32);
+                out.u16((end - from) as u16);
+                out.0.extend_from_slice(&b[from..end]);
             }
 
             op::TEXT_APPEND => {

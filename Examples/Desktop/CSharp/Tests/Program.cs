@@ -404,6 +404,19 @@ internal static class Tests
             Check(owl.GetText(t) == big + "\nreplaced", "SetText of a big text did not keep all of it");
         });
 
+        Case("A binary goes into an editor as its bytes and comes back byte for byte", () =>
+        {
+            // 0 and 20h are both a blank on the screen, and GetText cannot
+            // tell them apart; GetTextBytes can. 64 KB and more, in parts.
+            using var owl = Owl();
+            var data = Enumerable.Range(0, 70000).Select(i => (byte)(i * 7 % 256)).ToArray();
+            var w = owl.Window("BYTES.BIN", 60, 16);
+            var t = owl.Text(w, owl.TextOfBytes(data));
+            var back = owl.GetTextBytes(t);
+            var at = Enumerable.Range(0, Math.Min(back.Length, data.Length)).FirstOrDefault(i => back[i] != data[i], -1);
+            Check(back.Length == data.Length && at < 0, $"came back {back.Length} bytes of {data.Length}, first difference at {at}");
+        });
+
         Case("HelloWorld: the close box closes it", () =>
         {
             using var owl = Owl();

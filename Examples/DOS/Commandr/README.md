@@ -79,10 +79,17 @@ nothing above it the toolkit keeps a clipboard of its own.
   at fixed distances above itself, and loaded higher it would write past
   640K into the video card. Started without `RUN.BAT` (no `/STEP`), the
   commander runs every program from inside.
-* **The editor takes a whole file or nothing.** A file too big for one
-  request to the resident (about 30 KB of text) is refused, and F3 shows
-  its beginning, with the title saying how much. Half a file in an editor
-  would save the other half away.
+* **The editor takes a whole text file or nothing.** A file bigger than
+  the commander's buffer - 32 000 bytes, one 16-bit data segment's worth -
+  is refused, and F3 shows its beginning, with the title saying how much.
+  Half a file in an editor would save the other half away. Its own
+  `COMMANDR.PAS` is past that now, so it cannot edit itself.
+* **A binary is not opened.** F3 and F4 on an `.EXE`, a `.COM` or
+  anything else with a zero byte early on say it is not a text file. The
+  text goes back to DOS through the code page, and a zero byte would come
+  back a space. The commander in the browser demo does both: it opens a
+  binary as its bytes and saves it back byte for byte (`GET_TEXT_BYTES`),
+  and reads and saves files of any size in parts. This one does not, yet.
 * **Tabs come back as spaces**, and lines end CR LF, the way DOS keeps a
   text file.
 * **A file moves by renaming** when it stays on the same drive: nothing is

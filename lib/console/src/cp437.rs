@@ -42,7 +42,9 @@ pub const TABLE: [char; 256] = [
     // 0xE0
     'α', 'ß', 'Γ', 'π', 'Σ', 'σ', 'µ', 'τ', 'Φ', 'Θ', 'Ω', 'δ', '∞', 'φ', 'ε', '∩',
     // 0xF0
-    '≡', '±', '≥', '≤', '⌠', '⌡', '÷', '≈', '°', '∙', '·', '√', 'ⁿ', '²', '■', ' ',
+    // 0xFF is the no-break space, not a second space: a byte read as a
+    // character and written back must come back the same byte.
+    '≡', '±', '≥', '≤', '⌠', '⌡', '÷', '≈', '°', '∙', '·', '√', 'ⁿ', '²', '■', '\u{a0}',
 ];
 
 #[inline]

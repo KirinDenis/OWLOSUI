@@ -290,15 +290,18 @@ export class CommanderTool {
     this.open(name, new TextDecoder().decode(bytes), s.source, path, { readOnly: true });
   }
 
-  /** F4, and Enter on a text: an editor, saving back where the file came from. */
+  /**
+   * F4, and Enter on a text: an editor, saving back where the file came
+   * from. Anything that is not a text opens as its bytes, one glyph each,
+   * as the DOS editors opened one - Edit > Hex view shows the numbers - and
+   * is saved back byte for byte. Enter on one shows its bytes instead.
+   */
   async edit(s, name, orHex = false) {
     const path = `${s.dir}${name}`;
     const bytes = await s.source.readBytes(path);
-    if (binary(bytes)) {
-      if (orHex) return this.hex(name, bytes);
-      throw new Error(`${name} is not a text file. F3 shows its bytes.`);
-    }
-    this.open(name, new TextDecoder().decode(bytes), s.source, path, { readOnly: !!s.source.readOnly });
+    const asBytes = binary(bytes);
+    if (asBytes && orHex) return this.hex(name, bytes);
+    this.open(name, asBytes ? bytes : new TextDecoder().decode(bytes), s.source, path, { readOnly: !!s.source.readOnly });
   }
 
   hex(name, bytes) {

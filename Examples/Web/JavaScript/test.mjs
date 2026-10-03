@@ -437,6 +437,77 @@ await test('Demo: a CR LF file opens without a glyph for CR and is saved with CR
   check(disk === 'Xline one\r\nline two\r\n', `saved as ${JSON.stringify(disk)}`);
 });
 
+await test('Demo: Save and Save as are on File, above Exit, only while a file is in front - F2 too', async () => {
+  const o = await owl();
+  const app = new Demo.App(o);
+  o.press('Escape');
+  o.press('f', { alt: true });
+  let f = o.frame();
+  check(f.find('Exit') && !f.find('Save'), 'Save is offered with no file in front', f);
+  check(!f.row(24).includes('F2 Save'), 'F2 Save is on the status line with no file in front', f);
+  o.press('Escape');
+  o.press('Escape');
+  app.onCommand(Demo.CmNew);
+  o.press('f', { alt: true });
+  f = o.frame();
+  const save = f.find('Save  '), as = f.find('Save as'), exit = f.find('Exit');
+  check(save && as && exit && save.y < exit.y && as.y < exit.y, 'Save and Save as are not above Exit', f);
+  // The open menu's hint has the status line; closed, the keys are back.
+  o.press('Escape');
+  check(o.frame().row(24).includes('F2 Save'), 'no F2 Save with a file in front', o.frame());
+});
+
+await test('Demo: a binary opens in the editor as its bytes and is saved back byte for byte', async () => {
+  const all = Uint8Array.from({ length: 256 }, (_, i) => i);
+  const original = Buffer.concat([Buffer.from(all), Buffer.from([0, 0, 13, 10, 13, 255, 0]), Buffer.from(all)]);
+  writeFileSync(join(folder, 'BYTES.BIN'), original);
+  const o = await owl();
+  const app = new Demo.App(o);
+  app.openFrom(new ServerFolder(`${origin}/files`));
+  await app.pending;
+  app.chosen('BYTES.BIN');
+  await app.pending;
+  check(o.frame().find("BYTES.BIN - the server's folder"), 'the binary did not open in an editor', o.frame());
+  o.type('X');
+  key(o, app, 'F2');
+  await app.pending;
+  const disk = readFileSync(join(folder, 'BYTES.BIN'));
+  const want = Buffer.concat([Buffer.from('X'), original]);
+  check(disk.equals(want), `saved ${disk.length} bytes, not the ${want.length} it was plus X; first difference at ${disk.findIndex((b, i) => b !== want[i])}`);
+});
+
+await test('Demo: Save as puts the file in front under a new name, asks before replacing, and Save goes there after', async () => {
+  rmSync(join(folder, 'COPY.TXT'), { force: true });
+  const o = await owl();
+  const app = new Demo.App(o);
+  app.onCommand(Demo.CmNew);
+  const server = new ServerFolder(`${origin}/files`);
+  app.saveAs(server);
+  await app.pending;
+  check(o.frame().find("Save as - the server's folder") && o.frame().find('File name'), 'no Save as dialog', o.frame());
+  o.setText(app.open.name, 'COPY.TXT');
+  app.onCommand(Demo.CmSaveAsOk);
+  await app.pending;
+  check(readText(join(folder, 'COPY.TXT'), 'utf8').startsWith('Type here.'), 'COPY.TXT was not written');
+  check(o.frame().find("COPY.TXT - the server's folder"), 'the window does not say it is COPY.TXT now', o.frame());
+  // Save, from now on, goes to COPY.TXT.
+  app.onCommand(Demo.CmDismiss);
+  o.type('Again. ');
+  key(o, app, 'F2');
+  await app.pending;
+  check(readText(join(folder, 'COPY.TXT'), 'utf8').startsWith('Again. Type here.'), 'Save did not go to the new name');
+  // The same name again: asked first, and Keep it leaves the file alone.
+  app.onCommand(Demo.CmDismiss);
+  app.saveAs(server);
+  await app.pending;
+  o.setText(app.open.name, 'copy.txt');
+  app.onCommand(Demo.CmSaveAsOk);
+  check(o.frame().find('Replace it?'), 'a file was replaced without asking', o.frame());
+  app.onCommand(Demo.CmReplace);
+  await app.pending;
+  check(o.frame().find('is saved in'), 'Replace did not save', o.frame());
+});
+
 const { Repository } = await import('../../../lib/js/files/repository.js');
 
 for (const [what, source] of [["the server's folder", new ServerFolder(`${origin}/files`)], ['WebDAV', new WebDavFolder(`${origin}/dav/`)]]) {
