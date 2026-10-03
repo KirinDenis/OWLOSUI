@@ -109,8 +109,8 @@ in the card's code page. A plain DOS, and the page's DOS, keep the core's.
 The top edge carries minimize `[↓]`, zoom `[↑]` and close `[■]` together at
 the right, the close box in the corner. Minimize puts a window into a bar in
 the bottom right corner, the bars stacking upwards; a click on a bar, or
-activating the window, brings it back. A modal window has no minimize box,
-nor has one without a shadow (a commander's panel), nor one made without it:
+activating the window, brings it back. Every window has a minimize box but a
+modal one and one made without it:
 
 ```
 Rust        window.minimizable = false

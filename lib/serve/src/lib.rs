@@ -586,11 +586,12 @@ impl Server {
                 };
                 // Bit 7: no minimize box. A modal window has none anyway:
                 // it is a question, and a question put away is one nobody
-                // can answer. Nor has a window without a shadow: that is a
-                // commander's panel, half of a pair, and half a commander
-                // in the corner is not something anyone wants. A tool of a
-                // fixed size - a calculator - has one, as everywhere else.
-                w.minimizable = flags & 0x80 == 0 && !w.modal && w.shadow;
+                // can answer. Every other window has one - with a shadow or
+                // without, a tool of a fixed size, a commander's panel - and
+                // a program that wants a window kept on the screen says so
+                // with this bit. How a window looks does not decide what it
+                // can do.
+                w.minimizable = flags & 0x80 == 0 && !w.modal;
                 if !w.resizable {
                     w.min_w = rect.w;
                     w.max_w = rect.w;

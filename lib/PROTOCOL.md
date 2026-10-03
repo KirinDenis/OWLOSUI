@@ -127,7 +127,7 @@ ask "save changes?" first.
 | 3   | not closable |
 | 4–5 | palette: `0` blue (documents), `1` cyan (help), `2` grey (dialogs), `3` black (a terminal: a console's window, frame and all) |
 | 6   | no shadow — for windows that tile the screen rather than float on it |
-| 7   | no minimize box. A modal window has none anyway, nor has one without a shadow (a commander's panel) |
+| 7   | no minimize box. A modal window has none anyway; every other window, with a shadow or without, has one unless this bit is set |
 
 The boxes sit together at the right of the top edge: minimize `[↓]`, zoom
 `[↑]` (`[↕]` while zoomed), close `[■]` in the corner, and only on the

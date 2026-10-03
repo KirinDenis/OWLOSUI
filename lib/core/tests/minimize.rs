@@ -145,7 +145,7 @@ fn a_dialog_has_no_minimize_box_and_a_modal_window_is_not_put_away() {
 fn a_title_too_long_for_the_room_loses_its_front_not_itself() {
     let mut ui = desk();
     let root = ui.root();
-    // A commander's panel: no shadow, so no minimize box; 40 wide.
+    // A commander's panel made without a minimize box (bit 7); 40 wide.
     let mut w = Window::new(r"C:\Users\someone\AppData\Local\Temp\left-panel");
     w.shadow = false;
     w.minimizable = false;
