@@ -97,6 +97,17 @@ fn rescale(r: Rect, from: Rect, to: Rect, w: &Window) -> Rect {
     Rect::new(x0, y0, nw, nh)
 }
 
+/// The line numbers' column for a text of `lines` lines: the digits of the
+/// last number, never fewer than three, and a blank before the text.
+fn gutter_width(lines: usize) -> i16 {
+    let (mut n, mut digits) = (lines.max(1), 0i16);
+    while n > 0 {
+        n /= 10;
+        digits += 1;
+    }
+    digits.max(3) + 1
+}
+
 /// The scroll bar a list or a tree draws in its own last column: that
 /// column and the row of its marker, or `None` when everything fits and
 /// there is no bar. One place for the drawing and the clicking alike.
@@ -366,6 +377,8 @@ const CM_ED_WRAP: Cmd = 0xFF49;
 const CM_ED_READONLY: Cmd = 0xFF4A;
 const CM_ED_HEX: Cmd = 0xFF4B;
 const CM_ED_KEYS: Cmd = 0xFF4C;
+const CM_ED_NUMBERS: Cmd = 0xFF4D;
+const CM_ED_POSITION: Cmd = 0xFF4E;
 const CM_SEARCH_GO: Cmd = 0xFF50;
 const CM_SEARCH_REPLACE: Cmd = 0xFF51;
 const CM_SEARCH_ALL: Cmd = 0xFF52;
@@ -384,7 +397,7 @@ const SYNTAX_MENU_MAX: Cmd = 64;
 
 /// A command the editor answers itself.
 fn is_editor_cmd(cmd: Cmd) -> bool {
-    (CM_ED_UNDO..=CM_ED_KEYS).contains(&cmd) || (CM_ED_SYNTAX..CM_ED_SYNTAX + SYNTAX_MENU_MAX).contains(&cmd)
+    (CM_ED_UNDO..=CM_ED_POSITION).contains(&cmd) || (CM_ED_SYNTAX..CM_ED_SYNTAX + SYNTAX_MENU_MAX).contains(&cmd)
 }
 
 /// The Find or Replace dialog while it is up, and the editor it searches.
@@ -1127,6 +1140,12 @@ impl Ui {
                 items.push(item("~W~ord wrap", String::new(), CM_ED_WRAP,
                     "Long lines folded at the window's edge; the file itself is not changed", text)
                     .checked(t.wrap));
+                items.push(item("~L~ine numbers", String::new(), CM_ED_NUMBERS,
+                    "Each line's number in a grey column on the left, as an assembler counts them", text)
+                    .checked(t.numbers));
+                items.push(item("Pos~i~tion", String::new(), CM_ED_POSITION,
+                    "The caret's line and column on the window's bottom edge", text)
+                    .checked(t.position));
             }
             if o & READONLY != 0 {
                 items.push(item("Read ~o~nly", String::new(), CM_ED_READONLY,
@@ -1226,6 +1245,16 @@ impl Ui {
                     t.set_wrap(on, r.h);
                 }
                 self.follow_x(tid);
+            }
+            CM_ED_NUMBERS => {
+                if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
+                    t.numbers = !t.numbers;
+                }
+            }
+            CM_ED_POSITION => {
+                if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
+                    t.position = !t.position;
+                }
             }
             CM_ED_READONLY => {
                 let ro = matches!(&self.nodes[tid.ix()].kind, Kind::Text(t) if t.readonly);
@@ -1645,6 +1674,8 @@ impl Ui {
                     t.set_wrap(state & WRAP != 0, r.h.max(1));
                 }
                 t.keymap = (state & CLASSIC != 0).then_some(Keymap::Classic);
+                t.numbers = state & NUMBERS != 0;
+                t.position = state & POSITION != 0;
                 t.hex.is_some()
             }
             _ => return false,
@@ -1677,6 +1708,12 @@ impl Ui {
         }
         if t.syntax.is_some() {
             s |= SYNTAX;
+        }
+        if t.numbers {
+            s |= NUMBERS;
+        }
+        if t.position {
+            s |= POSITION;
         }
         Some((t.offers, s, t.cur.y, t.cur.x))
     }
@@ -2737,6 +2774,23 @@ impl Ui {
                     _ => {}
                 }
             }
+            // Line numbers take a column on the left of a docked text, and
+            // the text starts after it: the caret, the mouse and the folding
+            // all see the narrower view and need nothing of their own. A
+            // memo placed by hand keeps its place and has none.
+            for k in &kids {
+                let manual = matches!(self.nodes[k.ix()].dock, Dock::Manual);
+                let mut r = self.nodes[k.ix()].rect;
+                if let Kind::Text(t) = &mut self.nodes[k.ix()].kind {
+                    let g = if t.numbers && !manual { gutter_width(t.lines.len()).min(r.w - 1).max(0) } else { 0 };
+                    t.gutter = g;
+                    if g > 0 {
+                        r.x += g;
+                        r.w -= g;
+                        self.nodes[k.ix()].rect = r;
+                    }
+                }
+            }
         }
 
         for i in 0..self.nodes.len() {
@@ -2803,7 +2857,12 @@ impl Ui {
                 self.draw_bars(buf, clip);
             }
             Kind::Window(w) => self.draw_window(id, w, abs, buf, clip),
-            Kind::Text(t) => self.draw_text(t, abs, buf, clip, wc),
+            Kind::Text(t) => {
+                self.draw_text(t, abs, buf, clip, wc);
+                if t.gutter > 0 {
+                    self.draw_numbers(t, abs, buf, parent_clip, wc);
+                }
+            }
             Kind::Html(h) => self.draw_html(h, abs, buf, clip, wc),
             Kind::Console(c) => draw_console(c, abs, buf, clip),
             Kind::Files(f) => {
@@ -3019,8 +3078,9 @@ impl Ui {
             }
         }
 
-        if !w.footer.is_empty() && abs.w > 8 {
-            buf.text(abs.x + 2, abs.bottom() - 1, &w.footer, fa, clip);
+        let footer = self.footer_of(id);
+        if !footer.is_empty() && abs.w > 8 {
+            buf.text(abs.x + 2, abs.bottom() - 1, &footer, fa, clip);
         }
 
         // Scrollbars belong to the frame, but their state belongs to whatever
@@ -3348,6 +3408,20 @@ impl Ui {
         }
     }
 
+    /// What sits at the left of a window's bottom edge, the horizontal bar
+    /// starting after it: the window's own footer, or - with none, and an
+    /// editor in it that shows its position - the caret's ` 12:5 `.
+    fn footer_of(&self, id: ViewId) -> String {
+        let Kind::Window(w) = &self.nodes[id.ix()].kind else { return String::new() };
+        if !w.footer.is_empty() {
+            return w.footer.clone();
+        }
+        match self.scrolling_child(id).map(|t| &self.nodes[t.ix()].kind) {
+            Some(Kind::Text(t)) if t.position && t.hex.is_none() => format!(" {}:{} ", t.cur.y as i32 + 1, t.cur.x as i32 + 1),
+            _ => String::new(),
+        }
+    }
+
     /// Both scrollbars of a window, or `None` for an axis that does not scroll.
     ///
     /// One calculation, used by the drawing and by the hit testing alike. Two
@@ -3405,10 +3479,7 @@ impl Ui {
         // editor starts it further along because its line:column indicator is
         // sitting there. One rule, both behaviours — and an empty footer
         // reproduces the classic layout exactly.
-        let footer = match &self.nodes[id.ix()].kind {
-            Kind::Window(w) => w.footer.chars().count() as i16,
-            _ => 0,
-        };
+        let footer = self.footer_of(id).chars().count() as i16;
         let x0 = abs.x + 2 + footer;
         let hlen = abs.right() - 2 - x0;
         let h = if inner.w >= 12 && hlen >= 4 {
@@ -4046,6 +4117,44 @@ impl Ui {
     /// Text with its lines folded: row after row from the first on the
     /// screen, each a piece of a line. Everything else is as `draw_text`
     /// does it - the caret's line barred if asked, the selection over it.
+    /// The line numbers, in the column left of the text: dark grey on the
+    /// window's own background, the caret's line a step lighter, each
+    /// number on the first row of its line - a folded line's other rows
+    /// have none, so a number always means a line of the file.
+    fn draw_numbers(&self, t: &TextView, abs: Rect, buf: &mut Buffer, parent_clip: Rect, p: &WinColors) {
+        let g = t.gutter;
+        let col = Rect::new(abs.x - g, abs.y, g, abs.h);
+        let clip = parent_clip.intersect(&col);
+        if clip.is_empty() {
+            return;
+        }
+        let bg = p.body & 0xF0;
+        buf.fill(col, SP, p.body, clip);
+        let mut put = |row: i16, li: usize| {
+            let s = format!("{:>w$}", li + 1, w = (g - 1) as usize);
+            let a = bg | if li as i16 == t.cur.y { 0x07 } else { 0x08 };
+            buf.text(col.x, col.y + row, &s, a, clip);
+        };
+        if t.wrapping() {
+            let mut at = Some(t.first_row());
+            for row in 0..abs.h {
+                let Some((li, r)) = at else { break };
+                at = t.next_row(li, r);
+                if r == 0 {
+                    put(row, li as usize);
+                }
+            }
+        } else {
+            for row in 0..abs.h {
+                let li = t.top as usize + row as usize;
+                if li >= t.lines.len() {
+                    break;
+                }
+                put(row, li);
+            }
+        }
+    }
+
     fn draw_folded(&self, t: &TextView, abs: Rect, buf: &mut Buffer, clip: Rect, p: &WinColors, body: u8) {
         let mut at = Some(t.first_row());
         for row in 0..abs.h {

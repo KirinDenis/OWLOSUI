@@ -230,7 +230,7 @@ public sealed class Owlosui : IDisposable
     }
 
     /// <summary>How an editor is set, and where its caret is: line and column from 0.</summary>
-    public readonly record struct EditorState(Offer Offers, bool Wrap, bool ReadOnly, bool Classic, bool Hex, bool Syntax, int Line, int Col);
+    public readonly record struct EditorState(Offer Offers, bool Wrap, bool ReadOnly, bool Classic, bool Hex, bool Syntax, int Line, int Col, bool Numbers = false, bool Position = false);
 
     /// <summary>
     /// Colour a text as a language: its name ("Pascal"), an extension ("PAS")
@@ -250,9 +250,10 @@ public sealed class Owlosui : IDisposable
     /// What a text offers and how it starts. The person can change each
     /// setting from the Edit menu; <see cref="GetEditor"/> reads them back.
     /// </summary>
-    public void Editor(ushort text, Offer offers, bool wrap = false, bool readOnly = false, bool classic = false, bool hex = false)
+    public void Editor(ushort text, Offer offers, bool wrap = false, bool readOnly = false, bool classic = false, bool hex = false,
+        bool numbers = false, bool position = false)
     {
-        var state = (byte)((wrap ? 1 : 0) | (readOnly ? 2 : 0) | (classic ? 4 : 0) | (hex ? 8 : 0));
+        var state = (byte)((wrap ? 1 : 0) | (readOnly ? 2 : 0) | (classic ? 4 : 0) | (hex ? 8 : 0) | (numbers ? 32 : 0) | (position ? 64 : 0));
         Call(Op.Editor, W.U16(text), new[] { (byte)offers, state });
     }
 
@@ -260,7 +261,8 @@ public sealed class Owlosui : IDisposable
     {
         var r = Call(Op.GetEditor, W.U16(text));
         var s = r[1];
-        return new EditorState((Offer)r[0], (s & 1) != 0, (s & 2) != 0, (s & 4) != 0, (s & 8) != 0, (s & 16) != 0, R.U16(r, 2), R.U16(r, 4));
+        return new EditorState((Offer)r[0], (s & 1) != 0, (s & 2) != 0, (s & 4) != 0, (s & 8) != 0, (s & 16) != 0, R.U16(r, 2), R.U16(r, 4),
+            (s & 32) != 0, (s & 64) != 0);
     }
 
     /// <summary>

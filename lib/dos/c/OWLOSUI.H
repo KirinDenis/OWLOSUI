@@ -72,6 +72,8 @@ typedef unsigned short owl_id;          /* a view; 0 is the desktop */
 #define OWL_EDIT_CLASSIC   0x04
 #define OWL_EDIT_HEX       0x08
 #define OWL_EDIT_SYNTAX    0x10         /* read back only: set a language with owl_syntax */
+#define OWL_EDIT_NUMBERS   0x20         /* line numbers in a grey column on the left */
+#define OWL_EDIT_POSITION  0x40         /* the caret's line:column on the bottom edge */
 
 /* ---- a file panel's flags (owl_files_ex) ---- */
 #define OWL_FILES_MARKS        0x01     /* Insert marks names */

@@ -214,6 +214,15 @@ pub struct TextView {
     /// folds: the lines, the caret's line and column, and the saved file are
     /// what they were, and there is no sideways scrolling while it is on.
     pub wrap: bool,
+    /// Line numbers in a grey column on the left: for code, where an
+    /// assembler or a compiler says what is wrong by its line.
+    pub numbers: bool,
+    /// The caret's line and column on the window's bottom edge, `12:5`,
+    /// where the classic IDEs had them.
+    pub position: bool,
+    /// How wide the line numbers' column was laid out: the view starts
+    /// this far right of where its window put it. Zero without numbers.
+    pub(crate) gutter: i16,
     /// Which folded row of line `top` the view starts on. Always 0 without
     /// `wrap`.
     pub top_row: i16,
@@ -255,6 +264,9 @@ impl TextView {
             modified: false,
             highlight_line: false,
             wrap: false,
+            numbers: false,
+            position: false,
+            gutter: 0,
             top_row: 0,
             width: 0,
             offers: 0,

@@ -149,6 +149,8 @@ EDIT_READONLY   = 02h
 EDIT_CLASSIC    = 04h
 EDIT_HEX        = 08h
 EDIT_SYNTAX     = 10h           ; read back only: set a language with owl_syntax
+EDIT_NUMBERS    = 20h           ; line numbers in a grey column on the left
+EDIT_POSITION   = 40h           ; the caret's line:column on the bottom edge
 
 ; ---- WINDOW flags -------------------------------------------------------------
 WF_MODAL        = 01h

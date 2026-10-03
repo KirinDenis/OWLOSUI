@@ -393,3 +393,32 @@ fn a_menu_dropped_over_the_caret_hides_it() {
     assert!(ui.menu_open().is_some());
     assert_eq!(ui.cursor().map(|p| (p.x, p.y)), Some((41, 2)));
 }
+
+#[test]
+fn line_numbers_and_the_position_are_settings_of_the_editor() {
+    let mut ui = desk(true);
+    // Inside 38 by 8, at (1, 2).
+    let (_, t) = editor(&mut ui, "first\nsecond\nthird", 40, 10);
+    ui.set_editor(t, offer::ALL, state::NUMBERS | state::POSITION);
+    let s = screen(&mut ui);
+    // A column of three digits and a blank, the text after it.
+    assert_eq!(cols(&s[2], 1, 10), "  1 first", "{s:#?}");
+    assert_eq!(cols(&s[4], 1, 10), "  3 third");
+    assert_eq!(ui.cursor().map(|p| (p.x, p.y)), Some((5, 2)), "the caret is after the numbers");
+    // The caret's line:column on the bottom edge, and it follows.
+    assert!(s[10].contains(" 1:1 "), "no position on the frame: {:?}", s[10]);
+    key(&mut ui, KeyCode::Down);
+    key(&mut ui, KeyCode::End);
+    let s = screen(&mut ui);
+    assert!(s[10].contains(" 2:7 "), "the position did not follow: {:?}", s[10]);
+    assert_eq!(ui.editor_state(t).map(|e| e.1 & (state::NUMBERS | state::POSITION)), Some(state::NUMBERS | state::POSITION));
+    // Both are on the Edit menu, ticked, and switch off from there.
+    alt(&mut ui, 'e');
+    let s = screen(&mut ui);
+    assert!(s.iter().any(|r| r.contains("Line numbers")) && s.iter().any(|r| r.contains("Position")), "not on the menu: {s:#?}");
+    key(&mut ui, KeyCode::Esc);
+    ui.set_editor(t, offer::ALL, 0);
+    let s = screen(&mut ui);
+    assert_eq!(cols(&s[2], 1, 6), "first", "the numbers are still there: {s:#?}");
+    assert!(!s[10].contains(":1 "), "the position is still there: {:?}", s[10]);
+}

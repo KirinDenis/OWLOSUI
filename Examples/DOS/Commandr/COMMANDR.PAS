@@ -835,8 +835,11 @@ begin
   CloseViewer;
   Viewer := OwlWindow(0, 2, 1, 76, 22, OwlBlue, Title, CmCloseView);
   T := OwlTextDos(Viewer, Buf^, Fits, 1);
-  OwlEditor(T, OfferFind or OfferWrap or OfferHex or OfferSyntax, EditReadOnly);
-  OwlSyntax(T, Name);
+  { The caret's line:column on the bottom edge; code gets its line
+    numbers as well, the way an assembler counts them in its errors. }
+  OwlEditor(T, OfferFind or OfferWrap or OfferHex or OfferSyntax, EditReadOnly or EditPosition);
+  if OwlSyntax(T, Name) then
+    OwlEditor(T, OfferFind or OfferWrap or OfferHex or OfferSyntax, EditReadOnly or EditPosition or EditNumbers);
   OwlWindowStatus(Viewer, 1);           { Escape closes it; F3 and F10 do too }
   OwlKey('', CmCloseView, KeyNamed, 1, 0);
   OwlEnd;
@@ -872,8 +875,9 @@ begin
   EditorText := OwlTextDos(Editor, Buf^, N, 0);
   { Everything the editor has, on an Edit menu of its own, in the colours
     of the language its name says. }
-  OwlEditor(EditorText, OfferAll, 0);
-  OwlSyntax(EditorText, Name);
+  OwlEditor(EditorText, OfferAll, EditPosition);
+  if OwlSyntax(EditorText, Name) then
+    OwlEditor(EditorText, OfferAll, EditPosition or EditNumbers);
   OwlWindowStatus(Editor, 1);           { F2 saves, as it did in the classic editors }
   OwlKey('', CmSave, KeyF, 2, 0);
   OwlEnd;

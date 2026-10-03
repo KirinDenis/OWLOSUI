@@ -312,11 +312,14 @@ export class App {
     // Everything the editor has, on an Edit menu of its own while this
     // window is in front: Find, Replace, Word wrap, Read only, Hex view,
     // Classic keys. The core runs all of it; nothing comes back here.
-    owl.editor(t, Offer.All, { readOnly });
+    // The caret's line:column on the bottom edge, always.
+    owl.editor(t, Offer.All, { readOnly, position: true });
     // Coloured as its language, which its name says: DEMO.PAS is Pascal.
     // A name no language answers to stays plain, and Edit > Syntax can
-    // still choose one.
-    if (!binary) owl.syntax(t, name);
+    // still choose one. Code gets its line numbers too - an assembler
+    // says by number which line is wrong; Edit > Line numbers turns them
+    // off, or on for anything else.
+    if (!binary && owl.syntax(t, name)) owl.editor(t, Offer.All, { readOnly, position: true, numbers: true });
     // Save and Save as, on the File menu above Exit and F2 on the status
     // line, while this window is in front - and only then.
     owl.windowMenu(w, sub('~F~ile',

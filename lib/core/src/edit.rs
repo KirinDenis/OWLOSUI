@@ -35,7 +35,8 @@ pub mod offer {
     pub const FIND: u8 = 2;
     /// Replace...
     pub const REPLACE: u8 = 4;
-    /// Word wrap, ticked while it is on.
+    /// How the text is shown: Word wrap, Line numbers and Position, each
+    /// ticked while it is on.
     pub const WRAP: u8 = 8;
     /// Read only, ticked while it is on.
     pub const READONLY: u8 = 16;
@@ -64,6 +65,10 @@ pub mod state {
     /// Coloured as a language. Read only: the language is set by name,
     /// with `Ui::set_syntax`.
     pub const SYNTAX: u8 = 16;
+    /// Line numbers in a grey column on the left.
+    pub const NUMBERS: u8 = 32;
+    /// The caret's line:column on the window's bottom edge.
+    pub const POSITION: u8 = 64;
 }
 
 /// Where each row of a line starts when it is folded at `width`.

@@ -61,6 +61,16 @@ line and column are what they were, and Up and Down go by rows on the
 screen. The person can change the settings from the menu; `GET_EDITOR`
 (`editor_state`, `GetEditor`, `editorState`) reads them back.
 
+**Line numbers and the position.** Two more settings beside Word wrap:
+line numbers in a dark grey column on the left, for code - an assembler
+says by number which line is wrong - and the caret's ` 12:5 ` on the
+window's bottom edge, where the classic IDEs had it. Both are state bits
+(`state::NUMBERS`, `POSITION`; `numbers`, `position` in JavaScript and
+C#; `OWL_EDIT_NUMBERS`, `EditNumbers`, `EDIT_NUMBERS` and the same for
+the position), and both are on the Edit menu, ticked. The web demo and
+the DOS commander show the position always, and the numbers when the
+file is code: when its name named a language.
+
 **Syntax colours.** `set_syntax(text, "DEMO.PAS")` (`SYNTAX` on the wire;
 `owl.syntax`, `Syntax`, `owl_syntax`, `OwlSyntax`) colours a text as the
 language its name, extension or file name says; Edit > Syntax lets the

@@ -321,7 +321,7 @@ editor's window is active. None of them sends the program a command.
     bit 0  Edit      Undo, Redo, Cut, Copy, Paste, Select all
     bit 1  Find      Find... (Ctrl+F, or Ctrl+Q F with classic keys) and Find next (Ctrl+L)
     bit 2  Replace   Replace... (Ctrl+H, or Ctrl+Q A)
-    bit 3  Wrap      Word wrap, ticked while on
+    bit 3  Wrap      Word wrap, Line numbers and Position, each ticked while on
     bit 4  ReadOnly  Read only, ticked while on
     bit 5  Hex       Hex view: the same text as bytes; the text's id keeps working
     bit 6  Keys      Classic keys: the WordStar arrangement, or the modern one
@@ -334,7 +334,11 @@ line's right end says where the caret is (`Ln 3 Col 7  Wrap`). An editor
 offering nothing - the default - changes neither bar.
 
 `EDITOR.state`: bit 0 word wrap (long lines folded at the edge, on the
-screen only), bit 1 read only, bit 2 classic keys, bit 3 shown as hex.
+screen only), bit 1 read only, bit 2 classic keys, bit 3 shown as hex,
+bit 5 line numbers (dark grey in a column on the left, the caret's line a
+step lighter; a text placed by hand, a memo, has none), bit 6 position
+(the caret's ` 12:5 ` on the window's bottom edge, where a window with no
+footer of its own has room for it, the horizontal bar after it).
 `GET_EDITOR` also sets bit 4 while the text is coloured as a language;
 `EDITOR` ignores it - a language is chosen by name, with `SYNTAX`.
 
