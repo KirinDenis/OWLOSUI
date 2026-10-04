@@ -683,6 +683,44 @@ await test("lib: the DOS PC's C: is the library's and the page's, and every file
   check(dos.written['C/OWL.BAT'] && dos.written['C/DEMO.BAT'], 'a batch file is missing');
 });
 
+await test('Demo: What to see shows what is chosen - by Enter, by Show me, by a click on it', async () => {
+  // The window a first visit opens on. A tool answering commands that were
+  // not its own once took its every button away, and nothing here noticed.
+  const o = await owl();
+  const app = new Demo.App(o);
+  app.welcome.show();
+  const pick = label => {
+    for (let i = 0; i < 12 && !o.frame().find(label); i++) key(o, app, 'ArrowDown');
+    while (app.welcome.choices[o.current(app.welcome.list)]?.label !== label) key(o, app, 'ArrowDown');
+  };
+  pick('Calculator, calendar, puzzle');
+  key(o, app, 'Enter');
+  let f = o.frame();
+  check(!app.welcome.win && app.calc.id && f.find(' Puzzle '), 'Enter on a choice did not show it', f);
+  app.welcome.show();
+  pick('What the page is doing');
+  const at = o.frame().find('Show me');
+  click(o, app, at.x + 1, at.y);
+  f = o.frame();
+  check(!app.welcome.win && app.console.win, 'a click on Show me did not show the console', f);
+});
+
+await test("Demo: no two of the page's tools answer the same command", async () => {
+  // Each tool owns a range and the page gives a command to the first that
+  // says handles(): two ranges that overlap and the later tool is deaf.
+  const o = await owl();
+  const app = new Demo.App(o);
+  const tools = [app.colors, ...app.tools];
+  const ranges = tools.map(t => [t.constructor.name, t.constructor.CmFirst, t.constructor.CmLast]).filter(r => r[1] !== undefined);
+  for (let i = 0; i < ranges.length; i++) {
+    for (let j = i + 1; j < ranges.length; j++) {
+      const [a, a0, a1] = ranges[i], [b, b0, b1] = ranges[j];
+      check(a1 < b0 || b1 < a0, `${a} ${a0}..${a1} and ${b} ${b0}..${b1} overlap`);
+    }
+  }
+  check(ranges.length >= 8, `only ${ranges.length} tools say their range`);
+});
+
 server.kill();
 rmSync(folder, { recursive: true, force: true });
 
