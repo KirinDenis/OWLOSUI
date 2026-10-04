@@ -422,3 +422,22 @@ fn line_numbers_and_the_position_are_settings_of_the_editor() {
     assert_eq!(cols(&s[2], 1, 6), "first", "the numbers are still there: {s:#?}");
     assert!(!s[10].contains(":1 "), "the position is still there: {:?}", s[10]);
 }
+
+#[test]
+fn folded_the_position_is_where_the_caret_is_seen() {
+    // The pilot's notes window: "Type here. Ctrl+Z ..." folded at 12. Down
+    // goes to the second row; the person sees row 2, column 1 - the file
+    // says line 1, column 12, and that is still what GET_EDITOR reads.
+    let mut ui = desk(true);
+    let (_, t) = editor(&mut ui, "Type here. Ctrl+Z takes it back, Shift and the arrows select.", 14, 10);
+    ui.set_editor(t, 0, state::WRAP | state::POSITION);
+    screen(&mut ui);
+    key(&mut ui, KeyCode::Down);
+    let s = screen(&mut ui);
+    assert!(s[10].contains(" 2:1 "), "the frame says {:?}", s[10]);
+    let (_, _, y, x) = ui.editor_state(t).unwrap();
+    assert_eq!((y, x), (0, 11), "the file's own position is unchanged");
+    key(&mut ui, KeyCode::Right);
+    key(&mut ui, KeyCode::Right);
+    assert!(screen(&mut ui)[10].contains(" 2:3 "));
+}

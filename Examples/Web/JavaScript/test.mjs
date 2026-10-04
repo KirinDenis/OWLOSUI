@@ -9,7 +9,7 @@
 // Exits 1 if any case failed. No test framework: a line per case.
 
 import { readFileSync } from 'node:fs';
-import { Wire, Owlosui, Style } from '../../../lib/js/owlosui.js';
+import { Wire, Owlosui, Style, sub } from '../../../lib/js/owlosui.js';
 import * as Hello from './01-HelloWorld/app.js';
 import * as Notes from './02-Notes/app.js';
 import * as Calc from './03-Calculator/app.js';
@@ -17,7 +17,7 @@ import { CalcEngine, Base } from './03-Calculator/calc-engine.js';
 import * as Soko from './04-Sokoban/app.js';
 import * as Demo from './05-Demo/app.js';
 import { Board } from './05-Demo/tools.js';
-import { log } from './05-Demo/log.js';
+import { log } from '../../../lib/js/apps/log.js';
 
 const bytes = readFileSync(new URL('../../../lib/js/owlosui-wire.wasm', import.meta.url));
 let failed = 0;
@@ -275,12 +275,12 @@ await test('Demo: an editor brings an Edit menu the core answers - Word wrap, Fi
   const o = await owl();
   const app = new Demo.App(o);
   check(!o.frame().row(0).includes('Edit'), 'no editor, no Edit menu', o.frame());
-  app.onCommand(Demo.CmNew);
+  app.onCommand(Demo.DocCm.New);
   let f = o.frame();
   check(f.row(0).includes('File  Edit  Tools'), 'the Edit menu is not after File', f);
   // Alt+E, W: Word wrap - the core does it, the program hears nothing.
   const w = o.active();
-  const t = app.docs.get(w).text;
+  const t = app.documents.of(w).text;
   key(o, app, 'e', { alt: true });
   check(o.frame().find('Word wrap') && o.frame().find('Find...'), 'no editor items', o.frame());
   key(o, app, 'w');
@@ -295,8 +295,8 @@ await test('Demo: an editor brings an Edit menu the core answers - Word wrap, Fi
 await test('Demo: a file is coloured as the language its name says', async () => {
   const o = await owl();
   const app = new Demo.App(o);
-  app.addDoc('HELLO.PAS', 'begin { hi }\nend.', null, null);
-  const t = app.docs.get(o.active()).text;
+  app.documents.add('HELLO.PAS', 'begin { hi }\nend.', null, null);
+  const t = app.documents.of(o.active()).text;
   check(o.editorState(t).syntax, 'no language for HELLO.PAS');
   const f = o.frame();
   const at = f.find('begin');
@@ -401,19 +401,19 @@ await test("Files: a browser with no storage for pages is told so in words", asy
 await test("Demo: Open from the server's folder, W and Enter open WELCOME.TXT, F2 saves it", async () => {
   const o = await owl();
   const app = new Demo.App(o);
-  app.openFrom(new ServerFolder(`${origin}/files`));
-  await app.pending;
+  app.documents.openFrom(new ServerFolder(`${origin}/files`));
+  await app.documents.pending;
   let f = o.frame();
   check(f.find("Open - the server's folder") && f.find('Examples/Web/files on the computer'), 'no Open dialog explaining itself', f);
   check(f.find('WELCOME.TXT') && f.find('NOTES'), 'the folder is not in the panel', f);
   key(o, app, 'w');
   key(o, app, 'Enter');
-  await app.pending;
+  await app.documents.pending;
   f = o.frame();
   check(f.find("WELCOME.TXT - the server's folder") && f.find('Hello from the server.'), 'the file did not open', f);
   o.type('Edited. ');
   key(o, app, 'F2');
-  await app.pending;
+  await app.documents.pending;
   check(o.frame().find('is saved in'), 'no word that it was saved', o.frame());
   check(readText(join(folder, 'WELCOME.TXT'), 'utf8').startsWith('Edited. Hello'), 'the disk did not change');
 });
@@ -422,17 +422,17 @@ await test('Demo: a CR LF file opens without a glyph for CR and is saved with CR
   writeFileSync(join(folder, 'DOS.TXT'), 'line one\r\nline two\r\n');
   const o = await owl();
   const app = new Demo.App(o);
-  app.openFrom(new WebDavFolder(`${origin}/dav/`));
-  await app.pending;
-  app.chosen('DOS.TXT');
-  await app.pending;
+  app.documents.openFrom(new WebDavFolder(`${origin}/dav/`));
+  await app.documents.pending;
+  app.documents.chosen('DOS.TXT');
+  await app.documents.pending;
   const f = o.frame();
   check(f.find('DOS.TXT - the WebDAV folder') && f.find('line two'), 'the file did not open', f);
   const one = f.find('line one');
   check(one && f.char(one.x + 8, one.y) === ' ', 'a CR shows as a glyph after the line', f);
   o.type('X');
   key(o, app, 'F2');
-  await app.pending;
+  await app.documents.pending;
   const disk = readText(join(folder, 'DOS.TXT'), 'utf8');
   check(disk === 'Xline one\r\nline two\r\n', `saved as ${JSON.stringify(disk)}`);
 });
@@ -447,7 +447,7 @@ await test('Demo: Save and Save as are on File, above Exit, only while a file is
   check(!f.row(24).includes('F2 Save'), 'F2 Save is on the status line with no file in front', f);
   o.press('Escape');
   o.press('Escape');
-  app.onCommand(Demo.CmNew);
+  app.onCommand(Demo.DocCm.New);
   o.press('f', { alt: true });
   f = o.frame();
   const save = f.find('Save  '), as = f.find('Save as'), exit = f.find('Exit');
@@ -463,14 +463,14 @@ await test('Demo: a binary opens in the editor as its bytes and is saved back by
   writeFileSync(join(folder, 'BYTES.BIN'), original);
   const o = await owl();
   const app = new Demo.App(o);
-  app.openFrom(new ServerFolder(`${origin}/files`));
-  await app.pending;
-  app.chosen('BYTES.BIN');
-  await app.pending;
+  app.documents.openFrom(new ServerFolder(`${origin}/files`));
+  await app.documents.pending;
+  app.documents.chosen('BYTES.BIN');
+  await app.documents.pending;
   check(o.frame().find("BYTES.BIN - the server's folder"), 'the binary did not open in an editor', o.frame());
   o.type('X');
   key(o, app, 'F2');
-  await app.pending;
+  await app.documents.pending;
   const disk = readFileSync(join(folder, 'BYTES.BIN'));
   const want = Buffer.concat([Buffer.from('X'), original]);
   check(disk.equals(want), `saved ${disk.length} bytes, not the ${want.length} it was plus X; first difference at ${disk.findIndex((b, i) => b !== want[i])}`);
@@ -480,31 +480,31 @@ await test('Demo: Save as puts the file in front under a new name, asks before r
   rmSync(join(folder, 'COPY.TXT'), { force: true });
   const o = await owl();
   const app = new Demo.App(o);
-  app.onCommand(Demo.CmNew);
+  app.onCommand(Demo.DocCm.New);
   const server = new ServerFolder(`${origin}/files`);
-  app.saveAs(server);
-  await app.pending;
+  app.documents.saveAs(server);
+  await app.documents.pending;
   check(o.frame().find("Save as - the server's folder") && o.frame().find('File name'), 'no Save as dialog', o.frame());
-  o.setText(app.open.name, 'COPY.TXT');
-  app.onCommand(Demo.CmSaveAsOk);
-  await app.pending;
+  o.setText(app.documents.open.name, 'COPY.TXT');
+  app.onCommand(Demo.DocCm.SaveAsOk);
+  await app.documents.pending;
   check(readText(join(folder, 'COPY.TXT'), 'utf8').startsWith('Type here.'), 'COPY.TXT was not written');
   check(o.frame().find("COPY.TXT - the server's folder"), 'the window does not say it is COPY.TXT now', o.frame());
   // Save, from now on, goes to COPY.TXT.
-  app.onCommand(Demo.CmDismiss);
+  app.onCommand(Demo.DocCm.Dismiss);
   o.type('Again. ');
   key(o, app, 'F2');
-  await app.pending;
+  await app.documents.pending;
   check(readText(join(folder, 'COPY.TXT'), 'utf8').startsWith('Again. Type here.'), 'Save did not go to the new name');
   // The same name again: asked first, and Keep it leaves the file alone.
-  app.onCommand(Demo.CmDismiss);
-  app.saveAs(server);
-  await app.pending;
-  o.setText(app.open.name, 'copy.txt');
-  app.onCommand(Demo.CmSaveAsOk);
+  app.onCommand(Demo.DocCm.Dismiss);
+  app.documents.saveAs(server);
+  await app.documents.pending;
+  o.setText(app.documents.open.name, 'copy.txt');
+  app.onCommand(Demo.DocCm.SaveAsOk);
   check(o.frame().find('Replace it?'), 'a file was replaced without asking', o.frame());
-  app.onCommand(Demo.CmReplace);
-  await app.pending;
+  app.onCommand(Demo.DocCm.Replace);
+  await app.documents.pending;
   check(o.frame().find('is saved in'), 'Replace did not save', o.frame());
 });
 
@@ -615,6 +615,72 @@ await test('Commander: two panels, the examples and the server; F5 copies, F6 re
   key(o, app, 'F3', { alt: true });
   check(!c.left && !o.frame().find('server:/'), 'the commander is still up', o.frame());
   rmSync(join(folder, 'BOX'), { recursive: true, force: true });
+});
+
+// ------------------------------------------- lib/js/apps, for other pages
+
+const { CommanderTool, ASSOCIATIONS } = await import('../../../lib/js/apps/commander.js');
+const { Documents, DocCm } = await import('../../../lib/js/apps/documents.js');
+const { existsSync } = await import('node:fs');
+
+await test('lib: the commander does what a page says on Enter, by extension', async () => {
+  // The course: an .ASM is assembled and run, the rest goes to the editor.
+  writeFileSync(join(folder, 'LESSON.ASM'), 'org 100h\r\nret\r\n');
+  const o = await owl();
+  const said = [];
+  const c = new CommanderTool(o, {
+    sources: [new ServerFolder(`${origin}/files`)],
+    open: name => said.push(`edit ${name}`),
+    associations: { ...ASSOCIATIONS, asm: ({ name, dir, source }) => { said.push(`build ${dir}${name} on ${source.title}`); } },
+    left: 0, right: 0,
+  });
+  await c.show();
+  c.enter(c.left, 'LESSON.ASM');
+  c.enter(c.left, 'WELCOME.TXT');
+  await c.settled;
+  check(said.includes("build /LESSON.ASM on the server's folder"), `the page's action was not run: ${said}`);
+  check(said.includes('edit WELCOME.TXT'), `a text did not go to the editor: ${said}`);
+});
+
+await test('lib: Documents says where Save as goes and what was saved', async () => {
+  const o = await owl();
+  const server = new ServerFolder(`${origin}/files`);
+  const saved = [];
+  const d = new Documents(o, { places: [{ label: '~S~erver', source: server }], saved: doc => saved.push(doc.path) });
+  o.menuBar(sub('~F~ile', ...d.fileMenu()));
+  const w = d.add('NOTE.TXT', 'one\r\ntwo\r\n', server, '/NOTE.TXT');
+  o.type('X');
+  d.save(w);
+  await d.pending;
+  check(readText(join(folder, 'NOTE.TXT'), 'utf8') === 'Xone\r\ntwo\r\n', 'not saved with its own line ends');
+  check(saved.join() === '/NOTE.TXT', `saved() was not told: ${saved}`);
+  // Its File menu, while it is in front: Save and Save as into the one place.
+  d.onCommand(DocCm.Dismiss);
+  o.press('f', { alt: true });
+  check(o.frame().find('Save as'), 'no Save as on the File menu', o.frame());
+  o.press('Escape');
+  rmSync(join(folder, 'NOTE.TXT'), { force: true });
+});
+
+await test("lib: the DOS PC's C: is the library's and the page's, and every file is where it says", async () => {
+  const o = await owl();
+  const app = new Demo.App(o);
+  const dos = app.dos;
+  // The library's: the toolkit, from lib/dos. The demo's: the DOS
+  // examples, the commander among them, from Examples/DOS.
+  for (const want of ['OWLOS/OWLOSRES.COM', 'OWLOS/OWLOSRES.BIN', 'OWLOS/CWSDPMI.EXE', 'DEMO/COMMANDR/COMMANDR.EXE', 'DEMO/PASCAL/DEMO.EXE']) {
+    check(dos.diskList.some(([to]) => to === want), `no ${want} on C:`);
+  }
+  check(!dos.diskList.some(([to]) => /^OWLOS\/COMMANDR/.test(to)), 'the library put a commander on C: of its own');
+  for (const [to, url] of dos.diskList) {
+    check(existsSync(fileURLToPath(url)), `${to} is to come from ${url}, and there is nothing there`);
+  }
+  for (const b of dos.bundles) check(existsSync(fileURLToPath(b.url)), `no bundle at ${b.url}`);
+  // The page's starts, on the DOS menu and after the library's; its batch files over the library's.
+  const labels = dos.menu().map(i => i.label);
+  check(labels.includes('OWLOSUI ~d~emo on DOS') && labels.includes('Play OWL ~F~LY III') && labels.includes('~C~ommander on DOS'), `menu: ${labels}`);
+  check(/COMMANDR\.EXE \/STEP C:\\DEMO A:\\/.test(dos.written['C/COMMANDR.BAT']), 'the commander does not open on C:\\DEMO and A:\\');
+  check(dos.written['C/OWL.BAT'] && dos.written['C/DEMO.BAT'], 'a batch file is missing');
 });
 
 server.kill();

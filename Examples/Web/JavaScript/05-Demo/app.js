@@ -7,28 +7,33 @@
 //
 //   File      New editor windows. Open from: this browser's storage, the
 //             server's folder, a WebDAV folder - the file panel, and the
-//             file in an editor; Save (F2) puts it back where it came
-//             from. lib/js/files/ reads the folders; the panel draws them.
-//             Exit.
+//             file in an editor; while one is in front, Save (F2) puts it
+//             back where it came from and Save as somewhere else.
+//             lib/js/files/ reads the folders, lib/js/apps/documents.js is
+//             the editors and the dialog. Exit.
 //   Edit      Only while an editor is in front, and not written here: the
 //             editor brings it (owl.editor), and the core answers it.
 //   Tools     Commander - two panels over every place above and this
 //             project's own examples, Volkov Commander's keys, upload and
-//             download (commander.js). Calculator (step 3's, imported as it
-//             is), Calendar, ASCII table, Puzzle - tools.js, one class each.
-//             Console - everything the page has done since it opened,
-//             errors included, in a terminal window, to copy into a bug
-//             report (log.js records it, console.js shows it).
+//             download (lib/js/apps/commander.js). Calculator (step 3's,
+//             imported as it is), Calendar, ASCII table, Puzzle - tools.js,
+//             one class each. Console - everything the page has done since
+//             it opened, errors included, in a terminal window, to copy
+//             into a bug report (lib/js/apps/log.js records it, console.js
+//             there shows it).
 //   Options   A dialog of check boxes and radio buttons; the colour dialog,
 //             every role of the palette changed live; a ticked item.
 //   Window    Size/Move, Zoom, Minimize, Next, Previous, Close, List, Cascade, Tile:
 //             the desktop's own verbs. Alt+1..9 reach numbered windows.
-//   DOS       A DOS PC in a window: DOSBox in WebAssembly, its disk made
-//             of this repository's DOS examples on the same Rust core,
-//             floppies that are folders of the browser's storage (DOS A
-//             Drive, DOS B Drive), OWL FLY III on the network,
-//             settings, a network monitor and a machine monitor (dos.js,
-//             monitors.js; the machine is lib/js/dosbox/).
+//   DOS       A DOS PC in a window: DOSBox in WebAssembly, its disk the
+//             library's toolkit and this repository's DOS examples - the
+//             commander among them - on the same Rust core, floppies that are folders of
+//             the browser's storage (DOS A Drive, DOS B Drive), OWL FLY III
+//             on the network, settings, a network monitor and a machine
+//             monitor (lib/js/apps/dos.js and monitors.js; the machine is
+//             lib/js/dosbox/). What is the demo's own - its starts, its
+//             files on C:, its batch files - is DOS_STARTS, DOS_DISK and
+//             DOS_WRITTEN below.
 //   Help      What to see - the window a first visit opens on
 //             (welcome.js) - and About.
 //
@@ -36,20 +41,22 @@
 // this file only routes: a menu command opens a tool, a tool's own buttons
 // go to the tool, and poll() lets each look at what is not a command.
 
-import { Style, sub, line, Offer } from '../../../../lib/js/owlosui.js';
+import { Style, sub, line } from '../../../../lib/js/owlosui.js';
 import { CalculatorWindow } from '../03-Calculator/calculator.js';
 import { CalendarWindow, AsciiTableWindow, PuzzleWindow, ColorsWindow } from './tools.js';
-import { BrowserStorage, split } from '../../../../lib/js/files/browser.js';
+import { BrowserStorage } from '../../../../lib/js/files/browser.js';
 import { ServerFolder } from '../../../../lib/js/files/server.js';
 import { WebDavFolder } from '../../../../lib/js/files/webdav.js';
 import { Repository } from '../../../../lib/js/files/repository.js';
-import { CommanderTool, binary } from './commander.js';
-import { DosTool, DosCm } from './dos.js';
+import { CommanderTool } from '../../../../lib/js/apps/commander.js';
+import { Documents, DocCm } from '../../../../lib/js/apps/documents.js';
+import { DosTool, DosCm } from '../../../../lib/js/apps/dos.js';
+import { ConsoleWindow } from '../../../../lib/js/apps/console.js';
+import { log, watchWindows, mb } from '../../../../lib/js/apps/log.js';
 import { Welcome } from './welcome.js';
-import { ConsoleWindow } from './console.js';
-import { log, watchWindows, mb } from './log.js';
 
-export const CmNew = 1, CmExit = 2;
+export { DocCm, DosCm };
+export const CmExit = 2;
 export const CmCalc = 10, CmCalendar = 11, CmAscii = 12, CmPuzzle = 13, CmCommander = 14;
 
 /**
@@ -72,9 +79,94 @@ export const CmOptions = 20, CmClock = 21, CmColors = 22;
 export const CmNext = 30, CmZoom = 31, CmClose = 32, CmCascade = 33, CmTile = 34, CmPrevious = 35, CmList = 36, CmSizeMove = 37, CmMinimize = 38;
 export const CmAbout = 40, CmHelp = 41, CmWelcome = 42, CmConsole = 43;
 export const CmOk = 60, CmCancel = 61, CmDismiss = 62;
-export const CmOpenBrowser = 50, CmOpenServer = 51, CmOpenDav = 52, CmSave = 53;
-export const CmFileOpen = 54, CmFileCancel = 55, CmDavConnect = 56, CmDavCancel = 57;
-export const CmSaveAsBrowser = 64, CmSaveAsServer = 65, CmSaveAsDav = 66, CmSaveAsOk = 67, CmReplace = 68, CmKeep = 69;
+
+/**
+ * The DOS PC's disk C:, beyond the toolkit the library puts there: this
+ * repository's DOS examples - the commander, the demo in three languages -
+ * with their sources [where on C:, where in the repository]; and OWL FLY
+ * III, as a bundle.
+ */
+const DOS_DISK = [
+  ['DEMO/COMMANDR/COMMANDR.EXE', 'Examples/DOS/Commandr/COMMANDR.EXE'],
+  ['DEMO/COMMANDR/COMMANDR.PAS', 'Examples/DOS/Commandr/COMMANDR.PAS'],
+  ['DEMO/PASCAL/DEMO.EXE', 'Examples/DOS/Pascal/DEMO.EXE'],
+  ['DEMO/PASCAL/DEMO.PAS', 'Examples/DOS/Pascal/DEMO.PAS'],
+  ['DEMO/PASCAL/HELLO.EXE', 'Examples/DOS/Pascal/HELLO.EXE'],
+  ['DEMO/PASCAL/HELLO.PAS', 'Examples/DOS/Pascal/HELLO.PAS'],
+  ['DEMO/PASCAL/OWLOSUI.PAS', 'lib/dos/pascal/OWLOSUI.PAS'],
+  ['DEMO/C/DEMO.EXE', 'Examples/DOS/C/DEMO.EXE'],
+  ['DEMO/C/DEMO.C', 'Examples/DOS/C/DEMO.C'],
+  ['DEMO/C/HELLO.EXE', 'Examples/DOS/C/HELLO.EXE'],
+  ['DEMO/C/HELLO.C', 'Examples/DOS/C/HELLO.C'],
+  ['DEMO/ASM/DEMO.COM', 'Examples/DOS/Asm/DEMO.COM'],
+  ['DEMO/ASM/DEMO.ASM', 'Examples/DOS/Asm/DEMO.ASM'],
+  ['DEMO/ASM/HELLO.COM', 'Examples/DOS/Asm/HELLO.COM'],
+  ['DEMO/ASM/HELLO.ASM', 'Examples/DOS/Asm/HELLO.ASM'],
+].map(([to, from]) => [to, new URL(from, ROOT).href]);
+
+/** The demo's batch files and words on C:, beside the library's OWL.BAT. */
+const DOS_WRITTEN = {
+  // /STEP: the commander may step out of memory to run a program - the
+  // program's lines in RUNPROG.BAT, written in the folder it was started
+  // in - and is started again afterwards, in the same folders. A DOS
+  // program then has all of DOS's memory, as from the prompt; OWL FLY III
+  // needs it.
+  'C/COMMANDR.BAT': `@echo off
+cd \\DEMO
+:again
+call C:\\OWL.BAT C:\\DEMO\\COMMANDR\\COMMANDR.EXE /STEP C:\\DEMO A:\\
+if not exist C:\\DEMO\\RUNPROG.BAT goto done
+call C:\\DEMO\\RUNPROG.BAT
+del C:\\DEMO\\RUNPROG.BAT
+goto again
+:done
+cd \\
+`,
+  'C/DEMO.BAT': `@echo off
+cd \\DEMO\\PASCAL
+call C:\\OWL.BAT DEMO.EXE
+cd \\
+`,
+  'C/CDEMO.BAT': `@echo off
+cd \\DEMO\\C
+call C:\\OWL.BAT DEMO.EXE
+cd \\
+`,
+  'C/ASMDEMO.BAT': `@echo off
+cd \\DEMO\\ASM
+call C:\\OWL.BAT DEMO.COM
+cd \\
+`,
+  'C/OWLFLY.BAT': `@echo off
+cd \\GAMES\\OWLFLY3
+OWLFLY3
+cd \\
+`,
+  'C/README.TXT': `
+  This PC runs in your browser: DOSBox, compiled to WebAssembly.
+
+    COMMANDR   the file manager: C:\\DEMO on the left, floppy A: on the right
+    DEMO       the OWLOSUI demo in Pascal; CDEMO in C, ASMDEMO in assembler
+    OWLFLY     OWL FLY III, over the network
+
+  Each of them draws with OWLOSRES: the same Rust core as the page around this
+  window, built for DOS. A: and B: are folders of the browser's storage, DOS A
+  Drive and DOS B Drive: put files there from the page and find them here.
+  Right Ctrl gives the keyboard back to the page.
+
+`,
+};
+
+/** What the DOS PC can start into, beside the library's prompt. */
+const DOS_STARTS = {
+  // `reread`: it shows a folder as it read it, and Ctrl+R reads it again -
+  // pressed for the person when the page writes to a floppy.
+  commander: { name: 'the commander', line: 'call C:\\COMMANDR.BAT', reread: true, label: '~C~ommander on DOS',
+    hint: 'The file manager, in Pascal, on the same Rust core as this page - built for DOS' },
+  demo: { name: 'the OWLOSUI demo', line: 'call C:\\DEMO.BAT', label: 'OWLOSUI ~d~emo on DOS', hint: 'This demo, written again in Pascal, on DOS' },
+  owlfly: { name: 'OWL FLY III', line: 'call C:\\OWLFLY.BAT', network: true, label: 'Play OWL ~F~LY III',
+    hint: 'A DOS flight game on the network: every player in the same room shares the sky' },
+};
 
 export class App {
   constructor(owl) {
@@ -88,31 +180,58 @@ export class App {
     this.puzzle = new PuzzleWindow(owl, CmClose);
     this.colors = new ColorsWindow(owl);
     this.tools = [this.calc, this.calendar, this.ascii, this.puzzle];
-    this.editors = [];
-    this.docs = new Map();            // window -> { text, source, path, name }
-    this.open = null;                 // the Open dialog, while it is up
-    this.dav = null;                  // the WebDAV address dialog, likewise
     this.browser = new BrowserStorage({ samples: SAMPLES });
+    // Files in editors (lib/js/apps/documents.js): File > New and Open
+    // from, and Save and Save as on the File menu while an editor is in
+    // front. A new file's Save goes to this browser's storage.
+    const origin = globalThis.location?.origin ?? 'http://localhost:8765';
+    this.documents = new Documents(owl, {
+      places: [
+        { label: "~T~his browser's storage...", source: this.browser,
+          hint: 'Files this browser keeps for this page, on this computer; nothing is uploaded',
+          saveHint: 'Under a name and in a folder you choose, in this browser' },
+        { label: "The ~s~erver's folder...", source: () => new ServerFolder(),
+          hint: 'Examples/Web/files on the computer running RUN.CMD' },
+        { label: 'A ~W~ebDAV folder...', hint: 'A folder shared the way a NAS or Nextcloud shares one; RUN.CMD shares one too',
+          dav: { address: `${origin}/dav/`, about: 'WebDAV is how NAS boxes, Nextcloud and many servers share folders. The address ' +
+            "below is RUN.CMD's own share of Examples/Web/files, the same files as the server's folder: leave it " +
+            'to try, or type another.' } },
+      ],
+      defaultSource: this.browser,
+      closeCmd: CmClose,
+      newText: 'Type here. Ctrl+Z takes it back, Shift and the arrows select.\n' +
+        "F2 saves it in this browser's storage.\n",
+    });
+    this.tools.push(this.documents);
     // The commander's drives: every place a page can keep files, and the
     // examples themselves to copy from.
-    const origin = globalThis.location?.origin ?? 'http://localhost:8765';
     this.commander = new CommanderTool(owl, {
       sources: [new Repository(), this.browser, new ServerFolder(), new WebDavFolder(`${origin}/dav/`)],
       // A file opened from the commander fills the desktop, as a
       // commander's editor always has; F5 puts it back to a window.
-      open: (name, text, source, path, options) => owl.zoom(this.addDoc(name, text, source, path, options)),
+      open: (name, text, source, path, options) => owl.zoom(this.documents.add(name, text, source, path, options)),
       closeCmd: CmClose,
       quietKeys: [{ cmd: CmHelp, key: 'F1' }, { cmd: CmClose, key: 'F3', alt: true }, { cmd: CmExit, key: 'x', alt: true }],
       // Enter on a DOS program: it runs on the DOS PC, in its window.
       run: (source, dir, name) => this.dos.runProgram(source, dir, name),
     });
     this.tools.push(this.commander);
-    // The DOS PC. Its floppies are folders of this browser's storage,
-    // DOS A Drive and DOS B Drive: the commander reaches them there.
+    // The DOS PC (lib/js/apps/dos.js), its disk C: the library's toolkit,
+    // and this repository's DOS examples - the commander first - and OWL
+    // FLY III.
+    // Its floppies are folders of this browser's storage, DOS A Drive and
+    // DOS B Drive: the commander reaches them there.
     this.dos = new DosTool(owl, {
       commander: this.commander,
       storage: this.browser,
-      open: (name, text, source, path, options) => this.addDoc(name, text, source, path, options),
+      open: (name, text, source, path, options) => this.documents.add(name, text, source, path, options),
+      starts: DOS_STARTS,
+      disk: DOS_DISK,
+      bundles: [{ url: new URL('Examples/Web/dos/owlfly3_v17.jsdos', ROOT).href, to: 'GAMES/OWLFLY3' }],
+      written: DOS_WRITTEN,
+      // A program run from the page's commander gives way to DOS's.
+      start: 'commander',
+      returnTo: 'commander',
     });
     this.tools.push(this.dos);
     this.welcome = new Welcome(owl, this.choices());
@@ -128,17 +247,11 @@ export class App {
     // the item, in place of the keys.
     owl.menuBar(
       sub('~F~ile',
-        { label: '~N~ew', cmd: CmNew, shortcut: 'F3', hint: 'An editor window of its own' },
-        sub('~O~pen from',
-          { label: "~T~his browser's storage...", cmd: CmOpenBrowser,
-            hint: 'Files this browser keeps for this page, on this computer; nothing is uploaded' },
-          { label: "The ~s~erver's folder...", cmd: CmOpenServer,
-            hint: 'Examples/Web/files on the computer running RUN.CMD' },
-          { label: 'A ~W~ebDAV folder...', cmd: CmOpenDav,
-            hint: 'A folder shared the way a NAS or Nextcloud shares one; RUN.CMD shares one too' }),
-        // Save and Save as are not here: an editor window brings them, above
-        // Exit, while it is in front (addDoc). With no file in front there
-        // is nothing to save, and the menu does not offer it.
+        // New and Open from. Save and Save as are not here: an editor
+        // window brings them, above Exit, while it is in front. With no
+        // file in front there is nothing to save, and the menu does not
+        // offer it.
+        ...this.documents.fileMenu(),
         line(),
         { label: 'E~x~it', cmd: CmExit, shortcut: 'Alt+X', hint: 'Leave the program' }),
       sub('~T~ools',
@@ -172,7 +285,7 @@ export class App {
     );
     owl.statusLine(
       { label: '~F1~ Help', cmd: CmHelp, key: 'F1' },
-      { label: '~F3~ New', cmd: CmNew, key: 'F3' },
+      { label: '~F3~ New', cmd: DocCm.New, key: 'F3' },
       { label: '~F5~ Zoom', cmd: CmZoom, key: 'F5' },
       { label: '~F6~ Next', cmd: CmNext, key: 'F6' },
       { label: '~Alt-F3~ Close', cmd: CmClose, key: 'F3', alt: true },
@@ -284,279 +397,6 @@ export class App {
     this.box = 0;
   }
 
-  /** File > New: an editor of its own, a window like any other. */
-  newEditor() {
-    const n = this.editors.length + 1;
-    this.addDoc(`UNTITLED${n}.TXT`, 'Type here. Ctrl+Z takes it back, Shift and the arrows select.\n' +
-      "F2 saves it in this browser's storage.\n", null, null);
-  }
-
-  /**
-   * An editor window for a file; `source` and `path` say where Save puts it
-   * back. `text` is a string, or the file's bytes: a program, a picture,
-   * anything that is not a text opens as its bytes, one glyph each, as a
-   * DOS editor opened one - garbage on the screen, Edit > Hex view to see
-   * the numbers - and is saved back byte for byte.
-   */
-  addDoc(name, text, source, path, { readOnly = false } = {}) {
-    const owl = this.owl;
-    const n = this.editors.length + 1;
-    const w = owl.window(this.docTitle(name, source), 60, 16, { x: 2 + (n % 8), y: 1 + (n % 8), closeCmd: CmClose });
-    const binary = text instanceof Uint8Array;
-    // A DOS or Windows file ends its lines with CR LF. The editor wants LF
-    // alone - a CR would show as a glyph - so the CRs come off here and go
-    // back on in save(), and the file keeps the line ends it came with.
-    // A file opened as bytes keeps its CRs: they are bytes like the others.
-    const crlf = !binary && text.includes('\r\n');
-    const t = owl.text(w, binary ? owl.textOfBytes(text) : crlf ? text.replace(/\r\n/g, '\n') : text);
-    // Everything the editor has, on an Edit menu of its own while this
-    // window is in front: Find, Replace, Word wrap, Read only, Hex view,
-    // Classic keys. The core runs all of it; nothing comes back here.
-    // The caret's line:column on the bottom edge, always.
-    owl.editor(t, Offer.All, { readOnly, position: true });
-    // Coloured as its language, which its name says: DEMO.PAS is Pascal.
-    // A name no language answers to stays plain, and Edit > Syntax can
-    // still choose one. Code gets its line numbers too - an assembler
-    // says by number which line is wrong; Edit > Line numbers turns them
-    // off, or on for anything else.
-    if (!binary && owl.syntax(t, name)) owl.editor(t, Offer.All, { readOnly, position: true, numbers: true });
-    // Save and Save as, on the File menu above Exit and F2 on the status
-    // line, while this window is in front - and only then.
-    owl.windowMenu(w, sub('~F~ile',
-      { label: '~S~ave', cmd: CmSave, shortcut: 'F2', hint: 'This file, back where it came from' },
-      sub('Save ~a~s',
-        { label: "~T~his browser's storage...", cmd: CmSaveAsBrowser, hint: 'Under a name and in a folder you choose, in this browser' },
-        { label: "The ~s~erver's folder...", cmd: CmSaveAsServer, hint: 'Into Examples/Web/files on the computer running RUN.CMD' },
-        { label: 'A ~W~ebDAV folder...', cmd: CmSaveAsDav, hint: 'Into a folder shared the way a NAS or Nextcloud shares one' })));
-    owl.windowStatus(w, { label: '~F2~ Save', cmd: CmSave, key: 'F2' });
-    this.editors.push(w);
-    this.docs.set(w, { text: t, source, path, name, crlf, binary });
-    return w;
-  }
-
-  docTitle(name, source) { return source ? `${name} - ${source.title}` : name; }
-
-  // ---------------------------------------------------------------- files
-  //
-  // Every source answers list(dir), read(path) and write(path, text), and
-  // says in `about` what it is in words a first-time visitor knows. The
-  // panel only draws: the program reads the folder and hands it over.
-
-  /** Work that finishes later: what goes wrong is said in a box, and a test can wait for it. */
-  track(promise) {
-    this.pending = promise.catch(e => this.tell('Files', e.message)).finally(() => this.owl.refresh?.());
-    return this.pending;
-  }
-
-  /**
-   * File > Open from: the Open dialog, the source explained above the
-   * panel. With `saveAs`, File > Save as: the same dialog, walking the
-   * folders, with a line for the name the file in front is saved under.
-   */
-  openFrom(source, saveAs = null) {
-    const owl = this.owl;
-    this.closeOpen();
-    const d = owl.window(`${saveAs ? 'Save as' : 'Open'} - ${source.title}`, 72, saveAs ? 23 : 21,
-      { style: Style.ModalDialog, closeCmd: CmFileCancel });
-    // The panel first: the core gives a window's keys to a file panel only
-    // when it is the window's first part. The words about the source go in
-    // the rows it leaves free above itself.
-    const panel = owl.files(d, `${source.prefix}/*.*`, [], { top: saveAs ? 5 : 3 });
-    owl.staticText(d, 2, 1, source.about, 66, 2);
-    let name = 0;
-    if (saveAs) {
-      // Between the words and the panel: a name chosen in the panel goes
-      // here, and Save writes into the folder the panel shows.
-      name = owl.input(d, 2, 3, 50, 'File name', saveAs.name);
-      owl.buttons(d, { label: '~S~ave', cmd: CmSaveAsOk, default: true }, { label: '~C~ancel', cmd: CmFileCancel, cancel: true });
-    } else {
-      owl.buttons(d, { label: '~O~pen', cmd: CmFileOpen, default: true }, { label: '~C~ancel', cmd: CmFileCancel, cancel: true });
-    }
-    this.open = { dialog: d, panel, source, dir: '/', entries: [], saveAs, name };
-    return this.track(this.showFolder('/'));
-  }
-
-  closeOpen() {
-    if (this.open) this.owl.close(this.open.dialog);
-    this.open = null;
-  }
-
-  /** A folder of the source into the panel - or, in the panel, why not. */
-  async showFolder(dir) {
-    const o = this.open;
-    if (!o) return;
-    try {
-      const entries = await o.source.list(dir);
-      if (dir !== '/') entries.unshift({ name: '..', size: 0, date: new Date(), dir: true });
-      if (this.open !== o) return; // closed while the folder was on its way
-      o.dir = dir;
-      o.entries = entries;
-      this.owl.setFiles(o.panel, `${o.source.prefix}${dir}*.*`, entries);
-    } catch (e) {
-      if (this.open === o) this.owl.filesError(o.panel, e.message);
-    }
-  }
-
-  /**
-   * A file into an editor window; the dialog closes. Read as bytes: a text
-   * opens as text, anything else as its bytes (addDoc). In Save as, a file
-   * chosen in the panel is the name to save under instead.
-   */
-  async openFile(path) {
-    const o = this.open;
-    if (!o) return;
-    if (o.saveAs) {
-      this.owl.setText(o.name, split(path).name);
-      return this.saveAsHere();
-    }
-    try {
-      const bytes = await o.source.readBytes(path);
-      this.closeOpen();
-      this.addDoc(split(path).name, binary(bytes) ? bytes : new TextDecoder().decode(bytes), o.source, path);
-    } catch (e) {
-      if (this.open === o) this.owl.filesError(o.panel, e.message);
-    }
-  }
-
-  /**
-   * A name entered in the panel: a folder is walked into, a file opened.
-   * Enter on a name is reported twice - the panel says which name, and the
-   * dialog's default button, Open, is pressed - and reading takes a while
-   * here, so while one is on its way the second is let go.
-   */
-  chosen(name) {
-    const o = this.open;
-    if (!o || o.busy) return;
-    o.busy = true;
-    const e = o.entries.find(x => x.name === name);
-    const work = name === '..' ? this.showFolder(o.dir.replace(/[^/]+\/$/, ''))
-      : e?.dir ? this.showFolder(`${o.dir}${name}/`)
-        : this.openFile(`${o.dir}${name}`);
-    return this.track(work.finally(() => { o.busy = false; }));
-  }
-
-  /** A path typed in the panel's path line: a folder, a mask, or a file. */
-  typed(text) {
-    const o = this.open;
-    let p = text.startsWith(o.source.prefix) ? text.slice(o.source.prefix.length) : text;
-    if (!p.startsWith('/')) p = o.dir + p;
-    if (/[*?]/.test(p)) p = p.slice(0, p.lastIndexOf('/') + 1);
-    return p.endsWith('/') ? this.track(this.showFolder(p)) : this.track(this.openFile(p));
-  }
-
-  /** What a document holds, as the file will have it: its text with its own line ends, or its bytes. */
-  contentOf(doc) {
-    if (doc.binary) return this.owl.getTextBytes(doc.text);
-    const typed = this.owl.getText(doc.text);
-    return doc.crlf ? typed.replace(/\r?\n/g, '\r\n') : typed;
-  }
-
-  /**
-   * File > Save (F2): back where it came from; a new file goes to this
-   * browser's storage. Only an editor's window offers it, so there is
-   * always a file in front - the check is for a program that calls this.
-   */
-  save() {
-    const w = this.owl.active();
-    const doc = this.docs.get(w);
-    if (!doc) return null;
-    if (!doc.source) {
-      doc.source = this.browser;
-      doc.path = `/${doc.name}`;
-      this.owl.setText(w, this.docTitle(doc.name, doc.source));
-    }
-    const content = this.contentOf(doc);
-    return this.track((async () => {
-      await doc.source.write(doc.path, content);
-      this.tell('Saved', `${doc.name} is saved in ${doc.source.title}, as ${doc.path}. File > Open from finds it there.`);
-    })());
-  }
-
-  /** File > Save as: the dialog over a source, for the file in front. */
-  saveAs(source) {
-    const w = this.owl.active();
-    const doc = this.docs.get(w);
-    if (!doc) return null;
-    return this.openFrom(source, { window: w, name: doc.name });
-  }
-
-  /**
-   * Save in the Save as dialog: the name typed, in the folder the panel
-   * shows. A name already there is asked about first; a folder's name is
-   * walked into, as Enter on it would.
-   */
-  saveAsHere(replace = false) {
-    const o = this.open;
-    if (!o?.saveAs || o.saving || (o.asking && !replace)) return null;
-    o.asking = false;
-    const name = this.owl.getText(o.name).trim();
-    if (!name || /[\\:*?"<>|]/.test(name)) {
-      this.owl.filesError(o.panel, name ? `"${name}" cannot be a file's name.` : 'Type a name to save under.');
-      return null;
-    }
-    if (name.includes('/')) return this.typed(name);
-    const there = o.entries.find(e => e.name.toLowerCase() === name.toLowerCase());
-    if (there?.dir) return this.track(this.showFolder(`${o.dir}${there.name}/`));
-    if (there && !replace) {
-      o.asking = true;
-      this.box = this.owl.messageBox('Save as', `${there.name} is already in ${o.source.title}${o.dir}. Replace it?`,
-        { label: '~R~eplace', cmd: CmReplace }, { label: '~K~eep it', cmd: CmKeep, default: true, cancel: true });
-      return null;
-    }
-    const doc = this.docs.get(o.saveAs.window);
-    if (!doc) { this.closeOpen(); return null; }
-    const path = `${o.dir}${there?.name ?? name}`;
-    const content = this.contentOf(doc);
-    o.saving = true;
-    return this.track((async () => {
-      try {
-        await o.source.write(path, content);
-      } catch (e) {
-        o.saving = false;
-        if (this.open === o) this.owl.filesError(o.panel, e.message);
-        return;
-      }
-      this.closeOpen();
-      // From now on the window is that file: Save goes there, and the
-      // title says so.
-      Object.assign(doc, { source: o.source, path, name: split(path).name });
-      this.owl.setText(o.saveAs.window, this.docTitle(doc.name, doc.source));
-      if (!doc.binary) this.owl.syntax(doc.text, doc.name);
-      this.tell('Saved', `${doc.name} is saved in ${doc.source.title}, as ${path}.`);
-    })());
-  }
-
-  /** File > Open from > A WebDAV folder: where the share is, first. */
-  davAsk(forSave = false) {
-    const owl = this.owl;
-    this.davForSave = forSave;
-    if (this.dav) { owl.activate(this.dav.dialog); return; }
-    const d = owl.window('A WebDAV folder', 68, 16, { style: Style.ModalDialog, closeCmd: CmDavCancel });
-    owl.staticText(d, 2, 1, 'WebDAV is how NAS boxes, Nextcloud and many servers share folders. The address ' +
-      "below is RUN.CMD's own share of Examples/Web/files, the same files as the server's folder: leave it " +
-      'to try, or type another.', 62, 4);
-    const origin = globalThis.location?.origin ?? 'http://localhost:8765';
-    // An input's label is plain words; Tab walks the fields.
-    const url = owl.input(d, 2, 6, 62, 'Address', `${origin}/dav/`);
-    const user = owl.input(d, 2, 8, 40, 'User, if it asks', '');
-    const password = owl.input(d, 2, 10, 40, 'Password, shown as typed', '');
-    owl.buttons(d, { label: 'C~o~nnect', cmd: CmDavConnect, default: true }, { label: '~C~ancel', cmd: CmDavCancel, cancel: true });
-    this.dav = { dialog: d, url, user, password };
-  }
-
-  closeDav() {
-    if (this.dav) this.owl.close(this.dav.dialog);
-    this.dav = null;
-  }
-
-  davConnect() {
-    const v = id => this.owl.getText(id).trim();
-    const source = new WebDavFolder(v(this.dav.url), { user: v(this.dav.user), password: v(this.dav.password) });
-    const forSave = this.davForSave;
-    this.closeDav();
-    return forSave ? this.saveAs(source) : this.openFrom(source);
-  }
-
   showOptions() {
     const owl = this.owl;
     if (this.options) { owl.activate(this.options); return; }
@@ -572,15 +412,11 @@ export class App {
   closeActive() {
     const owl = this.owl, a = owl.active();
     if (!a) return;
-    for (const t of [this.commander, this.dos, this.welcome, this.console]) if (t.owns(a)) { t.closeWindow(a); return; }
+    for (const t of [this.documents, this.commander, this.dos, this.welcome, this.console]) if (t.owns(a)) { t.closeWindow(a); return; }
     const tool = this.tools.find(t => t.id === a);
     owl.close(a);
     if (tool) tool.closed();
-    this.editors = this.editors.filter(e => e !== a);
-    this.docs.delete(a);
     if (a === this.options) this.options = 0;
-    if (this.open?.dialog === a) this.open = null;
-    if (this.dav?.dialog === a) this.dav = null;
   }
 
   onCommand(cmd) {
@@ -596,36 +432,6 @@ export class App {
           'terminal, in a Windows window and on DOS.');
         return true;
       case CmDismiss: this.closeBox(); return true;
-      case CmNew: this.newEditor(); return true;
-      case CmOpenBrowser: this.openFrom(this.browser); return true;
-      case CmOpenServer: this.openFrom(new ServerFolder()); return true;
-      case CmOpenDav: this.davAsk(); return true;
-      case CmDavConnect: this.davConnect(); return true;
-      case CmDavCancel: this.closeDav(); return true;
-      case CmSave: this.save(); return true;
-      case CmSaveAsBrowser: this.saveAs(this.browser); return true;
-      case CmSaveAsServer: this.saveAs(new ServerFolder()); return true;
-      case CmSaveAsDav: this.davAsk(true); return true;
-      case CmSaveAsOk: {
-        // Enter on a name in the panel presses Save too, and before the
-        // panel's own report is collected: take that first, so the name
-        // under the cursor is the one saved to, not the one in the line.
-        const o = this.open;
-        const { kind, text } = o ? owl.takeFiles(o.panel) : { kind: 0 };
-        if (kind === 1) this.chosen(text);
-        else if (kind === 2) this.typed(text);
-        else this.saveAsHere();
-        return true;
-      }
-      case CmReplace: this.closeBox(); this.saveAsHere(true); return true;
-      case CmKeep: this.closeBox(); if (this.open) this.open.asking = false; return true;
-      case CmFileCancel: this.closeOpen(); return true;
-      case CmFileOpen: {
-        // The Open button: whatever is under the cursor.
-        const [name] = this.open ? owl.markedNames(this.open.panel) : [];
-        if (name) this.chosen(name);
-        return true;
-      }
       case CmCommander: this.commander.show(); return true;
       case CmCalc: this.calc.show(); return true;
       case CmCalendar: this.calendar.show(); return true;
@@ -667,11 +473,5 @@ export class App {
 
   poll() {
     for (const t of [...this.tools, this.colors]) t.poll();
-    // What the file panel reports is not a command.
-    if (this.open) {
-      const { kind, text } = this.owl.takeFiles(this.open.panel);
-      if (kind === 1) this.chosen(text);
-      else if (kind === 2) this.typed(text);
-    }
   }
 }

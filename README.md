@@ -131,7 +131,9 @@ lib/                  the toolkit
     window/           the Windows window screen: CreateWindow and GDI
     serve/            the core behind a pipe, speaking PROTOCOL.md
     csharp/           the C# client of that pipe, the core carried inside it
-    js/               the JavaScript client, and the core as WebAssembly for it
+    js/               the JavaScript client, and the core as WebAssembly for it;
+                      apps/: a commander, editors with Open and Save as, a DOS
+                      PC with its settings and monitors, a log and its console
     dos/              OWLOSRES, the core behind INT 60h; its bindings for
                       assembler, C and Pascal; the DOS machine layer
     PROTOCOL.md       the wire. Same numbers for a pipe, a module, an interrupt.

@@ -1200,7 +1200,8 @@ impl Ui {
                 _ => String::new(),
             };
         }
-        let mut s = format!("Ln {} Col {}", t.cur.y as i32 + 1, t.cur.x as i32 + 1);
+        let (row, col) = t.seen_position();
+        let mut s = format!("Ln {} Col {}", row + 1, col + 1);
         if let Some(lang) = t.syntax.and_then(|c| self.syntaxes.get(c as usize)) {
             s.push_str("  ");
             s.push_str(&lang.name);
@@ -3417,7 +3418,12 @@ impl Ui {
             return w.footer.clone();
         }
         match self.scrolling_child(id).map(|t| &self.nodes[t.ix()].kind) {
-            Some(Kind::Text(t)) if t.position && t.hex.is_none() => format!(" {}:{} ", t.cur.y as i32 + 1, t.cur.x as i32 + 1),
+            Some(Kind::Text(t)) if t.position && t.hex.is_none() => {
+                // Where the person sees the caret: folded, the row and the
+                // column on the screen, not in the file.
+                let (row, col) = t.seen_position();
+                format!(" {}:{} ", row + 1, col + 1)
+            }
             _ => String::new(),
         }
     }
@@ -4780,7 +4786,13 @@ impl Ui {
     /// dialog, a memo, a console - and, over the rest of a window, the
     /// window's own text. People turn the wheel before they read anything.
     fn scroll_at(&mut self, p: Point, delta: i16) {
-        if !self.menu_boxes().is_empty() {
+        // An open menu is a list too: the wheel walks its items, one a
+        // notch, as Up and Down do, in the panel the keys go to - the
+        // submenu, when one is open - and nothing behind it moves.
+        if let Some(top) = self.menu_box_id() {
+            if let Kind::MenuBox(m) = &mut self.nodes[top.ix()].kind {
+                m.step(delta.signum());
+            }
             return;
         }
         let Some(id) = self.window_at(p) else { return };

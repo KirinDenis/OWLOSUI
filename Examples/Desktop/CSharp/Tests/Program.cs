@@ -1664,9 +1664,12 @@ internal static class ConsoleCases
         {
             File.Delete(notesFile);
             using var a = ConsoleAgent.Start(NotesExe, "", workDir);
-            var f = a.WaitFor(s => s.Find("Exit") != null);
             // The window is (W-4)x(H-2), centred, so its corner is at (W-3, H-2)
             // for a console W x H - whatever size the hidden console came up as.
+            // Wait for the corner, not for "Exit": the first picture is painted
+            // a row at a time from the top, the buttons sit above the bottom
+            // edge, and a screen read mid-paint has the word but no corner yet.
+            var f = a.WaitFor(s => s.Find("Exit") != null && Tests.IsCorner(s, s.W - 3, s.H - 2));
             int cx = f.W - 3, cy = f.H - 2;
             Tests.Require(Tests.IsCorner(f, cx, cy), $"no corner at ({cx},{cy})", f);
             a.Drag(cx, cy, cx - 10, cy - 5);

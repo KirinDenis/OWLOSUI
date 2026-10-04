@@ -178,3 +178,35 @@ fn folded_text_gets_a_bar_that_counts_rows() {
         _ => unreachable!(),
     }
 }
+
+#[test]
+fn the_wheel_walks_an_open_menu_as_the_arrows_do() {
+    use owlosui_core::{MenuBar, MenuItem};
+    let mut ui = Ui::new(80, 25);
+    let root = ui.root();
+    ui.insert(
+        root,
+        Rect::new(0, 0, 80, 1),
+        Kind::MenuBar(MenuBar::new(vec![MenuItem::sub(
+            "~F~ile",
+            vec![MenuItem::new("~N~ew", "", 1), MenuItem::new("~O~pen", "", 2), MenuItem::line(), MenuItem::new("E~x~it", "", 3)],
+        )])),
+    );
+    let w = ui.insert(root, Rect::new(10, 5, 40, 10), Kind::Window(Window::new("Behind")));
+    ui.activate(w);
+    frame(&mut ui);
+    ui.handle(Event::Key(Key { code: KeyCode::Char('f'), mods: Mods { alt: true, ..Mods::default() } }));
+    frame(&mut ui);
+    let current = |ui: &Ui| match ui.menu_open().map(|m| ui.kind(m)) {
+        Some(Kind::MenuBox(m)) => m.current,
+        _ => usize::MAX,
+    };
+    assert_eq!(current(&ui), 0);
+    mouse(&mut ui, 30, 10, MouseKind::ScrollDown);
+    assert_eq!(current(&ui), 1, "the wheel did not move to Open");
+    // Over the line, to Exit, as Down does; and back up.
+    mouse(&mut ui, 30, 10, MouseKind::ScrollDown);
+    assert_eq!(current(&ui), 3, "the wheel did not step over the line");
+    mouse(&mut ui, 30, 10, MouseKind::ScrollUp);
+    assert_eq!(current(&ui), 1);
+}

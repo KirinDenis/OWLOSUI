@@ -338,7 +338,9 @@ screen only), bit 1 read only, bit 2 classic keys, bit 3 shown as hex,
 bit 5 line numbers (dark grey in a column on the left, the caret's line a
 step lighter; a text placed by hand, a memo, has none), bit 6 position
 (the caret's ` 12:5 ` on the window's bottom edge, where a window with no
-footer of its own has room for it, the horizontal bar after it).
+footer of its own has room for it, the horizontal bar after it; as the
+person sees it - folded, the row and column on the screen, as the status
+line's `Ln Col` is too - while `GET_EDITOR` gives the place in the file).
 `GET_EDITOR` also sets bit 4 while the text is coloured as a language;
 `EDITOR` ignores it - a language is chosen by name, with `SYNTAX`.
 

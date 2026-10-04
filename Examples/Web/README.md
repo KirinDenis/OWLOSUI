@@ -152,7 +152,8 @@ that: it takes the CRs off to edit and puts them back on Save.
 ### Tools > Commander
 
 The same two-panel file manager as the desktop and DOS ones, over the
-places above: [05-Demo/commander.js](JavaScript/05-Demo/commander.js). A
+places above: [lib/js/apps/commander.js](../../lib/js/apps/commander.js),
+the library's, which any page can have. A
 "drive" is a place: Alt+F1 and Alt+F2 choose what the left and the right
 side show, as a drive letter did on DOS. The keys are Volkov
 Commander's:
@@ -174,12 +175,14 @@ The examples are read-only, so they are a good side to copy from.
 
 The demo's DOS menu switches on a DOS PC in a window: DOSBox, compiled to
 WebAssembly ([lib/js/jsdos](../../lib/js/jsdos/NOTICE.md), js-dos 8.3.20),
-put together in the page ([05-Demo/dos.js](JavaScript/05-Demo/dos.js)):
+put together in the page ([lib/js/apps/dos.js](../../lib/js/apps/dos.js), the
+library's; what is the demo's own - its starts, its files, its batch files -
+is in [05-Demo/app.js](JavaScript/05-Demo/app.js)):
 
 | On the PC | What it is |
 |---|---|
-| `C:\OWLOS` | OWLOSRES: the same Rust core as the page, built for DOS, resident behind INT 60h |
-| `C:\DEMO` | the DOS examples - the commander, the demo in Pascal, C and assembler - with their sources |
+| `C:\OWLOS` | the library's: OWLOSRES, the same Rust core as the page, built for DOS, resident behind INT 60h |
+| `C:\DEMO` | the demo's: the DOS examples - the commander, the demo in Pascal, C and assembler - with their sources |
 | `C:\GAMES\OWLFLY3` | OWL FLY III, a DOS flight game played over the network ([dos/](dos/README.md)) |
 | `A:`, `B:` | floppies that are folders of this browser's storage: `DOS A Drive` and `DOS B Drive` |
 
@@ -249,9 +252,10 @@ Everything the page has done since it opened, in a terminal window: the
 browser and screen it is running on, every window opened and closed, the DOS
 PC switching on and off with its settings, what DOSBox itself prints, programs
 run, files crossing to the floppies, the network, and every error nobody
-caught, with its stack. [log.js](JavaScript/05-Demo/log.js) records it from
-the first moment - before the console is opened, before anything can go wrong
-unseen - and [console.js](JavaScript/05-Demo/console.js) shows it.
+caught, with its stack. [log.js](../../lib/js/apps/log.js) records it from
+the first moment - `catchThePage()`, first thing in index.html, before the
+console is opened, before anything can go wrong unseen - and
+[console.js](../../lib/js/apps/console.js) shows it.
 
 For a bug report: **F4** writes the state of everything now - windows,
 memory, storage, the DOS PC and its emulator's counters, the network's

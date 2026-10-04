@@ -15,11 +15,15 @@
      worker adds them, and reloads the page once on the first visit. -->
 <script src="coi-serviceworker.js"></script>
 <script type="module">
+  // The log first, in a module of its own that runs before the next one
+  // loads anything: it is listening for errors before anything can make one.
+  import { catchThePage } from '../../../../lib/js/apps/log.js';
+  catchThePage();
+</script>
+<script type="module">
   // The whole page: the core (lib/js/owlosui-wire.wasm, found beside
   // owlosui.js), a canvas, and the program in app.js - which opens on
   // What to see, so a first visit knows where to start.
-  // The log first: it is listening for errors before anything can make one.
-  import './log.js';
   import { run } from '../../../../lib/js/owlosui.js';
   import { App } from './app.js';
   run(document.getElementById('screen'), owl => {

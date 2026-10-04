@@ -350,6 +350,20 @@ impl TextView {
         Some((total.min(i16::MAX as i32) as i16, at as i16))
     }
 
+    /// Where the caret is as a person sees it, from 0: the row and the
+    /// column on the screen. Folded, the Z after "Type here. Ctrl+" on the
+    /// second row is row 1, column 5 - not line 0, column 16, which is
+    /// where it is in the file and nowhere anyone is looking. Unfolded the
+    /// two are the same; past `ROWS_COUNTED` lines the file's own.
+    pub fn seen_position(&self) -> (i32, i32) {
+        if !self.wrapping() || self.lines.len() > ROWS_COUNTED {
+            return (self.cur.y as i32, self.cur.x as i32);
+        }
+        let (r, col) = self.row_col(self.cur);
+        let above: i32 = (0..self.cur.y.max(0)).map(|y| self.rows_of(y).len() as i32).sum();
+        (above + r as i32, col as i32)
+    }
+
     /// Row `n` of the whole folded text, as (line, row within it).
     pub fn row_named(&self, n: i16) -> (i16, i16) {
         let mut left = n.max(0) as i32;

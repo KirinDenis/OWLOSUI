@@ -10,7 +10,9 @@ console/      a screen: the terminal (VT output, raw input), and the code pages
 window/       a screen: a native Windows window, CreateWindow and GDI
 serve/        the core behind a pipe, speaking PROTOCOL.md; any language is a client
 csharp/       the C# client of that pipe, with the server carried inside it
-js/           the JavaScript client, and the server compiled to WebAssembly for it
+js/           the JavaScript client, and the server compiled to WebAssembly for it;
+              files/ the places a page keeps files, dosbox/ a DOS PC in a window,
+              apps/ the tools a page puts on its menu bar (below)
 dos/          DOS: OWLOSRES, the toolkit behind INT 60h, its bindings for
               assembler, C and Pascal, and the machine layer a Rust program links
 PROTOCOL.md   the wire: every request, its bytes, its reply
@@ -64,7 +66,9 @@ screen. The person can change the settings from the menu; `GET_EDITOR`
 **Line numbers and the position.** Two more settings beside Word wrap:
 line numbers in a dark grey column on the left, for code - an assembler
 says by number which line is wrong - and the caret's ` 12:5 ` on the
-window's bottom edge, where the classic IDEs had it. Both are state bits
+window's bottom edge, where the classic IDEs had it. Folded, the position
+is where the caret is seen - the row and the column on the screen - not
+its place in the file. Both are state bits
 (`state::NUMBERS`, `POSITION`; `numbers`, `position` in JavaScript and
 C#; `OWL_EDIT_NUMBERS`, `EditNumbers`, `EDIT_NUMBERS` and the same for
 the position), and both are on the Edit menu, ticked. The web demo and
@@ -159,6 +163,45 @@ in parts - `TEXT` or `SET_TEXT` with the first, `TEXT_APPEND` with the rest
 clients do both by themselves, so `text`, `setText` and `getText` take a
 file of any size. A reply that would be longer than a reply can be is an
 error, never a length that wrapped round.
+
+## Tools for a web page
+
+[js/apps/](js/apps/) holds what the web demo is made of beyond the kit
+itself, for any page to have - the demo and the 8086 course are two pages
+on the same code. Each is a class over `owl` that owns a range of command
+numbers and answers `handles(cmd)`, `onCommand(cmd)`, `owns(window)`,
+`closeWindow(window)` and `poll()`, so a page only routes:
+
+```
+documents.js   Documents: editor windows; File > New and Open from (fileMenu());
+               Save (F2) and Save as on the File menu while an editor is in
+               front; the Open / Save as dialog. The page gives the places
+               (`places`), where a new file's Save goes (`defaultSource`), and
+               what to do after a save (`saved`). Any file opens: a text as
+               text, anything else as its bytes, saved back byte for byte.
+commander.js   CommanderTool: two panels over the page's places, Volkov
+               Commander's keys. What Enter does is by extension
+               (`associations`: 'program', 'browser', 'edit', 'view', 'hex', or
+               a function - a course assembles an .ASM and runs it).
+dos.js         DosTool: a DOS PC in a window, its DOS menu, DOSBox settings,
+               floppies that are folders of the browser's storage. Its drive
+               C: is the library's - C:\OWLOS: OWLOSRES and CWSDPMI, and
+               C:\OWL.BAT, which runs a program with them - and the page's
+               (`disk`, `bundles`, `written`): a DOS program, a commander, a
+               game. What it can start into is the prompt and the page's
+               `starts`; `runLines(name, lines)` runs lines of the page's own.
+monitors.js    the DOS PC's network and machine monitors
+log.js         the page's log: catchThePage() first thing, then log.info(...)
+console.js     ConsoleWindow: the log in a terminal window, for a bug report
+```
+
+DosTool fetches its own files from lib/dos, next to lib/js as in this
+repository. A page with a copy of the library elsewhere passes
+`dosFiles`, the URL of a folder holding:
+
+```
+CWSDPMI.EXE  OWLOSRES.COM  OWLOSRES.BIN
+```
 
 ## Building
 
