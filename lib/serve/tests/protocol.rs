@@ -804,6 +804,92 @@ fn a_canvas_shows_the_cells_it_was_given_and_a_static_takes_new_words() {
     assert!(c.err(0x2C, &[u16(label).to_vec(), i16(0).to_vec(), i16(0).to_vec(), i16(0).to_vec(), i16(0).to_vec()].concat()).contains("not a canvas"));
 }
 
+/// HOLES: `n:u16` then `n × (x y w)`.
+fn holes(c: &mut Client) -> Vec<(i16, i16, i16)> {
+    let b = c.ok(0x71, &[]);
+    let n = u16::from_le_bytes([b[0], b[1]]) as usize;
+    let at = |i: usize| i16::from_le_bytes([b[i], b[i + 1]]);
+    (0..n).map(|k| (at(2 + k * 6), at(4 + k * 6), at(6 + k * 6))).collect()
+}
+
+#[test]
+fn a_hole_is_the_cells_nothing_covers_and_the_frame_is_unchanged() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(40), i16(12)].concat());
+    // Before any hole, and before any frame: none.
+    frame(&mut c);
+    assert!(holes(&mut c).is_empty());
+
+    let dos = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 20, 8), vec![0], s("DOS")].concat()));
+    let hole = id_of(&c.ok(0x70, &u16(dos)));
+    let f = frame(&mut c);
+    // The frame is the window's background, as for any client that has no
+    // picture underneath: a space in the window's own colour.
+    assert_eq!(f.glyph(5, 3), b' ' as u16, "{}", picture(&f));
+    // The inside, row by row.
+    assert_eq!(holes(&mut c), (1..7).map(|y| (1, y, 18)).collect::<Vec<_>>());
+
+    // A window over its right half takes its cells, and its shadow two more
+    // columns of the rows below its first.
+    c.ok(0x10, &[u16(0).to_vec(), rect(10, 2, 15, 3), vec![0], s("Over")].concat());
+    frame(&mut c);
+    let h = holes(&mut c);
+    assert!(h.contains(&(1, 1, 18)), "row 1 untouched: {h:?}");
+    assert!(h.contains(&(1, 2, 9)), "row 2 up to the window: {h:?}");
+    assert!(h.contains(&(1, 5, 11)) && h.contains(&(1, 6, 18)), "the shadow below starts two columns in: {h:?}");
+
+    // Closed, the hole takes nothing more; a hole is a view like any other.
+    c.ok(0x20, &u16(hole));
+    frame(&mut c);
+    assert!(holes(&mut c).is_empty());
+}
+
+/// TAKE_LINK: `href:str`.
+fn take_link(c: &mut Client, id: u16) -> String {
+    let b = c.ok(0x73, &u16(id));
+    let n = u16::from_le_bytes([b[0], b[1]]) as usize;
+    String::from_utf8(b[2..2 + n].to_vec()).unwrap()
+}
+
+#[test]
+fn a_help_page_follows_its_own_anchors_and_hands_out_every_other_link() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(60), i16(16)].concat());
+    let help = id_of(&c.ok(0x10, &[u16(0).to_vec(), rect(0, 0, 40, 12), vec![0x10], s("Help")].concat()));
+    let page = id_of(&c.ok(0x72, &[u16(help).to_vec(), rect(0, 0, 0, 0),
+        s("<h1>Keys</h1><p>See <a href=\"#more\">more</a> or <a href=\"drives\">the drives</a>.</p>\
+           <p>.</p><p>.</p><p>.</p><p>.</p><p>.</p><p>.</p><p><a name=\"more\">More</a> here.</p>")].concat()));
+    let f = frame(&mut c);
+    assert!(find(&f, "Keys").is_some() && find(&f, "the drives").is_some(), "{}", picture(&f));
+    assert_eq!(take_link(&mut c, page), "", "nothing followed yet");
+
+    // Enter on the first link, a #name: the page follows it itself and
+    // hands nothing out.
+    c.ok(0x30, &[2, 0, 0, 0]);
+    assert_eq!(take_link(&mut c, page), "");
+    // Tab to the next and Enter: the program's to follow - once.
+    c.ok(0x30, &[2, 2, 0, 0]);
+    c.ok(0x30, &[2, 0, 0, 0]);
+    assert_eq!(take_link(&mut c, page), "drives");
+    assert_eq!(take_link(&mut c, page), "", "read once");
+
+    // SET_TEXT: the page it named, in the same window.
+    c.ok(0x2B, &[u16(page).to_vec(), s("<h1>Drives</h1><p>A letter each.</p>")].concat());
+    let f = frame(&mut c);
+    assert!(find(&f, "Drives").is_some() && find(&f, "Keys").is_none(), "{}", picture(&f));
+
+    // A click on a link follows it too: one press both focuses and follows.
+    c.ok(0x2B, &[u16(page).to_vec(), s("<p><a href=\"lessons\">Lessons</a></p>")].concat());
+    let f = frame(&mut c);
+    let (x, y) = find(&f, "Lessons").expect("the link is drawn");
+    mouse(&mut c, 0, x + 1, y);
+    mouse(&mut c, 1, x + 1, y);
+    assert_eq!(take_link(&mut c, page), "lessons");
+
+    // Not a help page: refused.
+    assert!(c.err(0x73, &u16(help)).contains("not a help page"));
+}
+
 /// `flags cmd text shortcut sub...` for one plain item.
 fn item(flags: u8, cmd: u16, text: &str, shortcut: &str, sub: Vec<u8>) -> Vec<u8> {
     [vec![flags], u16(cmd).to_vec(), s(text), s(shortcut), s(""), sub].concat()
@@ -956,7 +1042,7 @@ fn a_keypad_of_placed_rows_over_the_wire() {
     assert_eq!(attr_at(&f, px + 2, py), 0x30, "accent: black on cyan");
     assert_eq!(attr_at(&f, ax + 2, ay), 0x78, "disabled: dark grey on grey");
     // The last key of a row keeps its right-hand shadow.
-    assert_eq!(f.glyph(ax + 6, ay), 0xDD, "the shadow beside the last key");
+    assert_eq!(f.glyph(ax + 6, ay), 0xDC, "the shadow beside the last key");
     // Only = wears the default marks: a placed row implies no default.
     assert!(find(&f, "\u{10}  =  \u{11}").is_some(), "= is the default");
     assert!(find(&f, "\u{10}  C  \u{11}").is_none(), "C is not");

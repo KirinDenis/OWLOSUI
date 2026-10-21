@@ -5,6 +5,14 @@
 //! parent hands down absolute coordinates and a clip, and a child that draws
 //! outside it simply has nothing happen. That is the whole occlusion story:
 //! draw back to front, clip on the way down.
+//!
+//! A cell can also be a *hole*: drawn as the window's own background, and
+//! marked as showing what lies under the screen - a page's emulator picture
+//! behind the canvas. Whatever is drawn over a hole afterwards, a menu, a
+//! shadow, another window, writes the cell the ordinary way and the mark
+//! goes with it, so the marks left at the end of a frame are exactly the
+//! hole cells nothing covers. A screen with nothing underneath shows the
+//! background and never asks.
 
 // `no_std` needs these named; with `std` they are the prelude's.
 #[allow(unused_imports)]
@@ -16,6 +24,9 @@ pub struct Buffer {
     w: i16,
     h: i16,
     cells: Vec<Cell>,
+    /// One flag a cell, true where it is a hole; empty while there is
+    /// none, which is every frame of a program that never makes one.
+    holes: Vec<bool>,
 }
 
 impl Buffer {
@@ -26,6 +37,7 @@ impl Buffer {
             w,
             h,
             cells: vec![Cell::new(glyph::SPACE, attr(Color::LightGray, Color::Black)); (w as usize) * (h as usize)],
+            holes: Vec::new(),
         }
     }
 
@@ -53,6 +65,7 @@ impl Buffer {
         }
         self.w = w;
         self.h = h;
+        self.holes.clear();
         self.cells.clear();
         self.cells.resize(
             (w as usize) * (h as usize),
@@ -76,7 +89,48 @@ impl Buffer {
         if !clip.contains(crate::geom::Point::new(x, y)) {
             return;
         }
-        self.cells[(y as usize) * (self.w as usize) + (x as usize)] = Cell::new(ch, a);
+        let i = (y as usize) * (self.w as usize) + (x as usize);
+        self.cells[i] = Cell::new(ch, a);
+        if !self.holes.is_empty() {
+            self.holes[i] = false;
+        }
+    }
+
+    /// Make one cell a hole: a space in `a`, the background a screen with
+    /// nothing under it shows, marked to show what is under the screen
+    /// instead. Silently does nothing outside the buffer or the clip.
+    pub fn hole(&mut self, x: i16, y: i16, a: u8, clip: Rect) {
+        if x < 0 || y < 0 || x >= self.w || y >= self.h {
+            return;
+        }
+        if !clip.contains(crate::geom::Point::new(x, y)) {
+            return;
+        }
+        let i = (y as usize) * (self.w as usize) + (x as usize);
+        self.cells[i] = Cell::new(glyph::SPACE, a);
+        if self.holes.is_empty() {
+            self.holes.resize(self.cells.len(), false);
+        }
+        self.holes[i] = true;
+    }
+
+    /// Whether a cell is a hole that nothing has been drawn over.
+    pub fn is_hole(&self, x: i16, y: i16) -> bool {
+        if x < 0 || y < 0 || x >= self.w || y >= self.h || self.holes.is_empty() {
+            return false;
+        }
+        self.holes[(y as usize) * (self.w as usize) + (x as usize)]
+    }
+
+    /// Whether any cell is a hole: a screen with none skips looking.
+    pub fn has_holes(&self) -> bool {
+        self.holes.iter().any(|&h| h)
+    }
+
+    /// Every mark taken off: before a frame is drawn into a buffer that
+    /// held the last one.
+    pub fn clear_holes(&mut self) {
+        self.holes.clear();
     }
 
     /// Recolour one cell without touching its glyph. Used for selection.
@@ -87,7 +141,12 @@ impl Buffer {
         if !clip.contains(crate::geom::Point::new(x, y)) {
             return;
         }
-        self.cells[(y as usize) * (self.w as usize) + (x as usize)].attr = a;
+        let i = (y as usize) * (self.w as usize) + (x as usize);
+        self.cells[i].attr = a;
+        // A shadow over a hole is a shadow: the cell is the screen's again.
+        if !self.holes.is_empty() {
+            self.holes[i] = false;
+        }
     }
 
     /// Write raw code page bytes.

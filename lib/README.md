@@ -141,7 +141,11 @@ documents, cyan for help, grey for dialogs, and black for a terminal - a
 console's window, its frame the colour of what is in it (`Style.Terminal`,
 `OWL_BLACK`, `OwlBlack`, `WF_BLACK`). `SET_TAG` puts a word after the title
 as `[modal]` is, `SET_INDICATOR` words at the right of the status line,
-`PLACE` says where a window's inside is and whether anything covers it.
+`PLACE` says where a window's inside is and whether anything covers it,
+and `HOLE` (`hole`, `Hole`) makes it a hole: a web page puts its own
+element under the canvas there - the DOS PC's picture - and sees it through
+every cell nothing else is drawn over, a menu or a shadow hiding only its
+own cells. A screen with nothing underneath shows the window's background.
 
 ## The console
 

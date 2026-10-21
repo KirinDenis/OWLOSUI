@@ -105,6 +105,8 @@ that size.
 | 0x55 | TREE_EXPAND | `id` | `depth:u8` then `depth × (index:u16 text:str)` — the lazy node somebody opened, once, or depth `0` |
 | 0x56 | TREE_PATH   | `id` | `n:u8` then `n × str` — the texts from the root down to the current row |
 | 0x1F | HEX         | `parent:id rect bytes…` | `id` — a hex dump of the bytes (the rest of the payload), filling its window |
+| 0x70 | HOLE        | `parent:id` | `id` — a hole filling its window: cells that show what is under the screen; see below |
+| 0x72 | HTML        | `parent:id rect source:str` | `id` — a help page filling its window (the rect is read and not used, as `HEX`'s is), from a small HTML; see below |
 | 0x1E | BUTTON_ROW  | `parent:id rect flags:u8 n:u8` then `n ×` (`cmd:u16 flags:u8 label:str`) | `id` — a row placed by hand, from the left; `rect.w` of `0` means as wide as its buttons; row `flags` bit 0 takes it out of the Tab ring |
 
 A `rect` with `x` or `y` of `-1` means *centre it* - now, and again after
@@ -192,6 +194,27 @@ what floats above, never wrapped. A game board, a chart, a piece of ANSI
 art. A cell of `ch = 0, attr = 0xFF` is *clear*: not drawn, so the window
 shows through - and a new canvas is all clear.
 
+`HOLE` is a window's inside left for a picture the core does not draw -
+a web page's emulator, put under the page's canvas. In the frame its cells
+are the window's background, a space in the window's colour, which is what
+a client with nothing under its screen - a console, a native window, DOS -
+shows, and needs to know nothing more. A client that has a picture
+underneath asks `HOLES` after `FRAME`: the hole's cells that nothing is
+drawn over, cell by cell. A menu, a dialog, another window, a shadow covers
+exactly the cells it covers there, as it does anywhere; the client makes the
+rest transparent and the picture shows through. `CLOSE` takes the hole
+away and the window's own inside comes back.
+
+`HTML` is a help page: links, headings, `<b>`, paragraphs, line breaks,
+rules, bulleted lists and `<pre>` - nothing else survives an 80x25 screen
+in sixteen colours, and colour comes from the palette by role, never from
+the page. Tab and Shift+Tab go from link to link, Enter or a click
+follows one (a click both focuses and follows). An `<a href="#name">` the
+page follows itself, to its `<a name="name">`; any other link is handed
+out: `TAKE_LINK` gives its `href`, once, after the event that followed
+it. The program does what it names - fetches another page and shows it
+with `SET_TEXT` on the view, or does something else altogether.
+
 `MENU_BAR` is the bar across the top, one per desktop; a second replaces
 the first. `items` is `n:u8` then `n ×` (`flags:u8 cmd:u16 text:str
 shortcut:str` then that item's own `items`, the same shape, empty for a
@@ -234,11 +257,12 @@ name, for a commander that puts the folder in its window's title
 | 0x24 | GET_CURRENT  | `id`      | `u16` — the item under the cursor of a `LIST` |
 | 0x25 | SET_FILES    | `id path:str mask:str entries` | OK — a new listing for a `FILES` panel |
 | 0x26 | TAKE_FILES   | `id`      | `kind:u8 text:str` — `1` a name Enter was pressed on, `2` a path typed and entered, `0` nothing; read once |
+| 0x73 | TAKE_LINK    | `id`      | `href:str` — the link followed in an `HTML` page that the page could not follow itself (anything but a `#name`), or empty; read once |
 | 0x27 | ACTIVATE     | `id`      | OK — bring a window to the front |
 | 0x28 | MARKED_NAMES | `id`      | `n:u16` then `n × str` — a `FILES` panel's marked names, or the one under the cursor if none are |
 | 0x29 | SET_FILES_ERROR | `id text:str` | OK — show a message in the panel's pane, e.g. a folder that could not be read |
 | 0x61 | UNMARK | `id` | OK — a `FILES` panel's marks all taken off: what a commander does after copying, moving or deleting the marked files. Marks are kept on their names through `SET_FILES` of the same folder, and dropped by one of another |
-| 0x62 | PLACE | `id` (a window) | `x:i16 y:i16 w:i16 h:i16 covered:u8` — the window's inside, in cells from the screen's top left, as the last frame laid it out; `covered` is 1 while anything is drawn over any of it: a window above it, that window's shadow, an open menu. For a program that lays something of its own over a window - a web page's emulator picture - and must hide it while the window is covered |
+| 0x62 | PLACE | `id` (a window) | `x:i16 y:i16 w:i16 h:i16 covered:u8` — the window's inside, in cells from the screen's top left, as the last frame laid it out; `covered` is 1 while anything is drawn over any of it: a window above it, that window's shadow, an open menu. For a program that shows something of its own through a window's `HOLE` - a web page's emulator picture: where to put it, and, while covered, to take the keyboard from it |
 | 0x65 | SET_TAG | `id` (a window) `tag:str` | OK — a word in brackets after the window's title, drawn as `[modal]` is: what the window is doing that its name does not say - `[awake]` on an emulator that keeps running in a background tab. Empty takes it away; `[modal]` wins over it |
 | 0x66 | SET_INDICATOR | `id` (a window) `text:str` | OK — words at the right end of the status line while the window is in front, where an editor shows its line and column; a part between tildes is lit, green: `[~A:~ B: C:]`. Empty for none |
 | 0x67 | CONSOLE | `parent rect scrollback:u16` | `id` — a console filling its window (the rect is read and not used, as `HEX`'s is): a terminal, light grey on black, that keeps `scrollback` lines (`0`: a thousand), folds long lines to its width, and follows the newest one until it is scrolled back - Up, Down, PgUp, PgDn, Home, the wheel and its bar; End follows again. `GET_TEXT` on it gives the whole record as plain text, its colours left out |
@@ -248,7 +272,7 @@ name, for a commander that puts the folder in its window's title
 | 0x68 | CONSOLE_WRITE | `id text:str` | OK — text at the end of a `CONSOLE`, its ANSI sequences obeyed and never shown: SGR colours (`ESC[0m`, `1`, `22`, `7`, `27`, `30`-`37`, `39`, `40`-`47`, `49`, `90`-`97`, `100`-`107`, and `38;5;n` / `38;2;r;g;b` and their `48` forms folded onto the sixteen colours), CR, LF, tab, backspace, `ESC[K` (0, 1, 2), `ESC[J` (2 and 3 clear it all), `ESC[nC`, `ESC[nD`, `ESC[nG`, `ESC[r;cH` (its row ignored: there is only the line being written). Cursor movement up and every other sequence is consumed and ignored; `ESC]`…`BEL` titles too. A sequence cut in two between writes is still one |
 | 0x5A | ADD_FILES | `id` then entries as in FILES | OK — more names for a panel: a listing bigger than one request (64K) is sent as FILES or SET_FILES with the first part and ADD_FILES with the rest |
 | 0x2A | ACTIVE       | —         | `id` — the active window, or `0` |
-| 0x2B | SET_TEXT     | `id text:str` | OK — new words for a `STATIC` (keeps its place and width), an `INPUT` (keeps its label), a `TEXT` (starts over, keeping what it offers and its language) or a `WINDOW` (its title) |
+| 0x2B | SET_TEXT     | `id text:str` | OK — new words for a `STATIC` (keeps its place and width), an `INPUT` (keeps its label), a `TEXT` (starts over, keeping what it offers and its language), an `HTML` page (another page, from its top) or a `WINDOW` (its title) |
 | 0x2C | BLIT         | `id x:i16 y:i16 w:i16 h:i16` then `w×h ×` (`ch:u16 attr:u8`) | OK — cells into a `CANVAS` |
 | 0x2D | MENU_CHECK   | `cmd:u16 on:u8` | OK — tick or untick the menu item that sends `cmd` |
 | 0x2E | GET_CLUSTER  | `id`      | `n:u8` then `n × u8` (on or off) then `current:u8` |
@@ -291,6 +315,7 @@ is the client's, and about 90 ms is long enough to be seen.
 |------|-------|---------|-------|
 | 0x40 | FRAME | —       | `w:i16 h:i16 cx:i16 cy:i16 hold:u8 glyphs:u16` then `w×h ×` (`glyph:u16 attr:u8`) |
 | 0x41 | TAKE  | —       | `pressed:u16 command:u16` |
+| 0x71 | HOLES | — | `n:u16` then `n × (x:i16 y:i16 w:i16)` — the cells of the last `FRAME` that show what is under the screen: the cells of every `HOLE` that nothing was drawn over, as runs along a row, top to bottom. None for a client that never made a hole |
 | 0x42 | GET_GLYPHS | —  | `growing:u8 n:u16` then `n × u16` — the Unicode code point of each glyph index in the session's font |
 | 0x43 | CYCLE | —       | OK — the front window goes to the back (the classic F6) |
 | 0x44 | ZOOM  | `id`    | OK — a window fills the work area, or goes back to its size (F5) |

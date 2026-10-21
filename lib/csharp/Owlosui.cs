@@ -411,6 +411,18 @@ public sealed class Owlosui : IDisposable
     }
 
     /// <summary>
+    /// A help page filling its window, from a small HTML: links, headings,
+    /// &lt;b&gt;, paragraphs, line breaks, rules, bulleted lists and &lt;pre&gt;.
+    /// Tab and Shift+Tab go from link to link, Enter or a click follows one;
+    /// a <c>#name</c> it follows itself, any other link waits for
+    /// <see cref="TakeLink"/>. <c>SetText</c> shows another page in it.
+    /// </summary>
+    public ushort Html(ushort parent, string source) => R.U16(Call(Op.Html, W.U16(parent), W.Rect(0, 0, 0, 0), W.Str(source)));
+
+    /// <summary>The link followed in a help page since last asked - empty for none; read once.</summary>
+    public string TakeLink(ushort id) => R.Str(Call(Op.TakeLink, W.U16(id)), 0);
+
+    /// <summary>
     /// A hex dump filling its window: offsets, bytes, characters. At most
     /// 64K of bytes cross the wire in one call; send the part to be seen.
     /// </summary>
@@ -807,8 +819,9 @@ public sealed class Owlosui : IDisposable
     /// <summary>
     /// Where a window's inside is, in cells from the screen's top left, as
     /// the last frame laid it out, and whether anything is drawn over any of
-    /// it - a window above, its shadow, an open menu. For a program that lays
-    /// a picture of its own over a window and must hide it while covered.
+    /// it - a window above, its shadow, an open menu. For a program that
+    /// shows a picture of its own through a window's <see cref="Hole"/> and
+    /// takes the keyboard from it while the window is covered.
     /// </summary>
     public (int x, int y, int w, int h, bool covered) Place(ushort window)
     {
@@ -951,6 +964,27 @@ public sealed class Owlosui : IDisposable
     /// </summary>
     public ushort Canvas(ushort parent, int x, int y, int w, int h) =>
         R.U16(Call(Op.Canvas, W.U16(parent), W.Rect(x, y, w, h)));
+
+    /// <summary>
+    /// A hole filling a window's inside: where a screen with a picture of
+    /// its own underneath - a web page's emulator - shows the picture,
+    /// wherever nothing is drawn over it. A console has nothing underneath
+    /// and draws it as the window's background, as the frame says.
+    /// </summary>
+    public ushort Hole(ushort parent) => R.U16(Call(Op.Hole, W.U16(parent)));
+
+    /// <summary>
+    /// The holes of the last frame, each a run of cells along a row: what
+    /// a screen with a picture underneath leaves clear.
+    /// </summary>
+    public (int x, int y, int w)[] Holes()
+    {
+        var r = Call(Op.Holes);
+        var n = R.U16(r, 0);
+        var runs = new (int x, int y, int w)[n];
+        for (var i = 0; i < n; i++) runs[i] = (R.I16(r, 2 + i * 6), R.I16(r, 4 + i * 6), R.I16(r, 6 + i * 6));
+        return runs;
+    }
 
     /// <summary>
     /// Put a block of cells into a canvas: <paramref name="chars"/> and
@@ -1711,6 +1745,7 @@ public sealed class Owlosui : IDisposable
         public const byte Find = 0x57, Replace = 0x58, ReplaceAll = 0x59, Editor = 0x5D, GetEditor = 0x5E, Syntax = 0x5F, SyntaxDefine = 0x60, Unmark = 0x61;
         public const byte OpenWindow = 0x5B, Wait = 0x5C;
         public const byte Console = 0x67, ConsoleWrite = 0x68, Minimize = 0x6C, TextAppend = 0x6D, GetTextPart = 0x6E, GetTextBytes = 0x6F;
+        public const byte Hole = 0x70, Holes = 0x71, Html = 0x72, TakeLink = 0x73;
         public const byte Place = 0x62, SetTag = 0x65, SetIndicator = 0x66;
         public const byte Clipboard = 0x69, ClipboardGet = 0x6A, ClipboardPaste = 0x6B;
         public const byte Key = 0x30, Mouse = 0x31, Tick = 0x32;

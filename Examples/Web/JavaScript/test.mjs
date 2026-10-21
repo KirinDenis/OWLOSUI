@@ -617,6 +617,49 @@ await test('Commander: two panels, the examples and the server; F5 copies, F6 re
   rmSync(join(folder, 'BOX'), { recursive: true, force: true });
 });
 
+await test('lib: a hole shows what is under the canvas, except where a menu or a window is over it', async () => {
+  const o = await owl();
+  o.menuBar({ label: '~F~ile', items: [{ label: '~O~pen', cmd: 1 }] });
+  const w = o.window('DOS', 42, 14, { x: 10, y: 3 });
+  let f = o.frame();
+  check(!f.holes && !f.isHole(20, 8), 'a page with no hole has holes', f);
+  const hole = o.hole(w);
+  f = o.frame();
+  check(f.isHole(11, 4) && f.isHole(50, 15) && !f.isHole(10, 4) && !f.isHole(51, 15), 'the inside is not the hole', f);
+  // The File menu over its left: only those cells stop being a hole.
+  o.press('f', { alt: true });
+  f = o.frame();
+  const menu = f.find('Open');
+  check(menu && !f.isHole(menu.x, menu.y) && f.isHole(50, 15), 'the menu does not cover just its own cells', f);
+  o.press('Escape');
+  // Closed, the hole is gone and the window is the window again.
+  o.close(hole);
+  check(!o.frame().isHole(20, 8), 'the hole outlived its close');
+});
+
+await test('lib: a help page follows its own #anchors and hands out every other link', async () => {
+  const o = await owl();
+  const w = o.window('Help', 50, 14, { style: Style.Help });
+  const page = o.html(w, '<h1>Keys</h1><p>See <a href="#more">more</a> or <a href="drives">the drives</a>.</p>' +
+    '<p>.</p>'.repeat(8) + '<p><a name="more">More</a> here.</p>');
+  let f = o.frame();
+  check(f.find('Keys') && f.find('the drives'), 'the page is not drawn', f);
+  check(o.takeLink(page) === '', 'a link before any was followed');
+  o.press('Enter');                       // the first link, #more: the page's own
+  check(o.takeLink(page) === '', 'a #name handed out');
+  o.press('Tab');
+  o.press('Enter');
+  const got = o.takeLink(page);
+  check(got === 'drives' && o.takeLink(page) === '', `followed: "${got}", or not read once`);
+  // Another page in the same window, and a click on its link.
+  o.setText(page, '<h1>Drives</h1><p><a href="lessons">Lessons</a></p>');
+  f = o.frame();
+  const at = f.find('Lessons');
+  check(f.find('Drives') && !f.find('Keys') && at, 'setText did not show the new page', f);
+  o.click(at.x + 1, at.y);
+  check(o.takeLink(page) === 'lessons', 'a click did not follow the link');
+});
+
 // ------------------------------------------- lib/js/apps, for other pages
 
 const { CommanderTool, ASSOCIATIONS } = await import('../../../lib/js/apps/commander.js');

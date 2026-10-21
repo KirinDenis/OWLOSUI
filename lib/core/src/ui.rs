@@ -2680,6 +2680,7 @@ impl Ui {
         self.compose_bars();
         self.measure();
         let clip = buf.rect();
+        buf.clear_holes();
         let blue = self.palette.blue;
         self.draw_node(self.root, buf, clip, &blue);
         self.draw_anim(buf, clip);
@@ -2896,6 +2897,17 @@ impl Ui {
             }
             Kind::MenuBar(m) => self.draw_menu_bar(m, abs, buf, clip),
             Kind::MenuBox(m) => self.draw_menu_box(m, abs, buf, clip, parent_clip),
+            Kind::Hole => {
+                // The window's background, every cell marked: a screen with
+                // a picture underneath shows the picture through whatever of
+                // it is still a hole when the frame is done.
+                let r = abs.intersect(&clip);
+                for y in r.y..r.bottom() {
+                    for x in r.x..r.right() {
+                        buf.hole(x, y, wc.body, clip);
+                    }
+                }
+            }
         }
 
         let child_clip = clip.intersect(&self.client_abs(id));
@@ -3845,8 +3857,12 @@ impl Ui {
                 // one-cell-tall button is as thick as the button and reads as
                 // a second button; `▀` puts the dark at the top of the row
                 // below, hugging the edge, which is what a shadow looks like.
+                // Beside the button `▄`, the lower half of the cell: the same
+                // thickness as the strip below and the same half-row drop, so
+                // the two meet in one step. A left half, `▌`, was a thin bar
+                // the button's full height, starting level with its top.
                 buf.hline(x + 1, y + 1, w, 0xDF as Glyph, shadow, clip);
-                buf.vline(x + w, y, 1, 0xDD as Glyph, shadow, clip);
+                buf.vline(x + w, y, 1, 0xDC as Glyph, shadow, clip);
             }
 
             buf.fill(Rect::new(x, y, w, 1), b' ', a, clip);
@@ -5403,6 +5419,15 @@ impl Ui {
                     f.current = ix;
                     f.focus = crate::files::Focus::List;
                     f.path.focused = false;
+                }
+            }
+            // A link under the pointer: one press both focuses and follows
+            // it, as the window's own path does for a page outside the focus
+            // ring. A help page made by HTML is in it, so the click arrives here.
+            Kind::Html(h) => {
+                if let Some(ix) = h.link_at(h.top + row, col) {
+                    h.focus = ix;
+                    h.follow(r.h);
                 }
             }
             // The caret goes where the pointer is, and a selection starts

@@ -369,6 +369,11 @@ pub enum Kind {
     Canvas(crate::controls::Canvas),
     /// Text that keeps arriving, coloured by its ANSI sequences: a log.
     Console(crate::console::Console),
+    /// A window onto what lies under the screen: cells left for a picture
+    /// the core does not draw - a web page's emulator behind its canvas.
+    /// Drawn as the window's background, each cell marked a hole (see
+    /// `Buffer::hole`); what is drawn over it later takes the mark away.
+    Hole,
 }
 
 /// Where a child sits inside its parent.

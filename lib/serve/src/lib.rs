@@ -136,6 +136,10 @@ pub mod op {
     pub const TEXT_APPEND: u8 = 0x6D;
     pub const GET_TEXT_PART: u8 = 0x6E;
     pub const GET_TEXT_BYTES: u8 = 0x6F;
+    pub const HOLE: u8 = 0x70;
+    pub const HOLES: u8 = 0x71;
+    pub const HTML: u8 = 0x72;
+    pub const TAKE_LINK: u8 = 0x73;
 }
 
 /// The most text one GET_TEXT or GET_TEXT_PART carries: a reply is at most
@@ -394,6 +398,10 @@ pub struct Server {
     /// index, and the client fetches the table again when a frame refers
     /// past what it has.
     cp: Font,
+    /// The holes of the last FRAME, as runs along its rows: `(x, y, w)`.
+    /// HOLES hands them out; a client with a picture under its screen
+    /// shows the picture there.
+    holes: Vec<(i16, i16, i16)>,
 }
 
 impl Default for Server {
@@ -410,6 +418,7 @@ impl Server {
             status: None,
             menu: None,
             cp: Font::growing(437).expect("437 is built in"),
+            holes: Vec::new(),
         }
     }
 
@@ -718,6 +727,23 @@ impl Server {
                 }
                 let n = ui.replace_all_text(id, &pat, &with, flags & 1 != 0, flags & 2 != 0);
                 out.u16(n);
+            }
+
+            op::HTML => {
+                // A help page filling its window (owlosui_core::Html): links,
+                // headings, <b>, paragraphs, line breaks, rules, bulleted
+                // lists and <pre>. Tab and Shift+Tab go from link to link,
+                // Enter or a click follows one; a `#name` it follows itself,
+                // anything else waits for TAKE_LINK.
+                let parent = r.id("parent")?;
+                let rect = r.rect()?;
+                let source = self.cp.to_core(&r.str("source")?);
+                let parent = self.alive(parent)?;
+                let ui = self.ui()?;
+                let id = ui.insert(parent, rect, Kind::Html(owlosui_core::Html::new(&source)));
+                ui.set_dock(id, Dock::Fill);
+                self.settle_focus()?;
+                out.id(id);
             }
 
             op::HEX => {
@@ -1151,6 +1177,21 @@ impl Server {
                 }
             }
 
+            op::TAKE_LINK => {
+                // The link the person followed in a help page - Enter on it,
+                // or a click - that the page could not follow by itself: any
+                // `href` but a `#name` in it. Read once, like TAKE; empty for
+                // none. The program fetches what it names and sends it with
+                // SET_TEXT, or does what it says.
+                let id = r.id("id")?;
+                let id = self.alive(id)?;
+                let href = match self.ui()?.kind_mut(id) {
+                    Kind::Html(h) => h.pending.take().unwrap_or_default(),
+                    _ => return Err(format!("view {} is not a help page", id.raw())),
+                };
+                out.str(&self.cp.from_core(&href));
+            }
+
             op::TAKE_FILES => {
                 // What the person did in the panel since last asked: typed a
                 // path and pressed Enter (2), or pressed Enter on a name (1).
@@ -1543,6 +1584,17 @@ impl Server {
                 out.u8(pasted as u8);
             }
 
+            op::HOLE => {
+                // A hole filling its window: what is under the screen shows
+                // through it wherever nothing is drawn over it.
+                let parent = r.id("parent")?;
+                let parent = self.alive(parent)?;
+                let ui = self.ui()?;
+                let id = ui.insert(parent, Rect::default(), Kind::Hole);
+                ui.set_dock(id, Dock::Fill);
+                out.id(id);
+            }
+
             op::CANVAS => {
                 let parent = r.id("parent")?;
                 let rect = r.rect()?;
@@ -1594,6 +1646,8 @@ impl Server {
                     // New contents, the same editor: what it offers, its
                     // wrap, keys and language are kept.
                     Kind::Text(t) => t.set_lines(lines),
+                    // Another page in the same help window: a followed link's.
+                    Kind::Html(h) => h.load(&core),
                     _ => return Err(format!("view {} has no text to set", id.raw())),
                 }
             }
@@ -1703,6 +1757,37 @@ impl Server {
                         out.u16(ch);
                         out.u8(attr);
                     }
+                }
+                // Kept for HOLES rather than sent: a client with nothing
+                // under its screen never asks, and its frame is unchanged.
+                self.holes.clear();
+                if buf.has_holes() {
+                    for y in 0..r.h {
+                        let mut x = 0;
+                        while x < r.w {
+                            if buf.is_hole(x, y) {
+                                let from = x;
+                                while x < r.w && buf.is_hole(x, y) {
+                                    x += 1;
+                                }
+                                self.holes.push((from, y, x - from));
+                            } else {
+                                x += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            op::HOLES => {
+                // The cells of the last frame that show what is under the
+                // screen - no more than a reply carries; a frame has fewer.
+                let n = self.holes.len().min((0xFFFF - 2) / 6);
+                out.u16(n as u16);
+                for &(x, y, w) in &self.holes[..n] {
+                    out.i16(x);
+                    out.i16(y);
+                    out.i16(w);
                 }
             }
 

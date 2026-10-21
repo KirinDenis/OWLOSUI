@@ -385,6 +385,52 @@ internal static class Tests
             Check(owl.GetText(t) == "hello world", $"the text is '{owl.GetText(t)}'");
         });
 
+        Case("A hole is the window's background on a console, and the cells nothing covers", () =>
+        {
+            // A console has nothing under its screen: the frame is the same
+            // as for a window with nothing in it. Holes() says what a screen
+            // with a picture underneath would leave clear.
+            using var owl = Owl();
+            var w = owl.Window("DOS", 20, 6, x: 0, y: 0);
+            var empty = owl.GetFrame();
+            var hole = owl.Hole(w);
+            var f = owl.GetFrame();
+            Check(f.Glyph(5, 2) == empty.Glyph(5, 2) && f.Attr(5, 2) == empty.Attr(5, 2), "a hole looks different from the window's background", f);
+            var runs = owl.Holes();
+            Check(runs.Length == 4 && runs.All(r => r.x == 1 && r.w == 18), $"the holes are {string.Join(" ", runs)}");
+            // A window over a part of it takes those cells, its shadow too.
+            owl.Window("Over", 10, 3, x: 10, y: 1);
+            owl.GetFrame();
+            runs = owl.Holes();
+            Check(runs.Contains((1, 1, 9)) && runs.Contains((1, 4, 11)), $"under the window: {string.Join(" ", runs)}");
+            owl.Close(hole);
+            owl.GetFrame();
+            Check(owl.Holes().Length == 0, "the hole stayed after it was closed");
+        });
+
+        Case("A help page follows its own #anchors and hands out every other link", () =>
+        {
+            using var owl = Owl();
+            var w = owl.Window("Help", 50, 14, style: Owlosui.Style.Help);
+            var page = owl.Html(w, "<h1>Keys</h1><p>See <a href=\"#more\">more</a> or <a href=\"drives\">the drives</a>.</p>" +
+                string.Concat(Enumerable.Repeat("<p>.</p>", 8)) + "<p><a name=\"more\">More</a> here.</p>");
+            var f = owl.GetFrame();
+            Check(f.Find("Keys") != null && f.Find("the drives") != null, "the page is not drawn", f);
+            Check(owl.TakeLink(page) == "", "a link before any was followed");
+            owl.Press(ConsoleKey.Enter);            // the first link, #more: the page's own
+            Check(owl.TakeLink(page) == "", "a #name was handed out");
+            owl.Press(ConsoleKey.Tab);
+            owl.Press(ConsoleKey.Enter);
+            var got = owl.TakeLink(page);
+            Check(got == "drives" && owl.TakeLink(page) == "", $"followed '{got}', or not read once");
+            owl.SetText(page, "<h1>Drives</h1><p><a href=\"lessons\">Lessons</a></p>");
+            f = owl.GetFrame();
+            var at = f.Find("Lessons");
+            Check(f.Find("Drives") != null && f.Find("Keys") == null && at != null, "SetText did not show the new page", f);
+            owl.Click(at!.Value.x + 1, at.Value.y);
+            Check(owl.TakeLink(page) == "lessons", "a click did not follow the link");
+        });
+
         Case("A file of 200 KB goes in whole, grows, and comes back to the last character", () =>
         {
             // A request carries 64 KB. In pieces it goes in, in parts it comes
