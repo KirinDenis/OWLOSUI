@@ -11,6 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { Wire, Owlosui, Style, sub } from '../../../lib/js/owlosui.js';
 import { Finger, typedBetween } from '../../../lib/js/touch.js';
+import { keyFor, GLFW, Trackpad } from '../../../lib/js/dosbox/doskeys.js';
 import * as Hello from './01-HelloWorld/app.js';
 import * as Notes from './02-Notes/app.js';
 import * as Calc from './03-Calculator/app.js';
@@ -883,6 +884,51 @@ await test('touch: pinched bigger, a drag moves the view - but a title still mov
   finger.up(200);
   const p = o.place(w);
   check(p.x === 11 && p.y === 6, `the window did not move by its title: ${p.x},${p.y}`, o.frame());
+});
+
+await test('touch: DOS - a character is the keys a US keyboard presses for it', async () => {
+  const k = ch => JSON.stringify(keyFor(ch));
+  check(k('a') === '{"code":65,"shift":false}', 'a');
+  check(k('A') === '{"code":65,"shift":true}', 'A is Shift and a');
+  check(k('!') === '{"code":49,"shift":true}', '! is Shift and 1');
+  check(k(':') === '{"code":59,"shift":true}', ': is Shift and ;');
+  check(k('[') === '{"code":91,"shift":false}', '[');
+  check(k('\n') === `{"code":${GLFW.enter},"shift":false}`, 'a new line is Enter');
+  check(keyFor('ж') === null, 'a letter no PC key types is left out');
+});
+
+await test('touch: DOS - the picture is a touchpad: slide, tap, two-finger tap', async () => {
+  const sent = [];
+  const box = {
+    frameSize: { w: 640, h: 400 }, screenEl: null,
+    ci: {
+      sendMouseRelativeMotion: (x, y) => sent.push(`move ${Math.round(x)},${Math.round(y)}`),
+      sendMouseButton: (b, down) => sent.push(`${b} ${down ? 'down' : 'up'}`),
+    },
+  };
+  const pad = new Trackpad(box, { speed: 1 });
+  const ev = (type, pts) => ({ type, touches: type === 'touchend' ? pts.slice(1) : pts, changedTouches: pts.slice(0, 1) });
+  const at = (x, y) => ({ clientX: x, clientY: y });
+  // A slide of 30 pixels right: the pointer moves; no button.
+  pad.touch(ev('touchstart', [at(100, 100)]));
+  pad.touch(ev('touchmove', [at(115, 100)]));
+  pad.touch(ev('touchmove', [at(130, 100)]));
+  pad.touch(ev('touchend', [at(130, 100)]));
+  check(sent.some(s => s.startsWith('move')) && !sent.some(s => s.includes('down')), `a slide clicked: ${sent}`);
+  // A tap: the left button.
+  sent.length = 0;
+  pad.touch(ev('touchstart', [at(50, 50)]));
+  pad.touch(ev('touchend', [at(50, 50)]));
+  await new Promise(r => setTimeout(r, 60));
+  check(sent.join('|') === '0 down|0 up', `a tap was not a click: ${sent}`);
+  // Two fingers down and up together: the right button.
+  sent.length = 0;
+  pad.touch(ev('touchstart', [at(50, 50)]));
+  pad.touch({ type: 'touchstart', touches: [at(50, 50), at(80, 50)], changedTouches: [at(80, 50)] });
+  pad.touch({ type: 'touchend', touches: [at(50, 50)], changedTouches: [at(80, 50)] });
+  pad.touch({ type: 'touchend', touches: [], changedTouches: [at(50, 50)] });
+  await new Promise(r => setTimeout(r, 60));
+  check(sent.join('|') === '1 down|1 up', `two fingers were not the right button: ${sent}`);
 });
 
 await test('touch: what a phone keyboard typed is worked out from the text', async () => {

@@ -396,6 +396,7 @@ const CM_ED_HEX: Cmd = 0xFF4B;
 const CM_ED_KEYS: Cmd = 0xFF4C;
 const CM_ED_NUMBERS: Cmd = 0xFF4D;
 const CM_ED_POSITION: Cmd = 0xFF4E;
+const CM_ED_SUGGEST: Cmd = 0xFF4F;
 const CM_SEARCH_GO: Cmd = 0xFF50;
 const CM_SEARCH_REPLACE: Cmd = 0xFF51;
 const CM_SEARCH_ALL: Cmd = 0xFF52;
@@ -428,7 +429,7 @@ const SYNTAX_MENU_MAX: Cmd = 64;
 
 /// A command the editor answers itself.
 fn is_editor_cmd(cmd: Cmd) -> bool {
-    (CM_ED_UNDO..=CM_ED_POSITION).contains(&cmd) || (CM_ED_SYNTAX..CM_ED_SYNTAX + SYNTAX_MENU_MAX).contains(&cmd)
+    (CM_ED_UNDO..=CM_ED_SUGGEST).contains(&cmd) || (CM_ED_SYNTAX..CM_ED_SYNTAX + SYNTAX_MENU_MAX).contains(&cmd)
 }
 
 /// The Find or Replace dialog while it is up, and the editor it searches.
@@ -503,6 +504,9 @@ pub struct Ui {
     /// The keys held with the mouse event being handled - Shift+click
     /// stretches a selection. Only `mouse_with` sets it, for one event.
     pointer_mods: crate::event::Mods,
+    /// The words offered under an editor's caret while one is typed, and
+    /// the text they are for. See `complete.rs`.
+    completion: Option<(ViewId, crate::complete::Completion)>,
     /// The view a context menu was opened over, for the commands it sends.
     context_for: Option<ViewId>,
     /// A list or a tree whose scroll bar marker is held by the mouse.
@@ -547,6 +551,7 @@ impl Ui {
             syntaxes_loaded: false,
             selecting: None,
             pointer_mods: crate::event::Mods::default(),
+            completion: None,
             context_for: None,
             bar_drag: None,
             host_clip: HostClip::default(),
@@ -1181,6 +1186,10 @@ impl Ui {
                 items.push(item("Pos~i~tion", String::new(), CM_ED_POSITION,
                     "The caret's line and column on the window's bottom edge", text)
                     .checked(t.position));
+                items.push(item("Su~g~gest words", String::new(), CM_ED_SUGGEST,
+                    "While a word is typed, the words it may become: the language's and the program's own; Tab takes one",
+                    text && t.syntax.is_some())
+                    .checked(t.suggest && t.syntax.is_some()));
             }
             if o & READONLY != 0 {
                 items.push(item("Read ~o~nly", String::new(), CM_ED_READONLY,
@@ -1291,6 +1300,12 @@ impl Ui {
                 if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
                     t.position = !t.position;
                 }
+            }
+            CM_ED_SUGGEST => {
+                if let Kind::Text(t) = &mut self.nodes[tid.ix()].kind {
+                    t.suggest = !t.suggest;
+                }
+                self.completion = None;
             }
             CM_ED_READONLY => {
                 let ro = matches!(&self.nodes[tid.ix()].kind, Kind::Text(t) if t.readonly);
@@ -1454,7 +1469,11 @@ impl Ui {
 
     /// A key for a text view: the editor's own keys first, then its keymap.
     fn text_key(&mut self, id: ViewId, k: Key) {
+        if self.completion_key(id, k) {
+            return;
+        }
         if self.editor_key(id, k) {
+            self.completion = None;
             return;
         }
         let km = match &self.nodes[id.ix()].kind {
@@ -1463,6 +1482,134 @@ impl Ui {
         };
         let Some((cmd, extend)) = km.lookup(k) else { return };
         self.edit(id, cmd, extend);
+        self.suggest(id, k);
+    }
+
+    // ------------------------------------------------------- suggestions
+
+    /// A key while words are offered: Up and Down choose, Tab takes the lit
+    /// one, Enter takes it only once Up or Down chose it - `mov` and Enter
+    /// is a new line, not `movsb` - and Escape puts the list away. True if
+    /// the key was the list's.
+    fn completion_key(&mut self, id: ViewId, k: Key) -> bool {
+        use crate::event::KeyCode as K;
+        let Some((cid, c)) = &mut self.completion else { return false };
+        if *cid != id {
+            self.completion = None;
+            return false;
+        }
+        let n = c.items.len();
+        let plain = k.mods.is_none();
+        match k.code {
+            K::Up if plain => {
+                c.current = (c.current + n - 1) % n;
+                c.chosen = true;
+            }
+            K::Down if plain => {
+                c.current = (c.current + 1) % n;
+                c.chosen = true;
+            }
+            K::Tab if plain => self.take_suggestion(None),
+            K::Enter if plain && c.chosen => self.take_suggestion(None),
+            K::Esc => self.completion = None,
+            _ => return false,
+        }
+        true
+    }
+
+    /// After a key in an editor: the words the typed one may become, or
+    /// none. Only for a letter typed, or a Backspace while the list is up,
+    /// at the end of a word, in a text coloured as a language.
+    fn suggest(&mut self, id: ViewId, k: Key) {
+        use crate::event::KeyCode as K;
+        let was = self.completion.take();
+        let Kind::Text(t) = &self.nodes[id.ix()].kind else { return };
+        let Some(syn) = t.syntax.and_then(|c| self.syntaxes.get(c as usize)) else { return };
+        let typed = matches!(k.code, K::Char(_)) && !k.mods.ctrl && !k.mods.alt;
+        let back = k.code == K::Backspace && was.is_some();
+        if !(typed || back) || !t.suggest || t.readonly || t.hex.is_some() || t.selection().is_some() {
+            return;
+        }
+        let (row, col) = (t.cur.y as usize, t.cur.x as usize);
+        let Some(line) = t.lines.get(row) else { return };
+        if col > line.len() || line.get(col).is_some_and(|&g| syn.word_char(g)) {
+            return; // in the middle of a word: nothing to finish
+        }
+        let mut start = col;
+        while start > 0 && syn.word_char(line[start - 1]) {
+            start -= 1;
+        }
+        let items = crate::complete::candidates(syn, &t.lines, (row, start), &line[start..col]);
+        if !items.is_empty() {
+            self.completion = Some((id, crate::complete::Completion { row, start, items, current: 0, chosen: false }));
+        }
+    }
+
+    /// The offered word in place of what was typed of it: item `ix`, or
+    /// the lit one.
+    fn take_suggestion(&mut self, ix: Option<usize>) {
+        let Some((id, c)) = self.completion.take() else { return };
+        let Some(word) = c.items.get(ix.unwrap_or(c.current)).cloned() else { return };
+        let Kind::Text(t) = &mut self.nodes[id.ix()].kind else { return };
+        if t.cur.y as usize != c.row || (t.cur.x as usize) < c.start {
+            return;
+        }
+        // The typed part selected, and the word typed over it: one change,
+        // which one Undo takes back.
+        t.anchor = Some(Point::new(c.start as i16, c.row as i16));
+        for &g in &word {
+            let Some(ch) = char::from_u32(g as u32) else { continue };
+            self.edit(id, crate::edit::Cmd::Insert(ch), false);
+        }
+    }
+
+    /// Where the list is on the screen, and the list as a menu panel to be
+    /// drawn as one: under the start of the word, or above it when there
+    /// is no room below. None while nothing is offered or the editor is
+    /// covered.
+    fn completion_box(&self) -> Option<(Rect, MenuBox)> {
+        use crate::menu::MenuItem;
+        let (id, c) = self.completion.as_ref()?;
+        if !self.is_alive(*id) || self.menu_box_id().is_some() {
+            return None;
+        }
+        let Kind::Text(t) = &self.nodes[id.ix()].kind else { return None };
+        if !t.focused || t.cur.y as usize != c.row {
+            return None;
+        }
+        let caret = self.cursor()?;
+        let items: Vec<MenuItem> = c.items.iter().map(|w| MenuItem::new(&glyph_string(w).replace('~', ""), "", 0)).collect();
+        let mut b = MenuBox::new(items);
+        b.current = c.current;
+        let (w, h) = (b.width(), b.height());
+        let screen = self.nodes[self.root.ix()].rect;
+        let typed = (t.cur.x as usize).saturating_sub(c.start) as i16;
+        let x = (caret.x - typed - 1).min(screen.w - w).max(0);
+        let y = if caret.y + 1 + h <= screen.h { caret.y + 1 } else { (caret.y - h).max(0) };
+        Some((Rect::new(x, y, w, h), b))
+    }
+
+    fn draw_completion(&self, buf: &mut Buffer, clip: Rect) {
+        if let Some((r, b)) = self.completion_box() {
+            self.draw_menu_box(&b, r, buf, clip, clip);
+        }
+    }
+
+    /// A press on the list takes the word under it; a press anywhere else
+    /// puts the list away. True if it was on the list.
+    fn completion_click(&mut self, p: Point) -> bool {
+        let Some((r, b)) = self.completion_box() else {
+            self.completion = None;
+            return false;
+        };
+        if !r.contains(p) {
+            self.completion = None;
+            return false;
+        }
+        if let Some(ix) = b.item_at(p.y - r.y) {
+            self.take_suggestion(Some(ix));
+        }
+        true
     }
 
     /// The Find dialog, or the Replace dialog: a modal the core builds and
@@ -1716,6 +1863,7 @@ impl Ui {
                 t.keymap = (state & CLASSIC != 0).then_some(Keymap::Classic);
                 t.numbers = state & NUMBERS != 0;
                 t.position = state & POSITION != 0;
+                t.suggest = state & QUIET == 0;
                 t.hex.is_some()
             }
             _ => return false,
@@ -1754,6 +1902,9 @@ impl Ui {
         }
         if t.position {
             s |= POSITION;
+        }
+        if !t.suggest {
+            s |= QUIET;
         }
         Some((t.offers, s, t.cur.y, t.cur.x))
     }
@@ -2725,6 +2876,7 @@ impl Ui {
         buf.clear_holes();
         let blue = self.palette.blue;
         self.draw_node(self.root, buf, clip, &blue);
+        self.draw_completion(buf, clip);
         self.draw_anim(buf, clip);
     }
 
@@ -4377,6 +4529,10 @@ impl Ui {
 
     fn handle_mouse(&mut self, m: Mouse) {
         let p = Point::new(m.x, m.y);
+        // The words offered under a caret: a press takes one, or puts them away.
+        if self.completion.is_some() && matches!(m.kind, MouseKind::Down(_) | MouseKind::Double(_)) && self.completion_click(p) {
+            return;
+        }
 
         match m.kind {
             MouseKind::Double(b) => {
@@ -4972,6 +5128,14 @@ impl Ui {
         // than a decoration: while it is up, nothing behind it is listening.
         if let Some(mb) = self.menu_box_id() {
             return self.menu_key(mb, k);
+        }
+
+        // Words offered under an editor's caret take Tab, Up, Down, Escape -
+        // before the window, whose Tab moves the focus.
+        if let Some((cid, _)) = self.completion {
+            if self.focused() == Some(cid) && self.completion_key(cid, k) {
+                return;
+            }
         }
 
         // F10 opens the bar, and Alt with a letter opens the one it belongs

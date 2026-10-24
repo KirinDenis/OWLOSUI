@@ -74,6 +74,7 @@ const
   EditSyntax    = $10;                  { read back only: set a language with OwlSyntax }
   EditNumbers   = $20;                  { line numbers in a grey column on the left }
   EditPosition  = $40;                  { the caret's line:column on the bottom edge }
+  EditQuiet     = $80;                  { no words offered under the caret while typing }
 
   { a file panel's flags (OwlFilesEx) }
   FilesMarks      = $01;                { Insert marks names }

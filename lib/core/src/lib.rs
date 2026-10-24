@@ -22,6 +22,7 @@ extern crate alloc;
 pub mod buffer;
 pub mod button;
 pub mod cell;
+pub mod complete;
 pub mod console;
 pub mod edit;
 pub mod controls;

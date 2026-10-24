@@ -220,6 +220,9 @@ pub struct TextView {
     /// The caret's line and column on the window's bottom edge, `12:5`,
     /// where the classic IDEs had them.
     pub position: bool,
+    /// Words offered under the caret while one is typed (`complete.rs`), in
+    /// a text coloured as a language. On unless turned off.
+    pub suggest: bool,
     /// How wide the line numbers' column was laid out: the view starts
     /// this far right of where its window put it. Zero without numbers.
     pub(crate) gutter: i16,
@@ -266,6 +269,7 @@ impl TextView {
             wrap: false,
             numbers: false,
             position: false,
+            suggest: true,
             gutter: 0,
             top_row: 0,
             width: 0,

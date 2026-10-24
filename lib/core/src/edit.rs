@@ -69,6 +69,9 @@ pub mod state {
     pub const NUMBERS: u8 = 32;
     /// The caret's line:column on the window's bottom edge.
     pub const POSITION: u8 = 64;
+    /// No words offered while typing (`complete.rs`): they are offered in
+    /// any text coloured as a language unless this is set.
+    pub const QUIET: u8 = 128;
 }
 
 /// The most lines whose rows a folding view counts for its scroll bar

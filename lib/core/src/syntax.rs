@@ -147,6 +147,29 @@ impl Syntax {
         self.files.iter().any(|f| f.eq_ignore_ascii_case(ext))
     }
 
+    /// Whether the language reads `MOV` and `mov` as one word.
+    pub fn ignores_case(&self) -> bool {
+        self.ignore_case
+    }
+
+    /// The language's own words - keywords, types, directives - starting
+    /// with `prefix`, compared as the language compares them. As written
+    /// in the INI: lower case, for a language that ignores case.
+    pub fn words_from(&self, prefix: &[u8]) -> Vec<&[u8]> {
+        let p: Vec<u8> = if self.ignore_case { prefix.to_ascii_lowercase() } else { prefix.to_vec() };
+        let mut out: Vec<&[u8]> = Vec::new();
+        for list in [&self.keywords, &self.types, &self.directives] {
+            out.extend(list.iter().filter(|w| w.starts_with(&p)).map(|w| w.as_slice()));
+        }
+        out
+    }
+
+    /// Whether a glyph belongs to a word in this language: a letter, a
+    /// digit, `_`, or one of its own - `.@?` in assembler.
+    pub fn word_char(&self, g: Glyph) -> bool {
+        self.is_word(g)
+    }
+
     fn is_word(&self, g: Glyph) -> bool {
         // Beyond ASCII every glyph is a letter, as the editor's word moves
         // have it: a Cyrillic identifier is still one word.

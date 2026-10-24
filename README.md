@@ -327,14 +327,20 @@ the window list on Alt+0, Shift+F6, Ctrl+F5 to move or resize from the
 keyboard, cascade and tile, double clicks, a hint per menu item on the
 status line, input-line history, a colour dialog over the palette, a tree
 filled as it opens (a drive as folders, with a drive chooser, in the
-Commander), and find/replace in the editor.
+Commander), and find/replace in the editor. In a text coloured as a
+language, the editor offers words as one is typed: two letters bring up a
+list under the caret of the program's own names, the most used first, and
+the language's words in the case being typed; Tab takes one.
 
 On a phone or a tablet the browser page is touched, not clicked
 (lib/js/touch.js): a tap clicks and two taps double-click; a finger drags a
 window by its title and resizes it from near its corner; dragged over a
 text or a list it scrolls it a row at a time; held, it opens the right-click
 menu, and held and then dragged it selects and offers Copy. Two fingers
-are the browser's, to zoom. A tap where a caret shows brings up the phone's
+are the browser's, to zoom, and on a page zoomed in one finger moves the
+view. DOS in the page fills the screen there, with a PC keyboard under it
+whose keys go down and up with the finger (a game sees an arrow held), and
+its picture is a touchpad. A tap where a caret shows brings up the phone's
 keyboard, and a row of keys along the bottom gives what that keyboard has
 not got - Esc, Tab, Ctrl and Alt that stay down for the next key, the
 arrows, F1 to F10. The cells are smaller there, so the menus fit; a window

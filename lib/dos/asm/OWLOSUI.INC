@@ -151,6 +151,7 @@ EDIT_HEX        = 08h
 EDIT_SYNTAX     = 10h           ; read back only: set a language with owl_syntax
 EDIT_NUMBERS    = 20h           ; line numbers in a grey column on the left
 EDIT_POSITION   = 40h           ; the caret's line:column on the bottom edge
+EDIT_QUIET      = 80h           ; no words offered under the caret while typing
 
 ; ---- WINDOW flags -------------------------------------------------------------
 WF_MODAL        = 01h

@@ -368,7 +368,13 @@ step lighter; a text placed by hand, a memo, has none), bit 6 position
 (the caret's ` 12:5 ` on the window's bottom edge, where a window with no
 footer of its own has room for it, the horizontal bar after it; as the
 person sees it - folded, the row and column on the screen, as the status
-line's `Ln Col` is too - while `GET_EDITOR` gives the place in the file).
+line's `Ln Col` is too - while `GET_EDITOR` gives the place in the file),
+bit 7 quiet (no words offered while typing: in a text coloured as a
+language, two letters of a word bring up a list under the caret of the
+words it may become - the language's and the program's own, the most used
+first - Up and Down choose, Tab takes one, Enter takes one once Up or Down
+chose it, Escape puts it away, a click or a tap takes the one under it;
+Edit > Suggest words turns it off and on).
 `GET_EDITOR` also sets bit 4 while the text is coloured as a language;
 `EDITOR` ignores it - a language is chosen by name, with `SYNTAX`.
 
