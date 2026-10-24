@@ -88,6 +88,8 @@ pub mod op {
     pub const KEY: u8 = 0x30;
     pub const MOUSE: u8 = 0x31;
     pub const TICK: u8 = 0x32;
+    pub const TOUCH_AT: u8 = 0x33;
+    pub const SCROLL: u8 = 0x34;
     pub const FRAME: u8 = 0x40;
     pub const TAKE: u8 = 0x41;
     pub const GET_GLYPHS: u8 = 0x42;
@@ -508,13 +510,28 @@ impl Server {
     /// `-1` in either coordinate means "in the middle of the work area" -
     /// now and after every resize, until it is dragged. Returns the rect and
     /// whether that was asked for.
-    fn place(&mut self, r: Rect) -> Res<(Rect, bool)> {
+    ///
+    /// A window that may be resized and was asked bigger than the work
+    /// area - an editor opened on a phone - is made to fit it. One that may
+    /// not keeps its size, because its controls were laid out for it; it
+    /// is put with its top left corner on the screen, and a hand drags the
+    /// rest into sight.
+    fn place(&mut self, r: Rect, resizable: bool) -> Res<(Rect, bool)> {
         let ui = self.ui()?;
         let work = ui.work_area();
         let centred = r.x < 0 || r.y < 0;
-        let x = if r.x < 0 { work.x + (work.w - r.w) / 2 } else { r.x };
-        let y = if r.y < 0 { work.y + (work.h - r.h) / 2 } else { r.y };
-        Ok((Rect::new(x, y, r.w, r.h), centred))
+        let (mut w, mut h) = (r.w, r.h);
+        if resizable {
+            w = w.min(work.w.max(1));
+            h = h.min(work.h.max(1));
+        }
+        let mut x = if r.x < 0 { work.x + ((work.w - w) / 2).max(0) } else { r.x };
+        let mut y = if r.y < 0 { work.y + ((work.h - h) / 2).max(0) } else { r.y };
+        if resizable {
+            x = x.min(work.right() - w).max(work.x);
+            y = y.min(work.bottom() - h).max(work.y);
+        }
+        Ok((Rect::new(x, y, w, h), centred))
     }
 
     /// One request in, one reply out. `Ok(false)` means QUIT was received.
@@ -575,7 +592,7 @@ impl Server {
                 // allowed to be absent: no field, no command.
                 let close_cmd = if r.remaining() >= 2 { r.u16("close_cmd")? } else { 0 };
                 let parent = self.alive(parent)?;
-                let (rect, centred) = self.place(rect)?;
+                let (rect, centred) = self.place(rect, flags & 0x02 == 0)?;
                 let mut w = Window::new(&title);
                 w.centred = centred;
                 w.close_cmd = close_cmd;
@@ -1722,11 +1739,31 @@ impl Server {
                     6 => MouseKind::Double(button),
                     _ => return Err(format!("no mouse kind {kind}")),
                 };
-                self.ui()?.handle(Event::Mouse(Mouse { x, y, kind }));
+                // The keys held, as KEY spells them: a later byte, so a
+                // client that never sends it is understood as before.
+                let m = if r.remaining() > 0 { r.u8("mods")? } else { 0 };
+                let mods = Mods { shift: m & 1 != 0, ctrl: m & 2 != 0, alt: m & 4 != 0 };
+                self.ui()?.mouse_with(Mouse { x, y, kind }, mods);
             }
 
             op::TICK => {
                 self.ui()?.complete_pick();
+            }
+
+            // A finger: what dragging it from here would do, and the rows
+            // it scrolls by - see `Ui::touch_at`.
+            op::TOUCH_AT => {
+                let (x, y) = (r.i16("x")?, r.i16("y")?);
+                let (what, at) = self.ui()?.touch_at(owlosui_core::Point::new(x, y));
+                out.u8(what as u8);
+                out.i16(at.x);
+                out.i16(at.y);
+            }
+
+            op::SCROLL => {
+                let (x, y) = (r.i16("x")?, r.i16("y")?);
+                let delta = r.i16("delta")?;
+                self.ui()?.scroll_rows_at(owlosui_core::Point::new(x, y), delta);
             }
 
             op::FRAME => {

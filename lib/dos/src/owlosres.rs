@@ -200,6 +200,9 @@ impl Host {
         }
         let ev = self.queue.pop_front().expect("wait_input returns with something");
         let ui = self.server.ui_mut().unwrap();
+        if let Event::Mouse(_) = ev {
+            ui.set_pointer_mods(held());
+        }
         ui.handle(ev);
         // A pressed button is seen down before it happens.
         self.settle();

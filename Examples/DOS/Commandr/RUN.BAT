@@ -17,6 +17,8 @@ rem From Windows this starts DOSBox-X and runs itself in there (RUNWIN.BAT).
 if "%OS%"=="Windows_NT" goto windows
 if "%1"=="TEST" goto test
 if "%1"=="test" goto test
+if "%1"=="KEYS" goto keys
+if "%1"=="keys" goto keys
 :again
 ..\..\..\lib\dos\CWSDPMI.EXE
 ..\..\..\lib\dos\OWLOSRES.COM COMMANDR.EXE /STEP %1 %2
@@ -44,6 +46,23 @@ rem   esc f10                    and out
 echo before > RUN.OUT
 ..\..\..\lib\dos\CWSDPMI.EXE
 AUTOTYPE -w 2 -p 0.5 f12 o f3 f12 esc insert f5 f12 left enter tab f7 n e w enter tab s f6 left enter g f8 f12 left enter t f4 f12 x f2 o enter f12 esc f1 f12 right enter f12 f1 right enter f1 right right enter f12 esc f10
+..\..\..\lib\dos\OWLOSRES.COM COMMANDR.EXE PLAY\A PLAY\B
+if errorlevel 1 echo errorlevel 1 or more >> RUN.OUT
+echo after >> RUN.OUT
+exit
+:keys
+rem The keys AUTOTYPE cannot press, held with Shift and Ctrl, typed by
+rem ..\MODKEYS.COM: the clipboard's keys in a field and in the editor.
+rem   4100 1E61 3062             F7, a folder's name: ab
+rem   c1E01 c2E03 4F00 s5200     Ctrl+A, Ctrl+C, End, Shift+Ins: abab
+rem   s4700 c9200 4F00 c2F16     Shift+Home, Ctrl+Ins, End, Ctrl+V: abababab
+rem   1C0D                       Enter: the folder ABABABAB made in PLAY\A
+rem   1474 3E00 s4F00 c9200      TWO.PAS edited: its first line, Ctrl+Ins
+rem   4700 s5200 3C00            Home, Shift+Ins - the line twice - F2
+rem   011B 4400                  and out
+echo before > RUN.OUT
+..\MODKEYS.COM 4100 1E61 3062 c1E01 c2E03 4F00 s5200 s4700 c9200 4F00 c2F16 1C0D 1474 3E00 s4F00 c9200 4700 s5200 3C00 011B 4400
+..\..\..\lib\dos\CWSDPMI.EXE
 ..\..\..\lib\dos\OWLOSRES.COM COMMANDR.EXE PLAY\A PLAY\B
 if errorlevel 1 echo errorlevel 1 or more >> RUN.OUT
 echo after >> RUN.OUT

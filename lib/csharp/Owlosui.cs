@@ -1097,10 +1097,13 @@ public sealed class Owlosui : IDisposable
     public enum MouseKind : byte { Down = 0, Up = 1, Drag = 2, Move = 3, WheelUp = 4, WheelDown = 5, Double = 6 }
     public enum MouseButton : byte { Left = 0, Right = 1, Middle = 2 }
 
-    /// <summary>One mouse event, in screen cells.</summary>
-    public void SendMouse(MouseKind kind, int x, int y, MouseButton button = MouseButton.Left)
+    /// <summary>
+    /// One mouse event, in screen cells. <paramref name="mods"/>: the keys held,
+    /// as a key spells them - 1 Shift (Shift+click stretches a selection), 2 Ctrl, 4 Alt.
+    /// </summary>
+    public void SendMouse(MouseKind kind, int x, int y, MouseButton button = MouseButton.Left, byte mods = 0)
     {
-        Call(Op.Mouse, new[] { (byte)kind, (byte)button }, W.I16(x), W.I16(y));
+        Call(Op.Mouse, new[] { (byte)kind, (byte)button }, W.I16(x), W.I16(y), new[] { mods });
     }
 
     /// <summary>Press and release at a cell. What a test means by "click".</summary>
@@ -1441,7 +1444,7 @@ public sealed class Owlosui : IDisposable
 
     private bool SendMouseEv(MouseEv m)
     {
-        SendMouse(m.Kind, m.X, m.Y, m.Button);
+        SendMouse(m.Kind, m.X, m.Y, m.Button, m.Mods);
         return true;
     }
 
@@ -1538,7 +1541,7 @@ public sealed class Owlosui : IDisposable
 
     private abstract record Ev;
     private sealed record KeyEv(ConsoleKeyInfo Key) : Ev;
-    private sealed record MouseEv(MouseKind Kind, MouseButton Button, int X, int Y) : Ev;
+    private sealed record MouseEv(MouseKind Kind, MouseButton Button, int X, int Y, byte Mods = 0) : Ev;
     private sealed record ResizeEv(int W, int H) : Ev;
 
     /// <summary>
@@ -1713,7 +1716,11 @@ public sealed class Owlosui : IDisposable
                         if (quick) kind = MouseKind.Double;
                     }
                     Trace($"  -> {kind} {button} at ({x},{y})");
-                    yield return new MouseEv(kind, button, x, y);
+                    // The keys held with it: Shift+click stretches a selection.
+                    var held = (byte)(((m.dwControlKeyState & SHIFT_PRESSED) != 0 ? 1 : 0)
+                        | ((m.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0 ? 2 : 0)
+                        | ((m.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0 ? 4 : 0));
+                    yield return new MouseEv(kind, button, x, y, held);
                 }
             }
         }

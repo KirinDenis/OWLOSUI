@@ -266,9 +266,9 @@ name, for a commander that puts the folder in its window's title
 | 0x65 | SET_TAG | `id` (a window) `tag:str` | OK — a word in brackets after the window's title, drawn as `[modal]` is: what the window is doing that its name does not say - `[awake]` on an emulator that keeps running in a background tab. Empty takes it away; `[modal]` wins over it |
 | 0x66 | SET_INDICATOR | `id` (a window) `text:str` | OK — words at the right end of the status line while the window is in front, where an editor shows its line and column; a part between tildes is lit, green: `[~A:~ B: C:]`. Empty for none |
 | 0x67 | CONSOLE | `parent rect scrollback:u16` | `id` — a console filling its window (the rect is read and not used, as `HEX`'s is): a terminal, light grey on black, that keeps `scrollback` lines (`0`: a thousand), folds long lines to its width, and follows the newest one until it is scrolled back - Up, Down, PgUp, PgDn, Home, the wheel and its bar; End follows again. `GET_TEXT` on it gives the whole record as plain text, its colours left out |
-| 0x69 | CLIPBOARD | `host:u8` | `copied:u32 paste:u8` — the client shares its own clipboard (a browser's, a desktop's) when `host` is 1, and asks after every input: `copied` goes up each time the core copies (Copy, Cut, a console's Ctrl+C, a context menu), the cue to read `CLIPBOARD_GET` and put it on the computer's clipboard; `paste` is 1 when a Paste was chosen and waits for the computer's clipboard, sent with `CLIPBOARD_PASTE`. While `host` is 1, Paste is offered even with the core's clipboard empty. A client that never sends this has the core's clipboard alone, as before |
+| 0x69 | CLIPBOARD | `host:u8` | `copied:u32 paste:u8` — the client shares its own clipboard (a browser's, a desktop's) when `host` is 1, and asks after every input: `copied` goes up each time the core copies (Copy, Cut, a console's or an input line's Ctrl+C, a context menu), the cue to read `CLIPBOARD_GET` and put it on the computer's clipboard; `paste` is 1 when a Paste was chosen and waits for the computer's clipboard, sent with `CLIPBOARD_PASTE`. While `host` is 1, Paste is offered even with the core's clipboard empty. A client that never sends this has the core's clipboard alone, as before |
 | 0x6A | CLIPBOARD_GET | — | `text:str` — the core's clipboard, lines joined by `\n`, at most 60000 bytes |
-| 0x6B | CLIPBOARD_PASTE | `flags:u8 text:str` | `pasted:u8` — the computer's clipboard in (empty leaves the core's as it was), and the paste that waited for it done, into the view that asked. Bit 0: paste now into whatever has the focus - a text, or an input line, which takes the first line - even if nothing waited: the client's own Ctrl+V. Bit 1: the client could not read its clipboard; paste what the core has |
+| 0x6B | CLIPBOARD_PASTE | `flags:u8 text:str` | `pasted:u8` — the computer's clipboard in (empty leaves the core's as it was), and the paste that waited for it done, into the view that asked. Bit 0: paste now into whatever has the focus - a text, or an input line, which takes every line joined by spaces, over its selection - even if nothing waited: the client's own Ctrl+V. Bit 1: the client could not read its clipboard; paste what the core has |
 | 0x68 | CONSOLE_WRITE | `id text:str` | OK — text at the end of a `CONSOLE`, its ANSI sequences obeyed and never shown: SGR colours (`ESC[0m`, `1`, `22`, `7`, `27`, `30`-`37`, `39`, `40`-`47`, `49`, `90`-`97`, `100`-`107`, and `38;5;n` / `38;2;r;g;b` and their `48` forms folded onto the sixteen colours), CR, LF, tab, backspace, `ESC[K` (0, 1, 2), `ESC[J` (2 and 3 clear it all), `ESC[nC`, `ESC[nD`, `ESC[nG`, `ESC[r;cH` (its row ignored: there is only the line being written). Cursor movement up and every other sequence is consumed and ignored; `ESC]`…`BEL` titles too. A sequence cut in two between writes is still one |
 | 0x5A | ADD_FILES | `id` then entries as in FILES | OK — more names for a panel: a listing bigger than one request (64K) is sent as FILES or SET_FILES with the first part and ADD_FILES with the rest |
 | 0x2A | ACTIVE       | —         | `id` — the active window, or `0` |
@@ -283,8 +283,10 @@ name, for a commander that puts the folder in its window's title
 | op   | name  | payload | reply |
 |------|-------|---------|-------|
 | 0x30 | KEY   | `kind:u8 value:u16 mods:u8` | OK |
-| 0x31 | MOUSE | `kind:u8 button:u8 x:i16 y:i16` | OK — kind `0` down, `1` up, `2` drag, `3` move, `4` wheel up, `5` wheel down, `6` the second press of a double click (sent in place of its down; the client decides what "double" is) |
+| 0x31 | MOUSE | `kind:u8 button:u8 x:i16 y:i16 [mods:u8]` | OK — kind `0` down, `1` up, `2` drag, `3` move, `4` wheel up, `5` wheel down, `6` the second press of a double click (sent in place of its down; the client decides what "double" is); `mods`, optional, the keys held as `KEY.mods` spells them: Shift with a press stretches a selection |
 | 0x32 | TICK  | —       | OK |
+| 0x33 | TOUCH_AT | `x:i16 y:i16` | `what:u8 x:i16 y:i16` — what a finger put down on this cell and moved would do: `0` press and drag it as the mouse would (a menu, a scroll bar, a button), `1` move the window by its title, `2` resize the active window - press at the `x y` given, its corner, which a finger may take from a little way off - `3` scroll what is there, with `SCROLL` |
+| 0x34 | SCROLL | `x:i16 y:i16 delta:i16` | OK — what is under the cell scrolled by `delta` rows, down for more than zero: a finger's drag, a row at a time where the wheel goes three |
 
 `KEY.kind`: `0` a character (`value` is its Unicode scalar), `1` a function
 key (`value` is its number), `2` a named key:
@@ -295,7 +297,8 @@ key (`value` is its number), `2` a named key:
 `KEY.mods`: bit 0 shift, bit 1 ctrl, bit 2 alt.
 
 `MOUSE.kind`: `0` down, `1` up, `2` drag, `3` move, `4` wheel up, `5` wheel
-down. `MOUSE.button`: `0` left, `1` right, `2` middle.
+down. `MOUSE.button`: `0` left, `1` right, `2` middle. `MOUSE.mods` may be left
+off, as a client written before it does: then no key is held.
 
 What the core does with the mouse by itself, in every client: the left button
 held down and dragged over a `TEXT` or a `CONSOLE` selects, and the view

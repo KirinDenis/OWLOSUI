@@ -21,6 +21,7 @@ Rust/           HELLO and DEMO in Rust, and the shared application: the core lin
 Commandr/       a two-panel file manager in Pascal, the classic DOS shape
 FINDDBX.CMD     how the root's DOS_ launchers find DOSBox-X
 TESTKEYS.BAT    the keys the tests type - the same for every language
+MODKEYS.ASM     a resident that presses keys with Shift, Ctrl or Alt held, for the tests
 CHECK.CMD       runs a folder's HELLO and DEMO and checks what they showed
 ```
 
@@ -113,3 +114,10 @@ host's is: DOSBox-X follows the Windows keyboard, and on a Slovak one the
 digit row types letters. The DOSBox-X here faults while closing after some
 runs that ended well, so the emulator's exit code is not looked at; the
 program's is.
+
+What AUTOTYPE cannot press - Ctrl+Ins, Shift+Home, Ctrl+C - `MODKEYS.COM`
+does: it stays resident and, every half second, sets the held keys in the
+BIOS flags byte and puts the next key in the BIOS ring, as the keyboard's
+own handler would. The commander's test runs a second time with it and
+checks the clipboard's keys by what they leave on the disk: a folder
+named in a field, a line doubled in the editor.

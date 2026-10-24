@@ -57,5 +57,5 @@ pub use input::InputLine;
 pub use keymap::Keymap;
 pub use menu::{MenuBar, MenuBox, MenuItem};
 pub use tree::{TreeNode, TreeView};
-pub use ui::{Ui, ViewId, CM_INTERNAL};
+pub use ui::{Touch, Ui, ViewId, CM_INTERNAL};
 pub use views::{Desktop, Dock, Kind, TextView, Window};

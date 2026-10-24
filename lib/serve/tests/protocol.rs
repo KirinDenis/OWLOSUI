@@ -1665,3 +1665,28 @@ fn a_file_opened_as_bytes_comes_back_byte_for_byte() {
     assert_eq!((total, n), (256, 256));
     assert_eq!(r[6..6 + n].to_vec(), (0..=255u8).collect::<Vec<_>>());
 }
+
+#[test]
+fn a_mouse_press_with_shift_held_stretches_the_selection() {
+    let mut c = Client::start();
+    c.ok(0x01, &[i16(40), i16(12)].concat());
+    let win = id_of(&c.ok(
+        0x10,
+        &[u16(0).to_vec(), rect(0, 0, 40, 12), vec![0], s("Notes")].concat(),
+    ));
+    let text = id_of(&c.ok(
+        0x11,
+        &[u16(win).to_vec(), rect(0, 0, 0, 0), vec![0, 0], s("hello world")].concat(),
+    ));
+    frame(&mut c);
+    // The caret before "world" - a MOUSE without the mods byte, as every
+    // older client sends it - then a press past its end with Shift (1).
+    mouse(&mut c, 0, 1 + 6, 1);
+    mouse(&mut c, 1, 1 + 6, 1);
+    c.ok(0x31, &[vec![0, 0], i16(1 + 11).to_vec(), i16(1).to_vec(), vec![1]].concat());
+    mouse(&mut c, 1, 1 + 11, 1);
+    // Typing replaces what is selected.
+    c.ok(0x30, &[0, b'X' as u8, 0, 0]);
+    let b = c.ok(0x21, &u16(text));
+    assert_eq!(String::from_utf8_lossy(&b[2..]), "hello X");
+}

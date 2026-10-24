@@ -76,6 +76,9 @@ pub struct Term {
     /// Where the terminal cursor currently is, so it is only moved when it
     /// needs moving.
     cursor: Option<Point>,
+    /// The keys held with the last mouse event read, for
+    /// `Ui::set_pointer_mods`: Shift+click stretches a selection.
+    mouse_mods: std::cell::Cell<Mods>,
 }
 
 impl Term {
@@ -100,6 +103,7 @@ impl Term {
             frame: String::new(),
             truecolor: std::env::var("OWLOSUI_COLOR").as_deref() != Ok("16"),
             cursor: None,
+            mouse_mods: std::cell::Cell::new(Mods::default()),
         })
     }
 
@@ -213,7 +217,15 @@ impl Term {
             }
         }
 
+        if let ct::Event::Mouse(m) = &first {
+            self.mouse_mods.set(mods(m.modifiers));
+        }
         Ok(translate(first))
+    }
+
+    /// The keys held with the last mouse event `next_event` returned.
+    pub fn mouse_mods(&self) -> Mods {
+        self.mouse_mods.get()
     }
 }
 

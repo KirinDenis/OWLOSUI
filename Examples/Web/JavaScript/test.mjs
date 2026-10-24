@@ -10,6 +10,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Wire, Owlosui, Style, sub } from '../../../lib/js/owlosui.js';
+import { Finger, typedBetween } from '../../../lib/js/touch.js';
 import * as Hello from './01-HelloWorld/app.js';
 import * as Notes from './02-Notes/app.js';
 import * as Calc from './03-Calculator/app.js';
@@ -762,6 +763,113 @@ await test("Demo: no two of the page's tools answer the same command", async () 
     }
   }
   check(ranges.length >= 8, `only ${ranges.length} tools say their range`);
+});
+
+// ------------------------------------------------- touch.js, a finger
+
+/**
+ * A finger on a core with cells 10 by 20 pixels, a clock of its own and
+ * the hold timer in hand: hold() is called by the test, when it says so.
+ */
+function fingerOn(o) {
+  const finger = new Finger(o, {
+    cell: p => ({ x: Math.floor(p.x / 10), y: Math.floor(p.y / 20) }),
+    cellH: 20,
+    after: () => { o.tick(); o.take(); },
+    setTimer: () => 1,
+    clearTimer: () => {},
+  });
+  // Cell (x, y), in the middle of it, in pixels.
+  const at = (x, y, t = 0) => ({ x: x * 10 + 5, y: y * 20 + 10, t });
+  return { finger, at };
+}
+
+await test('touch: a finger drags a window by its title and resizes it from near its corner', async () => {
+  const o = await owl();
+  const w = o.window('Notes', 30, 10, { x: 5, y: 3 });
+  o.text(w, 'hello');
+  const { finger, at } = fingerOn(o);
+  finger.down(at(12, 3));
+  finger.move(at(22, 8));
+  finger.up(100);
+  let p = o.place(w);
+  check(p.x === 16 && p.y === 9, `the window did not follow the finger: inside at ${p.x},${p.y}`, o.frame());
+  // Two cells in from the corner and a row up: the corner is taken anyway.
+  const right = 15 + 30 - 1, bottom = 8 + 10 - 1;
+  finger.down(at(right - 2, bottom - 1));
+  finger.move(at(right - 2 + 6, bottom - 1 + 3));
+  finger.up(200);
+  p = o.place(w);
+  check(p.w === 28 + 6 && p.h === 8 + 3, `the window was not resized by the finger: ${p.w}x${p.h}`, o.frame());
+});
+
+await test('touch: a finger drag scrolls a text a row at a time; a tap puts the caret', async () => {
+  const o = await owl();
+  const w = o.window('Lines', 40, 12, { x: 0, y: 1 });
+  const t = o.text(w, Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n'));
+  const { finger, at } = fingerOn(o);
+  check(o.frame().row(2).includes('line 0'), 'the text does not start at the top', o.frame());
+  // Up by three rows and a bit: three rows scrolled, the text going up.
+  finger.down(at(5, 8));
+  finger.move({ x: 55, y: 8 * 20 + 10 - 65 });
+  finger.up(100);
+  check(o.frame().row(2).includes('line 3'), 'three rows up did not scroll three rows', o.frame());
+  check(!o.frame().find('Copy'), 'a scroll opened a menu', o.frame());
+  // A tap: the caret goes there, nothing is selected.
+  finger.down(at(3, 4));
+  finger.up(1000);
+  const f = o.frame();
+  check(f.cursorX === 3 && f.cursorY === 4, `the tap did not put the caret there: ${f.cursorX},${f.cursorY}`, f);
+  check(o.getText(t).startsWith('line 0'), 'a tap changed the text');
+});
+
+await test('touch: a hold opens the context menu; a hold and a drag selects, then offers Copy', async () => {
+  const o = await owl();
+  const w = o.window('Words', 40, 8, { x: 0, y: 1 });
+  o.text(w, 'one two three');
+  o.frame(); // laid out, as a page has it before any finger
+  const { finger, at } = fingerOn(o);
+  finger.down(at(5, 2));
+  finger.hold();
+  finger.up(600);
+  let f = o.frame();
+  check(f.find('Paste') && f.find('Select all'), 'a hold did not open the context menu', f);
+  o.press('Escape');
+  // From "two" to past it, held first: selected, and the menu is up with Copy.
+  finger.down(at(5, 2));
+  finger.hold();
+  finger.move(at(6, 2));
+  finger.move(at(8, 2));
+  finger.up(1500);
+  f = o.frame();
+  check(f.find('Copy'), 'no menu after the selection', f);
+  // Its Copy, by the keyboard: C.
+  o.press('c');
+  o.tick();
+  check(o.clipboardText() === 'two', `the selection was not "two": ${JSON.stringify(o.clipboardText())}`);
+});
+
+await test('touch: two quick taps on one cell are a double tap - a word in a field', async () => {
+  const o = await owl();
+  const d = o.window('Find', 40, 6, { x: 0, y: 1, style: Style.Dialog });
+  const i = o.input(d, 1, 1, 36, 'Name', 'copy this word');
+  const { finger, at } = fingerOn(o);
+  const field = o.frame().find('copy this');
+  finger.down(at(field.x + 6, field.y));
+  finger.up(100);
+  finger.down(at(field.x + 6, field.y));
+  finger.up(300);
+  o.press('c', { ctrl: true });
+  check(o.clipboardText() === 'this', `a double tap did not take the word: ${JSON.stringify(o.clipboardText())}`, o.frame());
+  void i;
+});
+
+await test('touch: what a phone keyboard typed is worked out from the text', async () => {
+  check(JSON.stringify(typedBetween('  ', '  a')) === '{"back":0,"text":"a"}', 'a letter');
+  check(JSON.stringify(typedBetween('  ', ' ')) === '{"back":1,"text":""}', 'a Backspace on nothing typed');
+  // A word corrected in place: "teh" taken back to "te", then "he " typed.
+  check(JSON.stringify(typedBetween('  teh', '  the ')) === '{"back":2,"text":"he "}', 'a word corrected');
+  check(JSON.stringify(typedBetween('  \u{1F989}', '  ')) === '{"back":1,"text":""}', 'an emoji is one character');
 });
 
 server.kill();

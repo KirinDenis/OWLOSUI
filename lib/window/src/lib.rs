@@ -600,6 +600,8 @@ fn cell_at(lparam: LPARAM) -> (i16, i16) {
 
 fn mouse(hwnd: HWND, kind: MouseKind, lparam: LPARAM) {
     let (x, y) = cell_at(lparam);
+    // The keys held with it: Shift+click stretches a selection.
+    state().program.ui().set_pointer_mods(mods());
     input(hwnd, Event::Mouse(Mouse { x, y, kind }));
 }
 

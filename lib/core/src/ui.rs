@@ -166,9 +166,26 @@ fn draw_input(
     };
     buf.fill(Rect::new(fx, r.y, fw, 1), b' ', a, clip);
     buf.text(fx, r.y, &i.visible(r.w), a, clip);
+    draw_field_selection(i, fx, r.y, r.w, a, buf, clip);
     // A field with a past has a ▼ at its end: click it, or press Down.
     if !i.history.is_empty() && fw > 4 {
         buf.put(r.right() - 1, r.y, 0x1F as Glyph, p.file_path_label, clip);
+    }
+}
+
+/// The selected part of a field, in the field's colours turned round - ink
+/// for paper - so it reads in any palette. `fx` is the field's first
+/// column on the screen, `w` the width `visible` was given.
+fn draw_field_selection(i: &crate::input::InputLine, fx: i16, y: i16, w: i16, a: u8, buf: &mut Buffer, clip: Rect) {
+    let Some((s, e)) = i.selection() else { return };
+    let left = i.left(w);
+    let shown = (w - i.field_x()).max(1) as usize;
+    let a = a.rotate_left(4) & 0x7F;
+    let chars: Vec<char> = i.text.chars().collect();
+    for c in s.max(left)..e.min(left + shown) {
+        let x = fx + (c - left) as i16;
+        let mut b = [0u8; 4];
+        buf.text(x, y, chars[c].encode_utf8(&mut b), a, clip);
     }
 }
 
@@ -391,6 +408,20 @@ const CM_CTX_CUT: Cmd = 0xFF59;
 const CM_CTX_COPY: Cmd = 0xFF5A;
 const CM_CTX_PASTE: Cmd = 0xFF5B;
 const CM_CTX_SELECT_ALL: Cmd = 0xFF5C;
+
+/// The lower right corner a finger may take a window by: wider and taller
+/// than the mouse's two cells, because a fingertip covers several.
+const TOUCH_GRIP_W: i16 = 4;
+const TOUCH_GRIP_H: i16 = 2;
+
+/// What a finger dragged from a point does - see `Ui::touch_at`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Touch {
+    Mouse = 0,
+    Move = 1,
+    Resize = 2,
+    Scroll = 3,
+}
 /// Edit > Syntax: 0xFF60 is None, 0xFF61 on the languages in list order.
 const CM_ED_SYNTAX: Cmd = 0xFF60;
 const SYNTAX_MENU_MAX: Cmd = 64;
@@ -469,6 +500,9 @@ pub struct Ui {
     /// A text or a console being selected with the mouse: the button went
     /// down on it and has not come up.
     selecting: Option<ViewId>,
+    /// The keys held with the mouse event being handled - Shift+click
+    /// stretches a selection. Only `mouse_with` sets it, for one event.
+    pointer_mods: crate::event::Mods,
     /// The view a context menu was opened over, for the commands it sends.
     context_for: Option<ViewId>,
     /// A list or a tree whose scroll bar marker is held by the mouse.
@@ -512,6 +546,7 @@ impl Ui {
             syntaxes: Vec::new(),
             syntaxes_loaded: false,
             selecting: None,
+            pointer_mods: crate::event::Mods::default(),
             context_for: None,
             bar_drag: None,
             host_clip: HostClip::default(),
@@ -1333,16 +1368,20 @@ impl Ui {
             }
             // A field with the focus - Find, a file's name - before the
             // window's text.
-            if let Some(f) = self.focused().filter(|f| matches!(self.nodes[f.ix()].kind, Kind::Input(_))) {
+            if let Some(f) = self.focused().filter(|f| {
+                matches!(&self.nodes[f.ix()].kind, Kind::Input(_)) || matches!(&self.nodes[f.ix()].kind, Kind::Files(p) if p.focus == crate::files::Focus::Path)
+            }) {
                 return Some(f);
             }
             let win = self.active_window()?;
             self.window_editor(win)
         });
         let Some(tid) = target else { return false };
-        if let Kind::Input(i) = &mut self.nodes[tid.ix()].kind {
-            let Some(l) = self.clipboard.first() else { return false };
-            i.insert(&glyph_string(l));
+        if self.field_mut(tid).is_some() {
+            let Some(s) = self.clipboard_line() else { return false };
+            if let Some(i) = self.field_mut(tid) {
+                i.insert(&s);
+            }
             return true;
         }
         if self.clipboard.is_empty() || !matches!(&self.nodes[tid.ix()].kind, Kind::Text(t) if !t.readonly && t.hex.is_none()) {
@@ -2105,8 +2144,11 @@ impl Ui {
         b.parent = Some(bar_ix);
         let (w, h) = (b.width(), b.height());
         let bar_y = self.nodes[bar.ix()].rect.y;
-        // One column left of the label, so the frame lines up under it.
-        let r = Rect::new((x - 2).max(0), bar_y + 1, w, h);
+        // One column left of the label, so the frame lines up under it -
+        // or as far left as it takes for all of it to be on the screen: the
+        // last menu of a bar on a narrow screen, a phone's.
+        let screen_w = self.nodes[self.root.ix()].rect.w;
+        let r = Rect::new((x - 2).min(screen_w - w).max(0), bar_y + 1, w, h);
         let root = self.root;
         self.insert(root, r, Kind::MenuBox(b));
     }
@@ -2714,8 +2756,10 @@ impl Ui {
             }
             let mut r = self.nodes[id.ix()].rect;
             if matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if w.centred) {
-                r.x = work.x + (work.w - r.w) / 2;
-                r.y = work.y + (work.h - r.h) / 2;
+                // Wider or taller than the screen - a dialog on a phone - it
+                // keeps its top left corner on it, not both edges off it.
+                r.x = work.x + ((work.w - r.w) / 2).max(0);
+                r.y = work.y + ((work.h - r.h) / 2).max(0);
             }
             r.y = r.y.clamp(work.y, (work.bottom() - 1).max(work.y));
             r.x = r.x.clamp(1 - r.w, (work.right() - 1).max(0));
@@ -3343,7 +3387,11 @@ impl Ui {
                 f.path.focused = false;
                 return;
             }
-            f.edit_path(k);
+            if !self.field_clipboard_key(id, k) {
+                if let Kind::Files(f) = &mut self.nodes[id.ix()].kind {
+                    f.edit_path(k);
+                }
+            }
             return;
         }
 
@@ -4227,6 +4275,22 @@ impl Ui {
 
     // ------------------------------------------------------------------ events
 
+    /// A mouse event with the keys held while it happened: a host that
+    /// knows them sends them here, and Shift+click then stretches a
+    /// selection to the pointer as it does in every editor.
+    pub fn mouse_with(&mut self, m: crate::event::Mouse, mods: crate::event::Mods) {
+        self.pointer_mods = mods;
+        self.handle(Event::Mouse(m));
+        self.pointer_mods = crate::event::Mods::default();
+    }
+
+    /// The keys held, for the mouse events that follow - for a host whose
+    /// events go through a program's own `handle` and so cannot use
+    /// `mouse_with`. It says so before every mouse event it hands on.
+    pub fn set_pointer_mods(&mut self, mods: crate::event::Mods) {
+        self.pointer_mods = mods;
+    }
+
     pub fn handle(&mut self, ev: Event) {
         self.compose_bars();
         match ev {
@@ -4295,6 +4359,15 @@ impl Ui {
             }
             // An item in a list: chosen, which is the default button.
             Kind::List(l) => l.at_row(row).is_some(),
+            // A word in a field: selected, to copy or to type over.
+            Kind::Input(i) => {
+                if col >= i.field_x() {
+                    let x = i.left(r.w) + (col - i.field_x()) as usize;
+                    i.select_word(x);
+                    self.selecting = None;
+                }
+                false
+            }
             _ => false,
         };
         if press {
@@ -4801,6 +4874,55 @@ impl Ui {
     /// The wheel: whatever scrolls under the pointer - a list or a tree in a
     /// dialog, a memo, a console - and, over the rest of a window, the
     /// window's own text. People turn the wheel before they read anything.
+    /// What a finger put down here and then moved would do, for a host on
+    /// a touch screen - a finger has no wheel and no second button, and a
+    /// drag that selects with a mouse should scroll under a finger:
+    ///
+    /// - `Touch::Move`: a window's title - the drag moves the window;
+    /// - `Touch::Resize`: near the active window's lower right corner, with
+    ///   room for a finger - press at the point given, the corner itself;
+    /// - `Touch::Scroll`: a text, a list, a tree, a console, a page - the
+    ///   drag scrolls it, row by row, with `scroll_rows_at`;
+    /// - `Touch::Mouse`: anything else - a menu, a scroll bar, a button -
+    ///   is pressed and dragged as the mouse would.
+    pub fn touch_at(&self, p: Point) -> (Touch, Point) {
+        if self.menu_box_id().is_some() {
+            return (Touch::Mouse, p);
+        }
+        let Some(id) = self.window_at(p) else { return (Touch::Mouse, p) };
+        let Kind::Window(w) = &self.nodes[id.ix()].kind else { return (Touch::Mouse, p) };
+        let abs = self.abs_rect(id);
+        let active = self.active_window() == Some(id);
+        if w.resizable && active && p.x >= abs.right() - TOUCH_GRIP_W && p.y >= abs.bottom() - TOUCH_GRIP_H {
+            return (Touch::Resize, Point::new(abs.right() - 1, abs.bottom() - 1));
+        }
+        if p.y == abs.y {
+            // The title's boxes are tapped, not dragged.
+            let on_box = active && title_boxes(w, abs).iter().any(|&(_, x)| p.x >= x && p.x <= x + 2);
+            return (if w.movable && !on_box { Touch::Move } else { Touch::Mouse }, p);
+        }
+        // The frame's other edges carry the scroll bars: the mouse's.
+        if p.x == abs.x || p.x == abs.right() - 1 || p.y == abs.bottom() - 1 {
+            return (Touch::Mouse, p);
+        }
+        let scrolls = self.nodes[id.ix()].children.iter().any(|c| {
+            matches!(
+                self.nodes[c.ix()].kind,
+                Kind::List(_) | Kind::Tree(_) | Kind::Text(_) | Kind::Console(_) | Kind::Html(_) | Kind::Hex(_) | Kind::Files(_)
+                    | Kind::Static(_)
+            ) && self.abs_rect(*c).contains(p)
+        });
+        (if scrolls { Touch::Scroll } else { Touch::Mouse }, p)
+    }
+
+    /// Scroll what is under `p` by `delta` rows - down for more than zero:
+    /// what the wheel does three rows a notch, a finger does a row at a
+    /// time, following it.
+    pub fn scroll_rows_at(&mut self, p: Point, delta: i16) {
+        self.compose_bars();
+        self.scroll_at(p, delta);
+    }
+
     fn scroll_at(&mut self, p: Point, delta: i16) {
         // An open menu is a list too: the wheel walks its items, one a
         // notch, as Up and Down do, in the panel the keys go to - the
@@ -5360,6 +5482,7 @@ impl Ui {
         }
         let r = self.abs_rect(id);
         let (row, col) = (at.y - r.y, at.x - r.x);
+        let shift = self.pointer_mods.shift;
 
         match &mut self.nodes[id.ix()].kind {
             Kind::Cluster(c) => {
@@ -5402,8 +5525,16 @@ impl Ui {
                     self.open_history(id);
                     return;
                 }
+                // A press starts a selection, which a drag then stretches;
+                // with Shift held it stretches the one there is, from where
+                // the caret was.
                 let x = i.left(r.w) + (col - i.field_x()).max(0) as usize;
-                i.set_cursor(x);
+                if shift {
+                    i.extend_to(x);
+                } else {
+                    i.set_cursor(x);
+                }
+                self.selecting = Some(id);
             }
             Kind::Files(f) => {
                 // Row 0 is the path line, one column in from the panel's
@@ -5433,8 +5564,13 @@ impl Ui {
             // The caret goes where the pointer is, and a selection starts
             // there: dragging with the button down is how a hand selects.
             Kind::Text(t) => {
-                t.cur = text_point(t, row, col);
-                t.anchor = Some(t.cur);
+                // With Shift held the selection's far end stays - or, with
+                // none yet, the caret becomes it - and the near end comes here.
+                let at = text_point(t, row, col);
+                if !shift || t.anchor.is_none() {
+                    t.anchor = Some(if shift { t.cur } else { at });
+                }
+                t.cur = at;
                 self.selecting = Some(id);
             }
             Kind::Console(c) => {
@@ -5471,6 +5607,17 @@ impl Ui {
                 let q = c.point(row.clamp(0, (r.h - 1).max(0)), col.clamp(0, r.w.max(0)));
                 c.select_to(q);
             }
+            // Past either end the field scrolls a character at a time,
+            // because the caret it follows moves one.
+            Kind::Input(i) => {
+                let fx = i.field_x();
+                let x = if col < fx {
+                    i.left(r.w).saturating_sub(1)
+                } else {
+                    (i.left(r.w) + (col - fx) as usize).min(i.left(r.w) + (r.w - fx).max(1) as usize)
+                };
+                i.extend_to(x);
+            }
             _ => {}
         }
     }
@@ -5492,7 +5639,7 @@ impl Ui {
         }
         let Some(win) = self.window_at(p) else { return };
         let target = self.nodes[win.ix()].children.iter().copied().find(|c| {
-            matches!(self.nodes[c.ix()].kind, Kind::Text(_) | Kind::Console(_)) && self.abs_rect(*c).contains(p)
+            matches!(self.nodes[c.ix()].kind, Kind::Text(_) | Kind::Console(_) | Kind::Input(_)) && self.abs_rect(*c).contains(p)
         });
         let Some(id) = target else { return };
         self.activate(win);
@@ -5538,6 +5685,28 @@ impl Ui {
                     item("Select ~a~ll", "Ctrl+A", CM_CTX_SELECT_ALL, "Everything in the console", true),
                 ]
             }
+            Kind::Input(i) => {
+                // The same menu as a text's, for the same reason: a right
+                // click outside the selection puts the caret there first.
+                let fx = i.field_x();
+                if col < fx {
+                    return;
+                }
+                let at = i.left(r.w) + (col - fx) as usize;
+                if !i.selection().is_some_and(|(a, b)| at >= a && at < b) {
+                    i.set_cursor(at);
+                }
+                let sel = i.selection().is_some();
+                vec![
+                    item("~U~ndo", "Ctrl+Z", CM_CTX_UNDO, "Take back the last change", i.can_undo()),
+                    MenuItem::line(),
+                    item("Cu~t~", "Ctrl+X", CM_CTX_CUT, "The selected text to the clipboard, and out of the field", sel),
+                    item("~C~opy", "Ctrl+C", CM_CTX_COPY, "The selected text to the clipboard", sel),
+                    item("~P~aste", "Ctrl+V", CM_CTX_PASTE, "What is on the clipboard, into the field here", host || clip_full),
+                    MenuItem::line(),
+                    item("Select ~a~ll", "Ctrl+A", CM_CTX_SELECT_ALL, "The whole field", !i.text.is_empty()),
+                ]
+            }
             _ => return,
         };
         self.close_menu();
@@ -5563,6 +5732,19 @@ impl Ui {
             (Kind::Text(_), CM_CTX_COPY) => self.edit(id, E::Copy, false),
             (Kind::Text(_), CM_CTX_PASTE) => self.edit(id, E::Paste, false),
             (Kind::Text(_), CM_CTX_SELECT_ALL) => self.edit(id, E::SelectAll, false),
+            (Kind::Input(_), CM_CTX_UNDO) => {
+                if let Some(i) = self.field_mut(id) {
+                    i.undo();
+                }
+            }
+            (Kind::Input(_), CM_CTX_CUT) => self.field_copy(id, true),
+            (Kind::Input(_), CM_CTX_COPY) => self.field_copy(id, false),
+            (Kind::Input(_), CM_CTX_PASTE) => self.field_paste(id),
+            (Kind::Input(_), CM_CTX_SELECT_ALL) => {
+                if let Some(i) = self.field_mut(id) {
+                    i.select_all();
+                }
+            }
             (Kind::Console(_), CM_CTX_COPY) => self.console_copy(id),
             (Kind::Console(_), CM_CTX_SELECT_ALL) => {
                 if let Kind::Console(c) = &mut self.nodes[id.ix()].kind {
@@ -5582,13 +5764,75 @@ impl Ui {
         self.host_clip.copied = self.host_clip.copied.wrapping_add(1);
     }
 
+    /// The one-line field inside a view: an input of its own, or a file
+    /// panel's path line while the panel is typing into it.
+    fn field_mut(&mut self, id: ViewId) -> Option<&mut crate::input::InputLine> {
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Input(i) => Some(i),
+            Kind::Files(f) if f.focus == crate::files::Focus::Path => Some(&mut f.path),
+            _ => None,
+        }
+    }
+
+    /// The clipboard's keys in a one-line field, the ones every program
+    /// has: Ctrl+C and Ctrl+Insert copy, Ctrl+X and Shift+Delete cut,
+    /// Ctrl+V and Shift+Insert paste. True if the key was one of them.
+    fn field_clipboard_key(&mut self, id: ViewId, k: Key) -> bool {
+        use crate::event::KeyCode as K;
+        let (ctrl, shift) = (k.mods.ctrl && !k.mods.alt, k.mods.shift && !k.mods.ctrl && !k.mods.alt);
+        match k.code {
+            K::Char('c' | 'C') if ctrl => self.field_copy(id, false),
+            K::Insert if ctrl => self.field_copy(id, false),
+            K::Char('x' | 'X') if ctrl => self.field_copy(id, true),
+            K::Delete if shift => self.field_copy(id, true),
+            K::Char('v' | 'V') if ctrl => self.field_paste(id),
+            K::Insert if shift => self.field_paste(id),
+            _ => return false,
+        }
+        true
+    }
+
+    /// The field's selection to the clipboard - and, cutting, out of the
+    /// field. Nothing selected copies nothing: the clipboard keeps what it had.
+    fn field_copy(&mut self, id: ViewId, cut: bool) {
+        let Some(i) = self.field_mut(id) else { return };
+        let s = if cut { i.cut() } else { i.selected() };
+        if let Some(s) = s {
+            self.clipboard = vec![crate::cell::glyphs(&s)];
+            self.host_clip.copied = self.host_clip.copied.wrapping_add(1);
+        }
+    }
+
+    /// A paste into the field: the host's clipboard first, when it shares
+    /// one - it answers later, through `host_paste`.
+    fn field_paste(&mut self, id: ViewId) {
+        if self.host_clip.on {
+            self.host_clip.paste_wanted = Some(id);
+            return;
+        }
+        let s = self.clipboard_line();
+        if let (Some(s), Some(i)) = (s, self.field_mut(id)) {
+            i.insert(&s);
+        }
+    }
+
+    /// The clipboard as one line, for a field: its lines joined by spaces,
+    /// as a browser's own field does with them.
+    fn clipboard_line(&self) -> Option<String> {
+        if self.clipboard.is_empty() {
+            return None;
+        }
+        let lines: Vec<String> = self.clipboard.iter().map(|l| glyph_string(l)).collect();
+        Some(lines.join(" "))
+    }
+
     /// The button came up: a press that never moved selected nothing.
     fn end_selection(&mut self) {
         let Some(id) = self.selecting.take() else { return };
-        if let Kind::Text(t) = &mut self.nodes[id.ix()].kind {
-            if t.anchor == Some(t.cur) {
-                t.anchor = None;
-            }
+        match &mut self.nodes[id.ix()].kind {
+            Kind::Text(t) if t.anchor == Some(t.cur) => t.anchor = None,
+            Kind::Input(i) if i.anchor == Some(i.cursor) => i.anchor = None,
+            _ => {}
         }
     }
 
@@ -5654,16 +5898,10 @@ impl Ui {
                     // Out of the borrow first: the panel is a new node.
                     let id = id;
                     self.open_history(id);
-                } else if (k.code == K::Char('v') && k.mods.ctrl && !k.mods.alt) || (k.code == K::Insert && k.mods.shift) {
-                    // Paste: the first line of the clipboard, at the caret -
-                    // the host's clipboard first, when it shares one.
-                    if self.host_clip.on {
-                        self.host_clip.paste_wanted = Some(id);
-                    } else if let Some(l) = self.clipboard.first() {
-                        i.insert(&glyph_string(l));
+                } else if !self.field_clipboard_key(id, k) {
+                    if let Kind::Input(i) = &mut self.nodes[id.ix()].kind {
+                        i.key(k);
                     }
-                } else {
-                    i.key(k);
                 }
             }
             Kind::Buttons(b) => match k.code {

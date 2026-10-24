@@ -62,6 +62,9 @@ fn main() -> std::io::Result<()> {
             continue;
         }
 
+        if let Event::Mouse(_) = ev {
+            ui.set_pointer_mods(term.mouse_mods());
+        }
         ui.handle(ev);
         if let Some(cmd) = ui.take_pressed() {
             if !run_command(&mut ui, cmd) {

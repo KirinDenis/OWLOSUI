@@ -46,3 +46,15 @@ rem Either case: DOSBox-X's AUTOTYPE types the x as X.
 findstr /b /i /c:"xprogram Two;" PLAY\A\TWO.PAS >nul || (echo FAIL: F4, x and F2 did not save TWO.PAS & exit /b 1)
 findstr /c:"WriteLn('two');" PLAY\A\TWO.PAS >nul || (echo FAIL: saving lost the rest of TWO.PAS & exit /b 1)
 echo ok: copied, made, moved, deleted and saved, on the disk
+
+rem Again, with the keys AUTOTYPE cannot press: Shift and Ctrl held, put
+rem into the BIOS by ..\MODKEYS.COM. Windows' clipboard is left out of it -
+rem the core's own carries the words - so the test does not write over
+rem what the person running it had copied.
+set DOSBOXX_OPTS=%DOSBOXX_OPTS% -set "dos clipboard api=false"
+del RUN.OUT 2>nul
+call .\RUNWIN.BAT KEYS
+findstr /c:"after" RUN.OUT >nul || (echo FAIL: the commander never came back from the held keys & exit /b 1)
+if not exist PLAY\A\ABABABAB\ (echo FAIL: Ctrl+A, Ctrl+C, Shift+Ins, Shift+Home, Ctrl+Ins and Ctrl+V did not make ab into ABABABAB in the F7 field & exit /b 1)
+findstr /b /i /c:"xprogram Two;xprogram Two;" PLAY\A\TWO.PAS >nul || (echo FAIL: Shift+End, Ctrl+Ins, Home and Shift+Ins did not double TWO.PAS's first line & exit /b 1)
+echo ok: the clipboard's keys with Shift and Ctrl held, in a field and in the editor

@@ -286,6 +286,23 @@ pub fn decode(ascii: u8, scan: u8) -> Option<Key> {
             0x51 => KeyCode::PageDown,
             0x52 => KeyCode::Insert,
             0x53 => KeyCode::Delete,
+            // Ctrl with the grey keys has scan codes of its own: Ctrl+Ins
+            // copies, Ctrl with the arrows goes by words.
+            0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x84 | 0x8D | 0x91 | 0x92 | 0x93 => {
+                mods.ctrl = true;
+                match scan {
+                    0x73 => KeyCode::Left,
+                    0x74 => KeyCode::Right,
+                    0x75 => KeyCode::End,
+                    0x76 => KeyCode::PageDown,
+                    0x77 => KeyCode::Home,
+                    0x84 => KeyCode::PageUp,
+                    0x8D => KeyCode::Up,
+                    0x91 => KeyCode::Down,
+                    0x92 => KeyCode::Insert,
+                    _ => KeyCode::Delete,
+                }
+            }
             0x0F => KeyCode::BackTab,
             0x3B..=0x44 => KeyCode::F(scan - 0x3B + 1),
             0x85 | 0x86 => KeyCode::F(scan - 0x85 + 11),
@@ -342,6 +359,13 @@ pub fn decode(ascii: u8, scan: u8) -> Option<Key> {
         }
     };
     Some(Key { code, mods })
+}
+
+/// The keys held now, by the BIOS's flags byte: for a mouse event, whose
+/// driver does not say - Shift+click stretches a selection.
+pub fn held() -> Mods {
+    let flags = peek8(BIOS_KB_FLAGS);
+    Mods { shift: flags & 3 != 0, ctrl: flags & 4 != 0, alt: flags & 8 != 0 }
 }
 
 // ------------------------------------------------------------------- mouse
@@ -938,6 +962,9 @@ pub fn run(program: &mut dyn Program) -> ! {
             wait_input(&mut mouse, &mut queue, &bytes);
         }
         if let Some(ev) = queue.pop_front() {
+            if let Event::Mouse(_) = ev {
+                program.ui().set_pointer_mods(held());
+            }
             program.ui().handle(ev);
             if !program.after_input() {
                 break;

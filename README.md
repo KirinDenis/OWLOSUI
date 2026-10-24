@@ -329,6 +329,20 @@ status line, input-line history, a colour dialog over the palette, a tree
 filled as it opens (a drive as folders, with a drive chooser, in the
 Commander), and find/replace in the editor.
 
+On a phone or a tablet the browser page is touched, not clicked
+(lib/js/touch.js): a tap clicks and two taps double-click; a finger drags a
+window by its title and resizes it from near its corner; dragged over a
+text or a list it scrolls it a row at a time; held, it opens the right-click
+menu, and held and then dragged it selects and offers Copy. Two fingers
+are the browser's, to zoom. A tap where a caret shows brings up the phone's
+keyboard, and a row of keys along the bottom gives what that keyboard has
+not got - Esc, Tab, Ctrl and Alt that stay down for the next key, the
+arrows, F1 to F10. The cells are smaller there, so the menus fit; a window
+that may be resized is opened no bigger than the screen, and a dialog
+wider than it shows its top left corner and is dragged for the rest. The
+real keyboard and real fingers are checked on a phone; the tests drive
+the gestures by the wire.
+
 Not yet at all: a grid, tabs, a drop-down list, a masked field; cursor
 movement up and down in the console (it colours a log, it does not lay out
 a full-screen ANSI drawing); the computer's clipboard in the page's DOS,

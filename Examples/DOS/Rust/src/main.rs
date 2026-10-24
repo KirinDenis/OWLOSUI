@@ -126,6 +126,9 @@ pub extern "C" fn _start(base: u32, flags: u32) -> ! {
         let mut events = VecDeque::new();
         wait_input(&mut mouse, &mut events, &bytes);
         for ev in events {
+            if let Event::Mouse(_) = ev {
+                app.ui.set_pointer_mods(held());
+            }
             app.ui.handle(ev);
             app.after_input();
         }
