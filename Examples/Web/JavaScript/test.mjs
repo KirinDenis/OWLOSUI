@@ -864,6 +864,27 @@ await test('touch: two quick taps on one cell are a double tap - a word in a fie
   void i;
 });
 
+await test('touch: pinched bigger, a drag moves the view - but a title still moves its window', async () => {
+  const o = await owl();
+  const w = o.window('Lines', 40, 12, { x: 0, y: 1 });
+  o.text(w, Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n'));
+  o.frame();
+  const finger = new Finger(o, {
+    cell: p => ({ x: Math.floor(p.x / 10), y: Math.floor(p.y / 20) }), cellH: 20,
+    after: () => { o.tick(); o.take(); }, zoomed: () => true, setTimer: () => 1, clearTimer: () => {},
+  });
+  finger.down({ x: 55, y: 8 * 20 + 10 });
+  const mine = finger.move({ x: 55, y: 8 * 20 + 10 - 65 });
+  finger.up(100);
+  check(!mine, 'a drag over the text was kept from the browser');
+  check(o.frame().row(2).includes('line 0'), 'the text scrolled under a zoomed page', o.frame());
+  finger.down({ x: 125, y: 1 * 20 + 10 });
+  check(finger.move({ x: 225, y: 5 * 20 + 10 }), 'the title drag was left to the browser');
+  finger.up(200);
+  const p = o.place(w);
+  check(p.x === 11 && p.y === 6, `the window did not move by its title: ${p.x},${p.y}`, o.frame());
+});
+
 await test('touch: what a phone keyboard typed is worked out from the text', async () => {
   check(JSON.stringify(typedBetween('  ', '  a')) === '{"back":0,"text":"a"}', 'a letter');
   check(JSON.stringify(typedBetween('  ', ' ')) === '{"back":1,"text":""}', 'a Backspace on nothing typed');
