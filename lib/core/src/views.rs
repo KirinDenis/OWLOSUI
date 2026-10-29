@@ -125,6 +125,11 @@ pub struct Window {
     /// What this window adds to the menu bar while it is active - see
     /// `menu::merge_items` for where an item lands.
     pub menu: Vec<MenuItem>,
+    /// Exactly where the program put it, never nudged into the work area -
+    /// not even off the screen's edges. A full-screen editor places its
+    /// frame just outside the screen so the text alone shows, under a
+    /// menu bar that is hidden: the work area would push it a row down.
+    pub pinned: bool,
 }
 
 impl Window {
@@ -154,6 +159,7 @@ impl Window {
             home: None,
             status: Vec::new(),
             menu: Vec::new(),
+            pinned: false,
         }
     }
 

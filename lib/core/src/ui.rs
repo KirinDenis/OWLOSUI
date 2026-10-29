@@ -2903,6 +2903,9 @@ impl Ui {
         let work = self.work_area();
         let kids: Vec<ViewId> = self.nodes[self.root.ix()].children.clone();
         for id in kids {
+            if matches!(&self.nodes[id.ix()].kind, Kind::Window(w) if w.pinned) {
+                continue;
+            }
             if !matches!(self.nodes[id.ix()].kind, Kind::Window(_)) {
                 continue;
             }

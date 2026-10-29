@@ -67,11 +67,15 @@ pub struct StatusLine {
     /// and how it is set. Composed with the items; shown only where it
     /// does not cover one.
     pub right: String,
+    /// Every item in a cell this wide, from the left edge, with no gap -
+    /// ten `F1 Help` keys in eighty columns, as a file manager's key bar
+    /// had them. 0: each item as wide as its label, two columns apart.
+    pub cell: i16,
 }
 
 impl StatusLine {
     pub fn new(items: Vec<StatusItem>) -> Self {
-        StatusLine { base: items.clone(), items, right: String::new() }
+        StatusLine { base: items.clone(), items, right: String::new(), cell: 0 }
     }
 
     /// Where the items end.
@@ -87,6 +91,9 @@ impl StatusLine {
     /// An item with no label is a key and nothing to see - Tab in a file
     /// manager, which everybody knows - and takes no room at all.
     pub fn item_x(&self, ix: usize) -> i16 {
+        if self.cell > 0 {
+            return ix as i16 * self.cell;
+        }
         let mut x = 1;
         for it in &self.items[..ix] {
             if it.width() > 0 {
@@ -100,7 +107,7 @@ impl StatusLine {
     pub fn item_at(&self, x: i16) -> Option<usize> {
         (0..self.items.len()).find(|&i| {
             let s = self.item_x(i);
-            x >= s && x < s + self.items[i].width()
+            x >= s && x < s + if self.cell > 0 { self.cell } else { self.items[i].width() }
         })
     }
 
@@ -128,5 +135,15 @@ mod tests {
         assert_eq!(s.item_x(2), s.item_x(0) + "F3 View".len() as i16 + 2);
         assert_eq!(s.items_end(), s.item_x(2) + "F5 Copy".len() as i16);
         assert_eq!(s.command_for(tab), Some(2));
+    }
+
+    #[test]
+    fn items_in_cells_stand_a_cell_apart_and_a_click_takes_the_whole_cell() {
+        let mut s = StatusLine::new(vec![StatusItem::new("~F1~ Help", None, 1), StatusItem::new("~F2~ Menu", None, 2)]);
+        s.cell = 8;
+        assert_eq!((s.item_x(0), s.item_x(1)), (0, 8));
+        // The blank after `F1 Help` is still F1's.
+        assert_eq!(s.item_at(7), Some(0));
+        assert_eq!(s.item_at(8), Some(1));
     }
 }

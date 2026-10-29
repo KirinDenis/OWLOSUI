@@ -15,6 +15,16 @@ browser and on DOS.
 
 Free and open source, under the [MIT licence](LICENSE).
 
+## Used in
+
+- **[Kirin Commander](https://github.com/KirinDenis/Kirin_Commander)** - a
+  two-panel file manager in Rust on OWLOSUI's core, one program from DOS to
+  the browser ([try it](https://kirindenis.github.io/Kirin_Commander/)).
+- **[WIRE CITY](https://github.com/KirinDenis/wire-city-2)** - DOS games in
+  assembly and a course in 8086 assembly, in the browser: its site and
+  course page are built on OWLOSUI's web library, and its DOS PC starts
+  into Kirin Commander ([play](https://kirindenis.github.io/wire-city-2/)).
+
 ## See it
 
 | The live demo: what to see first | The live demo: a DOS PC in a window |
